@@ -1,0 +1,10 @@
+{
+  "identifier": "main",
+  "description": "Local application window and lifecycle only. File access is validated by native commands.",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:default",
+    "core:window:allow-set-title",
+    "core:window:allow-destroy"
+  ]
+}

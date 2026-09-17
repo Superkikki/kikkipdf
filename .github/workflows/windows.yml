@@ -1,0 +1,29 @@
+name: Windows desktop build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm run assets
+      - run: npm run check
+      - run: cargo test --manifest-path tests/native/Cargo.toml
+      - run: npx playwright install chromium
+      - run: npm run test:e2e
+      - run: npm run desktop:build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kikki-PDF-Windows
+          path: src-tauri/target/release/bundle/nsis/*.exe

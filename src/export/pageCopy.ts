@@ -1,0 +1,201 @@
+import {
+  PDFArray,
+  PDFDict,
+  PDFHexString,
+  PDFName,
+  PDFNumber,
+  PDFObject,
+  PDFObjectCopier,
+  PDFPage,
+  PDFRef,
+  PDFString,
+  type PDFDocument,
+} from "pdf-lib";
+import type { PageModel, LinkTarget } from "../state/model";
+import { setLinkTarget } from "../links/pdfLinks";
+import { importedLinkUrl } from "../links/target";
+import type { AttachmentWriter } from "../attachments/pdfAttachments";
+
+const key = (name: string) => PDFName.of(name);
+const text = (value: PDFObject | undefined) =>
+  value instanceof PDFName
+    ? value.decodeText()
+    : value instanceof PDFString || value instanceof PDFHexString
+      ? value.decodeText()
+      : undefined;
+function namedDestination(
+  input: PDFDocument,
+  name: string,
+): PDFObject | undefined {
+  const direct = input.catalog
+    .lookupMaybe(key("Dests"), PDFDict)
+    ?.get(key(name));
+  if (direct) return input.context.lookup(direct);
+  const tree = input.catalog
+    .lookupMaybe(key("Names"), PDFDict)
+    ?.lookupMaybe(key("Dests"), PDFDict);
+  function search(
+    node: PDFDict | undefined,
+    depth: number,
+  ): PDFObject | undefined {
+    if (!node || depth > 32) return;
+    const names = node.lookupMaybe(key("Names"), PDFArray);
+    if (names)
+      for (let i = 0; i + 1 < names.size(); i += 2)
+        if (text(names.lookup(i)) === name) return names.lookup(i + 1);
+    const kids = node.lookupMaybe(key("Kids"), PDFArray);
+    if (kids)
+      for (let i = 0; i < kids.size(); i++) {
+        const found = search(kids.lookup(i, PDFDict), depth + 1);
+        if (found) return found;
+      }
+  }
+  return search(tree, 0);
+}
+function resolveDestination(
+  input: PDFDocument,
+  value: PDFObject | undefined,
+): PDFArray | undefined {
+  let v = value;
+  for (let i = 0; i < 5; i++) {
+    if (v instanceof PDFRef) v = input.context.lookup(v);
+    if (v instanceof PDFArray) return v;
+    if (v instanceof PDFDict) {
+      v = v.get(key("D"));
+      continue;
+    }
+    const name = text(v);
+    if (name) {
+      v = namedDestination(input, name);
+      continue;
+    }
+    return;
+  }
+}
+/** Share source resources across pages, but give every copied page/annotation its own identity.
+ * Navigation is rebound after page assembly, so links cannot pull deleted page graphs back in.
+ */
+export class PageCopier {
+  private copier: PDFObjectCopier;
+  private exported = new Map<number, PDFPage>();
+  private links: { dict: PDFDict; destination: PDFArray }[] = [];
+  private editedLinks: { dict: PDFDict; target: LinkTarget }[] = [];
+  constructor(
+    private input: PDFDocument,
+    private output: PDFDocument,
+    private attachments?: AttachmentWriter,
+  ) {
+    this.copier = PDFObjectCopier.for(input.context, output.context);
+  }
+  copy(model: PageModel): PDFPage {
+    const source = this.input.getPage(model.sourceIndex),
+      node = source.node.clone();
+    node.delete(key("Annots"));
+    const copied = this.copier.copy(node),
+      page = PDFPage.of(
+        copied,
+        this.output.context.register(copied),
+        this.output,
+      );
+    this.output.addPage(page);
+    if (!this.exported.has(model.sourceIndex))
+      this.exported.set(model.sourceIndex, page);
+    const annotations = source.node.Annots();
+    if (annotations)
+      for (let i = 0; i < annotations.size(); i++) {
+        const ref = annotations.get(i),
+          original = annotations.lookup(i);
+        if (
+          !(original instanceof PDFDict) ||
+          ["Widget", "Popup"].includes(text(original.get(key("Subtype"))) ?? "")
+        )
+          continue;
+        const id =
+          ref instanceof PDFRef
+            ? `${ref.objectNumber}R${ref.generationNumber || ""}`
+            : `direct-${i}`;
+        const edit = model.annotationEdits?.[id];
+        if (edit?.deleted) continue;
+        const isAttachment =
+          original.get(key("Subtype")) === key("FileAttachment");
+        const fileSpec = isAttachment
+          ? this.attachments?.fileSpec(original)
+          : undefined;
+        if (isAttachment && !fileSpec) continue;
+        const safe = original.clone();
+        // These references can traverse source pages or contain executable actions.
+        for (const name of [
+          "P",
+          "Parent",
+          "Popup",
+          "IRT",
+          "RT",
+          "Dest",
+          "A",
+          "AA",
+          "StructParent",
+          "FS",
+        ])
+          safe.delete(key(name));
+        if (edit?.text !== undefined)
+          safe.set(key("Contents"), PDFHexString.fromText(edit.text));
+        const annotation = this.copier.copy(safe);
+        if (fileSpec) annotation.set(key("FS"), fileSpec);
+        annotation.set(key("P"), page.ref);
+        const action = original.lookupMaybe(key("A"), PDFDict);
+        const destination = resolveDestination(
+          this.input,
+          original.get(key("Dest")) ??
+            (text(action?.get(key("S"))) === "GoTo"
+              ? action?.get(key("D"))
+              : undefined),
+        );
+        if (edit?.link)
+          this.editedLinks.push({ dict: annotation, target: edit.link });
+        else if (destination)
+          this.links.push({ dict: annotation, destination });
+        else if (text(action?.get(key("S"))) === "URI") {
+          const uri = importedLinkUrl(text(action?.get(key("URI"))));
+          if (uri)
+            annotation.set(
+              key("A"),
+              this.output.context.obj({
+                S: "URI",
+                URI: PDFString.of(uri),
+              }),
+            );
+        }
+        page.node.addAnnot(this.output.context.register(annotation));
+      }
+    return page;
+  }
+  finish(pageMap = new Map<string, PDFPage>()) {
+    for (const { dict, target } of this.editedLinks)
+      setLinkTarget(dict, target, pageMap);
+    const pages = this.input.getPages();
+    for (const { dict, destination } of this.links) {
+      const first = destination.get(0),
+        index =
+          first instanceof PDFNumber
+            ? first.asNumber()
+            : first instanceof PDFRef
+              ? pages.findIndex((p) => p.ref === first)
+              : -1;
+      const page = this.exported.get(index);
+      if (!page) continue;
+      const dest = this.output.context.obj([page.ref]);
+      for (let i = 1; i < destination.size(); i++) {
+        const value = destination.lookup(i);
+        if (
+          !value ||
+          value instanceof PDFDict ||
+          value instanceof PDFArray ||
+          value instanceof PDFRef
+        )
+          break;
+        dest.push(value.clone());
+      }
+      dict.set(key("Dest"), dest);
+    }
+  }
+}

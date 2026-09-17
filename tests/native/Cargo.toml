@@ -1,0 +1,9 @@
+[package]
+name = "kikki-native-tests"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+lopdf = "0.45"
+rand = "0.9"
+zeroize = "1"
+tempfile = "3"
