@@ -10,6 +10,7 @@ const {
 const fs = require("node:fs/promises");
 const path = require("node:path");
 (async () => {
+  const started = Date.now();
   let browser;
   for (let attempt = 0; attempt < 30; attempt++) {
     try {
@@ -37,6 +38,20 @@ const path = require("node:path");
   ).toBeVisible();
   await page.getByRole("button", { name: "ページ管理", exact: true }).click();
   await page.getByRole("button", { name: "回転", exact: true }).click();
+  await page
+    .locator(".viewer-scroll .textLayer span")
+    .first()
+    .evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+  await page
+    .getByRole("toolbar", { name: "選択文字への注釈" })
+    .getByRole("button", { name: "蛍光ペン", exact: true })
+    .click();
   await page.getByRole("button", { name: "編集", exact: true }).click();
   await page.getByRole("button", { name: "テキスト", exact: true }).click();
   const box = await page
@@ -44,7 +59,23 @@ const path = require("node:path");
     .first()
     .boundingBox();
   await page.mouse.click(box.x + 80, box.y + 130);
-  await page.getByLabel("テキスト内容").fill("Windows native save");
+  await page
+    .getByLabel("テキスト内容")
+    .fill("Windows native save wraps across multiple lines");
+  await page.getByLabel("width", { exact: true }).fill("120");
+  await page.getByLabel("x", { exact: true }).fill("60");
+  await page.getByLabel("y", { exact: true }).fill("140");
+  await page.getByLabel("行間", { exact: true }).fill("1.6");
+  await expect
+    .poll(() =>
+      page
+        .locator(".viewer-scroll .editable-text[data-layout-ready=true] tspan")
+        .count(),
+    )
+    .toBeGreaterThan(1);
+  await page
+    .getByRole("button", { name: "文字に合わせて高さを調整", exact: true })
+    .click();
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
   await expect(page.locator(".status-message")).toContainText("保存しました", {
@@ -56,6 +87,16 @@ const path = require("node:path");
   const pdf = await PDFDocument.load(await fs.readFile(fixture));
   if (pdf.getPage(0).getRotation().angle !== 90)
     throw Error("Native rotation did not persist");
+  const markup = pdf.getPage(0).node.Annots();
+  if (
+    !Array.from({ length: markup.size() }, (_, i) =>
+      markup.lookup(i, PDFDict),
+    ).some(
+      (annotation) =>
+        annotation.get(PDFName.of("Subtype")) === PDFName.of("Highlight"),
+    )
+  )
+    throw Error("Native selected-text markup did not persist");
   await page.screenshot({
     path: path.join(root, ".tools", "windows-native.png"),
   });
@@ -75,6 +116,40 @@ const path = require("node:path");
     .evaluate((el) => el.scrollWidth > el.clientWidth + 1);
   if (overflows) throw Error("Property controls overflow horizontally");
   await page.getByRole("button", { name: "ツール", exact: true }).click();
+  await page.getByRole("button", { name: "フォーム入力", exact: true }).click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("NativeOriginal", { exact: true })
+    .fill("日本語の既存欄");
+  await page
+    .getByRole("button", { name: "フォームを作成・編集", exact: true })
+    .click();
+  await page
+    .getByLabel("既存の入力欄", { exact: true })
+    .selectOption({ label: "NativeOriginal — ページ1" });
+  await page.getByLabel("既存フィールドx", { exact: true }).fill("250");
+  await page.getByLabel("既存フィールドy", { exact: true }).fill("220");
+  await page.getByLabel("既存フィールドwidth", { exact: true }).fill("120");
+  await page.getByLabel("既存フィールドheight", { exact: true }).fill("40");
+  await page.getByRole("button", { name: "完了", exact: true }).click();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+  await expect(page.locator(".busy-overlay")).toHaveCount(0, {
+    timeout: 30000,
+  });
+  const imported = (await PDFDocument.load(await fs.readFile(fixture)))
+    .getForm()
+    .getTextField("NativeOriginal");
+  if (imported.getText() !== "日本語の既存欄")
+    throw Error("Imported form value did not persist");
+  const rectangle = imported.acroField.getWidgets()[0].getRectangle();
+  if (
+    rectangle.x !== 250 ||
+    rectangle.y !== 335 ||
+    rectangle.width !== 120 ||
+    rectangle.height !== 40
+  )
+    throw Error("Imported form placement did not persist");
   await page.getByRole("button", { name: "OCR", exact: true }).click();
   await page.getByLabel("ページ範囲（空欄は全ページ）").fill("1");
   await page.getByLabel("言語", { exact: true }).selectOption("jpn+eng");
@@ -225,6 +300,10 @@ const path = require("node:path");
       savedInternalLink: true,
       ocrProofread: true,
       batchPageRotation: true,
+      textBoxWrap: true,
+      selectedTextMarkup: true,
+      importedFormLayout: true,
+      elapsedSeconds: Math.round((Date.now() - started) / 1000),
       errors,
     }),
   );

@@ -15,7 +15,8 @@ export type ObjectKind =
   | "replacement"
   | "ocr";
 export type LinkTarget =
-  { kind: "page"; pageId: string } | { kind: "url"; url: string };
+  | { kind: "page"; pageId: string }
+  | { kind: "url"; url: string };
 export interface AnnotationEdit {
   text?: string;
   deleted?: boolean;
@@ -48,6 +49,8 @@ export interface EditObject extends Box {
   link?: LinkTarget;
   ocrConfidence?: number;
   ocrReviewed?: boolean;
+  wrap?: boolean;
+  lineHeight?: number;
 }
 export interface PageModel {
   id: string;
@@ -58,6 +61,8 @@ export interface PageModel {
   rotation: number;
   objects: EditObject[];
   annotationEdits?: Record<string, AnnotationEdit>;
+  /** Widget identities refer to the immutable source PDF, scoped to this page. */
+  formWidgetEdits?: Record<string, Box>;
   crop?: Box;
 }
 export interface Source {
@@ -162,6 +167,7 @@ export function newObject(kind: ObjectKind, x: number, y: number): EditObject {
     italic: false,
     align: "left",
     rotation: 0,
+    ...(kind === "text" ? { wrap: true, lineHeight: 1.25 } : {}),
     ...(kind === "highlight" ? { color: "#ffce32", fill: "#ffce32" } : {}),
     ...(kind === "text" || kind === "replacement" ? { text: "テキスト" } : {}),
     ...(kind === "note"

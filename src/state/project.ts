@@ -64,6 +64,8 @@ const object = z.object({
   link: linkTarget.optional(),
   ocrConfidence: number.min(0).max(100).optional(),
   ocrReviewed: z.boolean().optional(),
+  wrap: z.boolean().optional(),
+  lineHeight: number.min(1).max(3).optional(),
   points: z
     .array(z.object({ x: number, y: number }))
     .max(100000)
@@ -127,6 +129,9 @@ const schema = z.object({
             )
             .optional(),
           crop: z.object(box).optional(),
+          formWidgetEdits: z
+            .record(z.string().max(1200), z.object(box))
+            .optional(),
         }),
       )
       .min(1)

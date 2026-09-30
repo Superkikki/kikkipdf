@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { DocumentModel } from "../state/model";
 import { pageSize } from "../state/model";
 import { PageView, type Tool } from "./PageView";
+import { TextSelectionTools } from "../annotations/TextSelectionTools";
 export type ZoomMode = "width" | "page" | number;
 export function Viewer({
   model,
@@ -35,6 +36,14 @@ export function Viewer({
   }, []);
   return (
     <div ref={root} className="viewer-scroll" id="viewer-scroll">
+      <TextSelectionTools
+        model={model}
+        root={root}
+        onApplied={(pageId, id) => {
+          onActive(pageId);
+          onSelect(id);
+        }}
+      />
       {model.pages.map((p, i) => {
         const size = pageSize(p);
         const scale =

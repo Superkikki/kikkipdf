@@ -169,7 +169,9 @@ describe("real PDF export and reload", () => {
     d.pages[0].objects = [
       { ...newObject("text", 30, 40), text: "日本語の編集テスト" },
     ];
-    const font = new Uint8Array(await readFile("public/assets/NotoSansJP.ttf"));
+    const font = new Uint8Array(
+      await readFile("public/assets/NotoSansJP-Regular.otf"),
+    );
     const bytes = await exportPdf(d, font);
     expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1);
     const png = new Uint8Array(await readFile("src-tauri/icons/32x32.png"));

@@ -572,7 +572,7 @@ Kikki PDF includes the following open-source components. Application source lice
 
 ## Bundled assets and tools
 
-- Noto Sans JP: Copyright the Noto Project Authors, SIL Open Font License 1.1. See LICENSES/NotoSansJP-OFL.txt.
+- Noto Sans JP static Regular 2.004: Copyright © 2014–2021 Adobe, SIL Open Font License 1.1. See LICENSES/NotoSansJP-OFL.txt and LICENSES/NotoSansJP-SOURCE.md for the original Noto CJK release and checksum.
 - Tesseract eng/jpn tessdata_fast: Apache-2.0, https://github.com/tesseract-ocr/tessdata_fast.
 - Tesseract.js / Tesseract / Leptonica WebAssembly: Apache-2.0 / Apache-2.0 / BSD-2-Clause. See LICENSES/ocr and the bundled tesseract.js-core license. Image codecs and OpenLibm are also included; their original notices and source revisions are in LICENSES/ocr.
 - PDF.js includes core-js (MIT), fonts, CMaps and OpenJPEG/QCMS WebAssembly; upstream notices are preserved under LICENSES/pdfjs-assets.

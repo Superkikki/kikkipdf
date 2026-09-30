@@ -20,6 +20,7 @@ import {
   rgb,
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
+import { widgetKey } from "./commands";
 import type {
   DocumentModel,
   FieldValue,
@@ -49,7 +50,10 @@ export function setFieldValue(field: PDFField, value: FieldValue) {
  * Existing AP streams are preserved. JavaScript, submit actions and signatures are not copied.
  */
 export class FormTransfer {
-  private widgets = new Map<number, { field: PDFField; widget: PDFDict }[]>();
+  private widgets = new Map<
+    number,
+    { field: PDFField; widget: PDFDict; id: string }[]
+  >();
   private fields = new Map<PDFRef, { dict: PDFDict; ref: PDFRef }>();
   private copier: PDFObjectCopier;
   constructor(
@@ -84,39 +88,41 @@ export class FormTransfer {
     if (fields.length) {
       this.input.registerFontkit(fontkit);
       const font = fontBytes
-        ? await this.input.embedFont(fontBytes, { subset: true })
+        ? await this.input.embedFont(fontBytes, { subset: false })
         : await this.input.embedFont(StandardFonts.Helvetica);
       form.updateFieldAppearances(font);
       // Appearance fonts need to be materialized before copying their references.
       await this.input.flush();
     }
-    if (model.flattenForms) {
-      form.flatten({ updateFieldAppearances: false });
-      return;
-    }
-    const owner = new Map<PDFDict, PDFField>();
+    const owner = new Map<PDFDict, { field: PDFField; id: string }>();
     for (const f of fields)
-      for (const w of f.acroField.getWidgets()) owner.set(w.dict, f);
+      f.acroField
+        .getWidgets()
+        .forEach((w, index) =>
+          owner.set(w.dict, { field: f, id: widgetKey(f.getName(), index) }),
+        );
     this.input.getPages().forEach((page, index) => {
       const annots = page.node.Annots();
       if (!annots) return;
       const retained = this.input.context.obj([]);
-      const items: { field: PDFField; widget: PDFDict }[] = [];
+      const items: { field: PDFField; widget: PDFDict; id: string }[] = [];
       for (let i = 0; i < annots.size(); i++) {
         const ref = annots.get(i),
           dict = this.input.context.lookup(ref);
-        const field = dict instanceof PDFDict ? owner.get(dict) : undefined;
-        if (field && dict instanceof PDFDict)
-          items.push({ field, widget: dict });
+        const entry = dict instanceof PDFDict ? owner.get(dict) : undefined;
+        if (entry && dict instanceof PDFDict)
+          items.push({ ...entry, widget: dict });
         else retained.push(ref);
       }
       page.node.set(PDFName.of("Annots"), retained);
       this.widgets.set(index, items);
     });
   }
-  attach(sourceIndex: number, page: PDFPage) {
+  attach(modelPage: PageModel, page: PDFPage) {
     const context = this.output.context;
-    for (const { field, widget } of this.widgets.get(sourceIndex) ?? []) {
+    for (const { field, widget, id } of this.widgets.get(
+      modelPage.sourceIndex,
+    ) ?? []) {
       let target = this.fields.get(field.ref);
       if (!target) {
         const dict = context.obj({});
@@ -133,6 +139,7 @@ export class FormTransfer {
           "TU",
           "TM",
         ]) {
+          if (key === "Opt" && field instanceof PDFRadioGroup) continue;
           const value = field.acroField.getInheritableAttribute(
             PDFName.of(key),
           );
@@ -172,8 +179,31 @@ export class FormTransfer {
       }
       copy.set(PDFName.of("Parent"), target.ref);
       copy.set(PDFName.of("P"), page.ref);
+      const edit = modelPage.formWidgetEdits?.[id];
+      if (edit) {
+        const crop = this.input.getPage(modelPage.sourceIndex).getCropBox();
+        const x = crop.x + edit.x,
+          y = crop.y + crop.height - edit.y - edit.height;
+        copy.set(
+          PDFName.of("Rect"),
+          context.obj([x, y, x + edit.width, y + edit.height]),
+        );
+        // Rect alone would stretch the old appearance. Rebuild it at final size.
+        this.output.getForm().markFieldAsDirty(target.ref);
+      }
       const ref = context.register(copy);
       target.dict.lookup(PDFName.of("Kids"), PDFArray).push(ref);
+      if (field instanceof PDFRadioGroup) {
+        const index = field.acroField
+          .getWidgets()
+          .findIndex((w) => w.dict === widget);
+        let options = target.dict.lookupMaybe(PDFName.of("Opt"), PDFArray);
+        if (!options) {
+          options = context.obj([]);
+          target.dict.set(PDFName.of("Opt"), options);
+        }
+        options.push(PDFHexString.fromText(field.getOptions()[index] ?? ""));
+      }
       page.node.addAnnot(ref);
     }
     const form = this.output.getForm();

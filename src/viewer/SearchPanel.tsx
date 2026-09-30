@@ -30,7 +30,10 @@ export function SearchPanel({
         try {
           for (const p of model.pages) {
             if (cancelled) return;
-            let text = p.objects.map((o) => o.text ?? "").join(" ");
+            let text = p.objects
+              .filter((o) => ["text", "replacement", "ocr"].includes(o.kind))
+              .map((o) => o.text ?? "")
+              .join(" ");
             if (p.sourceId) {
               const pdf = await sourcePdf(model.sources[p.sourceId]);
               const page = await pdf.getPage(p.sourceIndex + 1);

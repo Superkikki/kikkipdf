@@ -868,6 +868,7 @@ export function useWorkspace() {
                   o.height = 24;
                   o.fontSize = r.kind === "透かし" ? 44 : 11;
                   o.align = "center";
+                  o.wrap = false;
                   if (r.kind === "透かし") o.opacity = 0.2;
                   if (r.kind === "背景") {
                     o.x = 0;

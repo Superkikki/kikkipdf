@@ -11,6 +11,14 @@ const { writeFile } = require("node:fs/promises");
       font,
     });
   }
+  const existing = pdf.getForm().createTextField("NativeOriginal");
+  existing.addToPage(pdf.getPage(0), {
+    x: 260,
+    y: 450,
+    width: 110,
+    height: 25,
+  });
+  existing.setText("Original field");
   await pdf.attach(
     Buffer.from("Native attachment round trip", "utf8"),
     "native-note.txt",

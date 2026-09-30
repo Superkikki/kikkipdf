@@ -8,6 +8,7 @@ import type {
 import { documentStore } from "../state/store";
 import { patchObject } from "../commands/objects";
 import { updateObject } from "../commands/document";
+import { TextShape } from "../text/TextShape";
 function AssetImage({
   object,
   model,
@@ -79,55 +80,8 @@ export function ObjectShape({
         <title>リンク領域（枠は編集画面のみ）</title>
       </rect>
     );
-  if (["text", "replacement", "ocr"].includes(o.kind))
-    return (
-      <g>
-        {o.kind === "replacement" && (
-          <rect
-            x={x}
-            y={y}
-            width={w}
-            height={h}
-            fill={o.fill === "none" ? "white" : o.fill}
-          />
-        )}
-        <text
-          x={x + (o.align === "center" ? w / 2 : o.align === "right" ? w : 0)}
-          y={y + o.fontSize}
-          fill={o.color}
-          fontSize={o.fontSize}
-          fontFamily={
-            o.font === "mono"
-              ? "monospace"
-              : o.font === "serif"
-                ? "serif"
-                : "Noto Sans JP, sans-serif"
-          }
-          fontWeight={o.bold ? 700 : 400}
-          fontStyle={o.italic ? "italic" : "normal"}
-          textAnchor={
-            o.align === "center"
-              ? "middle"
-              : o.align === "right"
-                ? "end"
-                : "start"
-          }
-          transform={`rotate(${o.rotation} ${x} ${y + h})`}
-        >
-          {(o.text ?? "").split("\n").map((line, i) => (
-            <tspan
-              key={i}
-              x={
-                x + (o.align === "center" ? w / 2 : o.align === "right" ? w : 0)
-              }
-              dy={i ? o.fontSize * 1.25 : 0}
-            >
-              {line}
-            </tspan>
-          ))}
-        </text>
-      </g>
-    );
+  if (o.kind === "text" || o.kind === "replacement")
+    return <TextShape object={o} />;
   if (o.kind === "ellipse")
     return (
       <ellipse

@@ -158,7 +158,9 @@ describe("interactive AcroForm export", () => {
         multiline: kind === "text",
       }),
     );
-    const font = new Uint8Array(await readFile("public/assets/NotoSansJP.ttf"));
+    const font = new Uint8Array(
+      await readFile("public/assets/NotoSansJP-Regular.otf"),
+    );
     const bytes = await exportPdf(model, font),
       pdf = await PDFDocument.load(bytes);
     expect(pdf.getForm().getFields()).toHaveLength(5);

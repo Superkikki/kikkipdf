@@ -67,9 +67,13 @@ for (const p of meta.packages) {
 }
 out +=
   "\n## Bundled assets and tools\n\n- Noto Sans JP: Copyright the Noto Project Authors, SIL Open Font License 1.1. See LICENSES/NotoSansJP-OFL.txt.\n- Tesseract eng/jpn tessdata_fast: Apache-2.0, https://github.com/tesseract-ocr/tessdata_fast.\n- Tesseract.js / Tesseract / Leptonica WebAssembly: Apache-2.0 / Apache-2.0 / BSD-2-Clause. See LICENSES/ocr and the bundled tesseract.js-core license. Image codecs and OpenLibm are also included; their original notices and source revisions are in LICENSES/ocr.\n- PDF.js includes core-js (MIT), fonts, CMaps and OpenJPEG/QCMS WebAssembly; upstream notices are preserved under LICENSES/pdfjs-assets.\n- Lucide icons: ISC. Kikki application mark is an original geometric drawing.\n- NSIS installer: zlib/libpng license; nsis-tauri-utils MIT or Apache-2.0.\n- WebView2Loader.dll: Microsoft WebView2 SDK terms, included by webview2-com-sys (statically linked in the MSVC build). See LICENSES/WebView2-LICENSE.txt. WebView2 Runtime is a Microsoft prerequisite, not an OSS PDF component.\n- Build-only GCC/MinGW/binutils are external toolchain components; this repository does not distribute their binaries as part of the app. The final installer uses MSVC. NSIS and auxiliary GNU toolchain notices are in LICENSES/toolchain.\n\n## Development tools\n\nReact/TypeScript/Vite/Vitest/ESLint/Playwright/Tauri CLI licenses are available in their npm/crate distributions. Exact resolved versions are in package-lock.json and Cargo.lock.\n";
+out = out.replace(
+  "Noto Sans JP: Copyright the Noto Project Authors, SIL Open Font License 1.1. See LICENSES/NotoSansJP-OFL.txt.",
+  "Noto Sans JP static Regular 2.004: Copyright © 2014–2021 Adobe, SIL Open Font License 1.1. See LICENSES/NotoSansJP-OFL.txt and LICENSES/NotoSansJP-SOURCE.md for the original Noto CJK release and checksum.",
+);
 await writeFile("THIRD_PARTY_NOTICES.md", out);
 await copyFile(
-  "public/assets/NotoSansJP-OFL.txt",
+  "public/assets/NotoSansJP-static-OFL.txt",
   "LICENSES/NotoSansJP-OFL.txt",
 );
 for (const dir of ["cmaps", "standard_fonts", "wasm"]) {

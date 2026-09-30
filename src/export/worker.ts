@@ -34,7 +34,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   try {
     let result: unknown;
     if (req.type === "export" || req.type === "split") {
-      font ??= fetch("/assets/NotoSansJP.ttf")
+      font ??= fetch("/assets/NotoSansJP-Regular.otf")
         .then((r) => {
           if (!r.ok) throw Error("ローカル日本語フォントを読み込めません。");
           return r.arrayBuffer();

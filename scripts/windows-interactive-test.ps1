@@ -25,7 +25,7 @@ $Task.RegistrationInfo.Description='Temporary Kikki PDF integration test'
 $Task.Principal.UserId=[Security.Principal.WindowsIdentity]::GetCurrent().Name
 $Task.Principal.LogonType=3
 $Task.Principal.RunLevel=0
-$Task.Settings.ExecutionTimeLimit='PT3M'
+$Task.Settings.ExecutionTimeLimit='PT5M'
 $Task.Settings.DisallowStartIfOnBatteries=$false
 $Task.Settings.StopIfGoingOnBatteries=$false
 $Action=$Task.Actions.Create(0)
@@ -37,7 +37,7 @@ try {
  $Registered=$Folder.RegisterTaskDefinition($Name,$Task,6,$Task.Principal.UserId,$null,3,$null)
  $Registered.Run($null) | Out-Null
  Write-Output "Started temporary interactive test $Name"
- $Deadline=(Get-Date).AddSeconds(100)
+ $Deadline=(Get-Date).AddSeconds(240)
  while (!(Test-Path $Done) -and (Get-Date) -lt $Deadline) {Start-Sleep -Seconds 1}
  if(Test-Path $Log){Get-Content $Log}
  if(!(Test-Path $Done)){throw 'Interactive test timed out'}

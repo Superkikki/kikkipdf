@@ -33,14 +33,17 @@ test("fills imported multiline and multiselect form controls without losing choi
   });
   await page.getByRole("button", { name: "ツール", exact: true }).click();
   await page.getByRole("button", { name: "フォーム入力", exact: true }).click();
-  await expect(page.getByLabel("Tags", { exact: true })).toHaveValues([
-    "One",
-    "Three",
-  ]);
+  await expect(
+    page.getByRole("dialog").getByLabel("Tags", { exact: true }),
+  ).toHaveValues(["One", "Three"]);
   await page
+    .getByRole("dialog")
     .getByLabel("Notes", { exact: true })
     .fill("First line\nSecond line");
-  await page.getByLabel("Tags", { exact: true }).selectOption(["Two", "Three"]);
+  await page
+    .getByRole("dialog")
+    .getByLabel("Tags", { exact: true })
+    .selectOption(["Two", "Three"]);
   await page.getByRole("button", { name: "完了", exact: true }).click();
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "保存", exact: true }).click();

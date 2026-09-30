@@ -12,6 +12,7 @@ import { documentStore } from "../state/store";
 import { pasteObject, reorderObject } from "../editor/objectActions";
 import { deleteObject, updateObject } from "../commands/document";
 import { LinkTargetEditor } from "../links/LinkTargetEditor";
+import { useTextLayout } from "../text/useTextLayout";
 export function Properties({
   page,
   selected,
@@ -20,6 +21,9 @@ export function Properties({
   selected: string | null;
 }) {
   const o = page?.objects.find((o) => o.id === selected);
+  const { layout, error: layoutError } = useTextLayout(
+    o?.kind === "text" || o?.kind === "replacement" ? o : undefined,
+  );
   const patch = (p: Partial<EditObject>) => {
     if (page && o) documentStore.execute(updateObject(page.id, o.id, p));
   };
@@ -104,12 +108,13 @@ export function Properties({
             </div>
             <span className="hint">単位: pt（1/72インチ）</span>
           </div>
-          {o.text !== undefined && o.kind !== "note" && (
+          {["text", "replacement", "ocr"].includes(o.kind) && (
             <div className="property-group">
               <h3>テキスト</h3>
               <label>
                 フォント
                 <select
+                  aria-label="フォント"
                   value={o.font}
                   onChange={(e) =>
                     patch({ font: e.target.value as EditObject["font"] })
@@ -130,9 +135,11 @@ export function Properties({
                     min="1"
                     max="300"
                     value={o.fontSize}
-                    onChange={(e) =>
-                      patch({ fontSize: Math.max(1, Number(e.target.value)) })
-                    }
+                    onChange={(e) => {
+                      const size = Number(e.target.value);
+                      if (Number.isFinite(size))
+                        patch({ fontSize: Math.max(1, Math.min(300, size)) });
+                    }}
                   />
                 </label>
                 <button
@@ -163,6 +170,58 @@ export function Properties({
                   <option value="right">右揃え</option>
                 </select>
               </label>
+              {(o.kind === "text" || o.kind === "replacement") && (
+                <>
+                  <label className="text-wrap-control">
+                    <input
+                      type="checkbox"
+                      checked={!!o.wrap}
+                      onChange={(e) => patch({ wrap: e.target.checked })}
+                    />
+                    幅に合わせて折り返す
+                  </label>
+                  <label>
+                    行間（文字サイズの倍率）
+                    <input
+                      aria-label="行間"
+                      type="number"
+                      min={1}
+                      max={3}
+                      step={0.05}
+                      value={o.lineHeight ?? 1.25}
+                      onChange={(e) => {
+                        const n = Number(e.target.value);
+                        if (Number.isFinite(n))
+                          patch({ lineHeight: Math.max(1, Math.min(3, n)) });
+                      }}
+                    />
+                  </label>
+                  {layoutError && (
+                    <p className="warning small">{layoutError}</p>
+                  )}
+                  {layout && (
+                    <>
+                      <p className="hint text-layout-summary">
+                        {layout.lines.length} 行・必要な高さ{" "}
+                        {Math.ceil(layout.height)} pt
+                      </p>
+                      {(layout.height > o.height + 0.1 ||
+                        layout.width > o.width + 0.1) && (
+                        <p className="warning small text-overflow-warning">
+                          文字がボックスの範囲を超えています。保存時も全文を描画します。幅・高さ・文字サイズを調整してください。
+                        </p>
+                      )}
+                      <button
+                        onClick={() =>
+                          patch({ height: Math.ceil(layout.height) })
+                        }
+                      >
+                        文字に合わせて高さを調整
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
             </div>
           )}
           {o.kind !== "link" && o.kind !== "ocr" && (

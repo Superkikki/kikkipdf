@@ -5,6 +5,7 @@ import {
   writeFile,
   access,
   readFile,
+  unlink,
 } from "node:fs/promises";
 import { createHash } from "node:crypto";
 const checksums = JSON.parse(
@@ -40,10 +41,10 @@ for (const f of await readdir(
     );
 }
 const downloads = {
-  "NotoSansJP.ttf":
-    "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf",
-  "NotoSansJP-OFL.txt":
-    "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/OFL.txt",
+  "NotoSansJP-Regular.otf":
+    "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/Sans/SubsetOTF/JP/NotoSansJP-Regular.otf",
+  "NotoSansJP-static-OFL.txt":
+    "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/LICENSE",
   "ocr/eng.traineddata":
     "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata",
   "ocr/jpn.traineddata":
@@ -65,5 +66,14 @@ for (const [file, url] of Object.entries(downloads)) {
     throw Error(
       `Asset checksum mismatch: ${file}. Review the upstream change before updating asset-lock.json.`,
     );
+}
+// Remove only the known obsolete generated variable font, after the replacement
+// passed its checksum. It must not be bundled alongside the fixed Regular font.
+for (const obsolete of ["NotoSansJP.ttf", "NotoSansJP-OFL.txt"]) {
+  try {
+    await unlink(new URL(obsolete, root));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
 }
 console.log("Offline PDF / OCR / font assets are ready.");

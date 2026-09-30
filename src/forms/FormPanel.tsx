@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { DocumentModel, FieldValue } from "../state/model";
-import { loadForms } from "../export/client";
-import type { FormDescriptor } from "../export/engine";
+import { useImportedForms } from "./useImportedForms";
+import { ImportedFormDesigner } from "./ImportedFormDesigner";
 import { documentStore } from "../state/store";
 import { FormDesigner } from "./FormDesigner";
 import { updateFormField } from "./commands";
@@ -13,30 +13,8 @@ export function FormPanel({
   model: DocumentModel;
   active: string;
 }) {
-  const [fields, setFields] = useState<FormDescriptor[]>([]),
-    [error, setError] = useState(""),
-    [loading, setLoading] = useState(true);
+  const { fields, error, loading } = useImportedForms(model.sources);
   const [tab, setTab] = useState("fill");
-  const sources = model.sources;
-  useEffect(() => {
-    let live = true;
-    setLoading(true);
-    setError("");
-    void loadForms({ sources })
-      .then((f) => {
-        if (live) setFields(f);
-      })
-      .catch(() => {
-        if (live)
-          setError("フォームを読み込めません。XFAフォームは未対応です。");
-      })
-      .finally(() => {
-        if (live) setLoading(false);
-      });
-    return () => {
-      live = false;
-    };
-  }, [sources]);
   function update(key: string, value: FieldValue) {
     if (key.startsWith("new:")) {
       documentStore.execute(updateFormField(key.slice(4), { value }));
@@ -81,7 +59,12 @@ export function FormPanel({
         固定して保存（保存後は再入力不可）
       </label>
       {tab === "design" ? (
-        <FormDesigner model={model} active={active} />
+        <>
+          {loading && <p>フォームを読み込み中…</p>}
+          {error && <p className="warning">{error}</p>}
+          <ImportedFormDesigner model={model} fields={fields} active={active} />
+          <FormDesigner model={model} active={active} />
+        </>
       ) : (
         <>
           <p className="notice">
@@ -96,7 +79,14 @@ export function FormPanel({
               <p>このPDFには対応するフォームフィールドがありません。</p>
             )}
           {[
-            ...fields,
+            ...fields.filter((f) =>
+              f.widgets.some((w) =>
+                model.pages.some(
+                  (p) =>
+                    p.sourceId === f.sourceId && p.sourceIndex === w.pageIndex,
+                ),
+              ),
+            ),
             ...(model.formFields ?? []).map((f) => ({
               ...f,
               key: "new:" + f.id,

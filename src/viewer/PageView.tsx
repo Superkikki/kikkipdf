@@ -1,4 +1,8 @@
 import { FormOverlay } from "../forms/FormOverlay";
+import {
+  ImportedFormOverlay,
+  type FormEditSelection,
+} from "../forms/ImportedFormOverlay";
 import { useEffect, useRef, useState } from "react";
 import { TextLayer, type RenderTask } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type {
@@ -25,6 +29,7 @@ export function PageView({
   onSelect = () => {},
   onActive = () => {},
   onError,
+  formEdit,
 }: {
   model: DocumentModel;
   page: PageModel;
@@ -35,6 +40,7 @@ export function PageView({
   onSelect?: (id: string) => void;
   onActive?: () => void;
   onError?: (s: string) => void;
+  formEdit?: FormEditSelection;
 }) {
   const host = useRef<HTMLDivElement>(null),
     canvas = useRef<HTMLCanvasElement>(null),
@@ -285,6 +291,13 @@ export function PageView({
                   (f) => f.pageId === page.id,
                 )}
                 thumbnail={!!thumbnail}
+              />
+              <ImportedFormOverlay
+                model={model}
+                page={page}
+                enabled={visible}
+                thumbnail={thumbnail}
+                edit={formEdit}
               />
               <canvas
                 ref={canvas}

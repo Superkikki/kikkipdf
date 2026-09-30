@@ -1,13 +1,19 @@
-import type { FormFieldModel } from "../state/model";
+import type { FieldValue, FormFieldModel } from "../state/model";
 import { documentStore } from "../state/store";
 import { updateFormField } from "./commands";
 export function FormOverlay({
   fields,
   thumbnail,
+  onValue,
 }: {
   fields: FormFieldModel[];
   thumbnail: boolean;
+  onValue?: (id: string, value: FieldValue) => void;
 }) {
+  const update = (id: string, value: FieldValue) =>
+    onValue
+      ? onValue(id, value)
+      : documentStore.execute(updateFormField(id, { value }));
   return (
     <div className="form-page-overlay">
       {fields.map((f) => (
@@ -35,11 +41,7 @@ export function FormOverlay({
                 maxLength={f.maxLength}
                 value={String(f.value)}
                 rows={f.multiline ? 3 : 1}
-                onChange={(e) =>
-                  documentStore.execute(
-                    updateFormField(f.id, { value: e.target.value }),
-                  )
-                }
+                onChange={(e) => update(f.id, e.target.value)}
               />
             ) : (
               <input
@@ -47,11 +49,7 @@ export function FormOverlay({
                 readOnly={f.readOnly}
                 maxLength={f.maxLength}
                 value={String(f.value)}
-                onChange={(e) =>
-                  documentStore.execute(
-                    updateFormField(f.id, { value: e.target.value }),
-                  )
-                }
+                onChange={(e) => update(f.id, e.target.value)}
               />
             )
           ) : f.kind === "checkbox" ? (
@@ -60,11 +58,7 @@ export function FormOverlay({
               type="checkbox"
               disabled={f.readOnly}
               checked={Boolean(f.value)}
-              onChange={(e) =>
-                documentStore.execute(
-                  updateFormField(f.id, { value: e.target.checked }),
-                )
-              }
+              onChange={(e) => update(f.id, e.target.checked)}
             />
           ) : f.kind === "radio" ? (
             <div>
@@ -75,11 +69,7 @@ export function FormOverlay({
                     name={f.id}
                     checked={f.value === option}
                     disabled={f.readOnly}
-                    onChange={() =>
-                      documentStore.execute(
-                        updateFormField(f.id, { value: option }),
-                      )
-                    }
+                    onChange={() => update(f.id, option)}
                   />
                   {option}
                 </label>
@@ -103,12 +93,11 @@ export function FormOverlay({
                     : String(f.value)
               }
               onChange={(e) =>
-                documentStore.execute(
-                  updateFormField(f.id, {
-                    value: f.multiSelect
-                      ? Array.from(e.target.selectedOptions).map((o) => o.value)
-                      : e.target.value,
-                  }),
+                update(
+                  f.id,
+                  f.multiSelect
+                    ? Array.from(e.target.selectedOptions).map((o) => o.value)
+                    : e.target.value,
                 )
               }
             >
