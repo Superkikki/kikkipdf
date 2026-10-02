@@ -15,6 +15,8 @@ import type { PageModel, LinkTarget } from "../state/model";
 import { setLinkTarget } from "../links/pdfLinks";
 import { importedLinkUrl } from "../links/target";
 import type { AttachmentWriter } from "../attachments/pdfAttachments";
+import { rewrittenContent } from "../direct/content";
+import { directReferences } from "../direct/model";
 
 const key = (name: string) => PDFName.of(name);
 const text = (value: PDFObject | undefined) =>
@@ -87,10 +89,18 @@ export class PageCopier {
   ) {
     this.copier = PDFObjectCopier.for(input.context, output.context);
   }
-  copy(model: PageModel): PDFPage {
+  async copy(model: PageModel): Promise<PDFPage> {
     const source = this.input.getPage(model.sourceIndex),
       node = source.node.clone();
     node.delete(key("Annots"));
+    const edits = directReferences(model);
+    if (edits.some((r) => r.sourceId !== model.sourceId))
+      throw Error("直接編集の参照元PDFが一致しません。");
+    const content = edits.length
+      ? await rewrittenContent(source, model.sourceIndex, edits)
+      : undefined;
+    // Never copy the original content first: pdf-lib serializes orphan objects too.
+    if (content) node.delete(key("Contents"));
     const copied = this.copier.copy(node),
       page = PDFPage.of(
         copied,
@@ -98,6 +108,11 @@ export class PageCopier {
         this.output,
       );
     this.output.addPage(page);
+    if (content)
+      page.node.set(
+        key("Contents"),
+        this.output.context.register(this.output.context.flateStream(content)),
+      );
     if (!this.exported.has(model.sourceIndex))
       this.exported.set(model.sourceIndex, page);
     const annotations = source.node.Annots();

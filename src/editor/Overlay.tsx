@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   DocumentModel,
   EditObject,
@@ -9,6 +9,7 @@ import { documentStore } from "../state/store";
 import { patchObject } from "../commands/objects";
 import { updateObject } from "../commands/document";
 import { TextShape } from "../text/TextShape";
+import { ObjectContextMenu } from "./ObjectContextMenu";
 function AssetImage({
   object,
   model,
@@ -80,8 +81,13 @@ export function ObjectShape({
         <title>リンク領域（枠は編集画面のみ）</title>
       </rect>
     );
-  if (o.kind === "text" || o.kind === "replacement")
-    return <TextShape object={o} />;
+  if (o.kind === "text" || o.kind === "replacement" || o.kind === "direct-text")
+    return (
+      <TextShape
+        object={o}
+        asset={o.fontId ? model.fonts?.[o.fontId] : undefined}
+      />
+    );
   if (o.kind === "ellipse")
     return (
       <ellipse
@@ -153,25 +159,85 @@ export function Overlay({
   selected,
   onSelect,
   interactive,
+  contextEnabled = false,
 }: {
   page: PageModel;
   model: DocumentModel;
   selected: string | null;
   onSelect: (id: string) => void;
   interactive: boolean;
+  contextEnabled?: boolean;
 }) {
   const [preview, setPreview] = useState<EditObject | null>(null);
+  const [context, setContext] = useState<{
+    id: string;
+    point: Point;
+    anchor: SVGElement;
+  } | null>(null);
+  const closeContext = useCallback(() => setContext(null), []);
+  useEffect(() => {
+    closeContext();
+  }, [page.objects, contextEnabled, closeContext]);
   const drag = useRef<{ o: EditObject; point: Point; resize: boolean } | null>(
     null,
   );
   const svg = useRef<SVGSVGElement>(null);
+  const openContext = useCallback(
+    (id: string, point: Point, anchor: SVGElement) => {
+      drag.current = null;
+      setPreview(null);
+      onSelect(id);
+      setContext({ id, point, anchor });
+    },
+    [onSelect],
+  );
+  // Drawing/text tools need their normal left-click access through the overlay.
+  // Hit-test only the contextmenu event instead of intercepting their pointer events.
+  useEffect(() => {
+    if (!contextEnabled || interactive) return;
+    const host = svg.current?.closest(".page-content");
+    if (!host) return;
+    const contextMenu = (event: Event) => {
+      if (!(event instanceof MouseEvent)) return;
+      const matrix = svg.current?.getScreenCTM();
+      if (!matrix) return;
+      const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(
+        matrix.inverse(),
+      );
+      const object = [...page.objects]
+        .reverse()
+        .find(
+          (o) =>
+            (o.kind !== "ocr" || o.id === selected) &&
+            p.x >= o.x &&
+            p.x <= o.x + o.width &&
+            p.y >= o.y &&
+            p.y <= o.y + o.height,
+        );
+      const anchor =
+        object &&
+        svg.current?.querySelector<SVGElement>(
+          `g[data-object-id="${CSS.escape(object.id)}"]`,
+        );
+      if (!object || !anchor) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openContext(object.id, { x: event.clientX, y: event.clientY }, anchor);
+    };
+    host.addEventListener("contextmenu", contextMenu);
+    return () => host.removeEventListener("contextmenu", contextMenu);
+  }, [contextEnabled, interactive, openContext, page.objects, selected]);
   function point(e: React.PointerEvent) {
     const m = svg.current?.getScreenCTM()?.inverse();
     const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m);
     return { x: p.x, y: p.y };
   }
   function start(e: React.PointerEvent, o: EditObject, resize = false) {
-    if (!interactive) return;
+    if (e.button === 2 && contextEnabled) {
+      e.stopPropagation();
+      return;
+    }
+    if (!interactive || e.button !== 0) return;
     e.stopPropagation();
     onSelect(o.id);
     drag.current = { o, point: point(e), resize };
@@ -204,59 +270,84 @@ export function Overlay({
     setPreview(null);
   }
   return (
-    <svg
-      ref={svg}
-      className="object-layer"
-      width={page.width}
-      height={page.height}
-      viewBox={`0 0 ${page.width} ${page.height}`}
-      onPointerMove={move}
-      onPointerUp={end}
-      onPointerCancel={() => {
-        drag.current = null;
-        setPreview(null);
-      }}
-      style={{ pointerEvents: "none" }}
-    >
-      {page.objects
-        .filter((o) => o.kind !== "ocr" || o.id === selected)
-        .map((original) => {
-          const o = preview?.id === original.id ? preview : original;
-          return (
-            <g
-              key={o.id}
-              opacity={o.kind === "ocr" ? 1 : o.opacity}
-              style={{
-                pointerEvents: interactive ? "all" : "none",
-                cursor: interactive ? "move" : "default",
-              }}
-              onPointerDown={(e) => start(e, o)}
-            >
-              <ObjectShape o={o} model={model} />
-              <rect
-                x={o.x}
-                y={o.y}
-                width={o.width}
-                height={o.height}
-                fill="transparent"
-                stroke={selected === o.id ? "#18a999" : "none"}
-                strokeWidth={1}
-                strokeDasharray="4 2"
-              />
-              {selected === o.id && interactive && (
+    <>
+      <svg
+        ref={svg}
+        className="object-layer"
+        width={page.width}
+        height={page.height}
+        viewBox={`0 0 ${page.width} ${page.height}`}
+        onPointerMove={move}
+        onPointerUp={(e) => {
+          if (e.button === 0) end();
+        }}
+        onPointerCancel={() => {
+          drag.current = null;
+          setPreview(null);
+        }}
+        style={{ pointerEvents: "none" }}
+      >
+        {page.objects
+          .filter((o) => o.kind !== "ocr" || o.id === selected)
+          .map((original) => {
+            const o = preview?.id === original.id ? preview : original;
+            return (
+              <g
+                key={o.id}
+                data-object-id={o.id}
+                tabIndex={contextEnabled ? -1 : undefined}
+                opacity={o.kind === "ocr" ? 1 : o.opacity}
+                style={{
+                  pointerEvents: interactive ? "all" : "none",
+                  cursor: interactive ? "move" : "default",
+                }}
+                onPointerDown={(e) => start(e, o)}
+                onContextMenu={(e) => {
+                  if (!contextEnabled) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  openContext(
+                    o.id,
+                    { x: e.clientX, y: e.clientY },
+                    e.currentTarget,
+                  );
+                }}
+              >
+                <ObjectShape o={o} model={model} />
                 <rect
-                  x={o.x + o.width - 5}
-                  y={o.y + o.height - 5}
-                  width={10}
-                  height={10}
-                  fill="#18a999"
-                  stroke="white"
-                  onPointerDown={(e) => start(e, o, true)}
+                  x={o.x}
+                  y={o.y}
+                  width={o.width}
+                  height={o.height}
+                  fill="transparent"
+                  stroke={selected === o.id ? "#18a999" : "none"}
+                  strokeWidth={1}
+                  strokeDasharray="4 2"
                 />
-              )}
-            </g>
-          );
-        })}
-    </svg>
+                {selected === o.id && interactive && (
+                  <rect
+                    x={o.x + o.width - 5}
+                    y={o.y + o.height - 5}
+                    width={10}
+                    height={10}
+                    fill="#18a999"
+                    stroke="white"
+                    onPointerDown={(e) => start(e, o, true)}
+                  />
+                )}
+              </g>
+            );
+          })}
+      </svg>
+      {context && (
+        <ObjectContextMenu
+          pageId={page.id}
+          objectId={context.id}
+          point={context.point}
+          anchor={context.anchor}
+          onClose={closeContext}
+        />
+      )}
+    </>
   );
 }

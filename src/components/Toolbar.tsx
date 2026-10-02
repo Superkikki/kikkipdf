@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import {
   FolderOpen,
   Save,
@@ -20,7 +21,6 @@ import {
   Copy,
   Trash2,
   FilePlus2,
-  ChevronDown,
   PenTool,
   Shield,
   FormInput,
@@ -95,6 +95,57 @@ export function Toolbar({
   category: string;
   setCategory: (s: string) => void;
 }) {
+  const menubar = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = menubar.current;
+    if (!root) return;
+    function closeMenus() {
+      root?.querySelectorAll<HTMLDetailsElement>("details[open]").forEach((menu) => {
+        menu.open = false;
+      });
+    }
+    function outside(e: PointerEvent) {
+      if (!(e.target instanceof Element && root?.contains(e.target))) closeMenus();
+      else if (!e.target.closest("details")) closeMenus();
+    }
+    function escape(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      const open = root?.querySelector<HTMLDetailsElement>("details[open]");
+      if (open) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeMenus();
+        open.querySelector<HTMLElement>("summary")?.focus();
+      }
+    }
+    function toggle(e: Event) {
+      const current = e.target;
+      if (!(current instanceof HTMLDetailsElement) || !current.open) return;
+      root?.querySelectorAll<HTMLDetailsElement>("details[open]").forEach((menu) => {
+        if (menu !== current) menu.open = false;
+      });
+    }
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape, true);
+    root.addEventListener("toggle", toggle, true);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape, true);
+      root.removeEventListener("toggle", toggle, true);
+    };
+  }, []);
+  const toolHint =
+    tool === "select"
+      ? "追加したオブジェクトをクリックして選択 · 元の文字はドラッグでコピー"
+      : tool === "editText" || tool === "appearanceText"
+        ? "元の文字をダブルクリックして編集 · Escで選択ツールに戻る"
+        : tool === "text"
+          ? "ページをクリックして文字を追加 · ドラッグで範囲を指定"
+          : tool === "note"
+            ? "ページをクリックして付箋を追加"
+            : tool === "ink"
+              ? "ページ上でドラッグして描画 · Escで選択ツールに戻る"
+              : "ページ上でドラッグして範囲を指定 · Escで選択ツールに戻る";
   const tools = [
     { id: "select", label: "選択", icon: MousePointer2 },
     { id: "text", label: "テキスト", icon: Type },
@@ -111,7 +162,7 @@ export function Toolbar({
   ];
   return (
     <>
-      <div className="menubar">
+      <div className="menubar" ref={menubar}>
         <div className="brand-mark">
           k<span>•</span>
         </div>
@@ -137,6 +188,10 @@ export function Toolbar({
             ].map(([id, label, key]) => (
               <button
                 key={id}
+                disabled={
+                  !hasDocument &&
+                  !["open", "new", "projectOpen", "imagesPdf"].includes(id)
+                }
                 onClick={(e) => {
                   e.currentTarget.closest("details")?.removeAttribute("open");
                   action(id as Action);
@@ -188,6 +243,8 @@ export function Toolbar({
         {["編集", "ページ管理", "注釈", "ツール"].map((t) => (
           <button
             key={t}
+            disabled={!hasDocument}
+            aria-pressed={category === t}
             className={category === t ? "active" : ""}
             onClick={() => setCategory(t)}
           >
@@ -208,173 +265,184 @@ export function Toolbar({
           保存
         </button>
       </div>
-      <div className="toolbar">
-        <div className="tool-group">
-          <button
-            title="元に戻す (Ctrl+Z)"
-            disabled={!canUndo}
-            onClick={() => action("undo")}
-          >
-            <Undo2 size={19} />
-          </button>
-          <button
-            title="やり直す (Ctrl+Y)"
-            disabled={!canRedo}
-            onClick={() => action("redo")}
-          >
-            <Redo2 size={19} />
-          </button>
-        </div>
-        {category === "編集" && (
-          <div className="tool-group">
-            <button
-              disabled={!hasDocument}
-              className={`tool ${tool === "link" ? "active" : ""}`}
-              onClick={() => setTool("link")}
-            >
-              <Link2 size={20} />
-              <span>リンク</span>
-            </button>
-            {tools.slice(0, 8).map((t) => (
+      {hasDocument && (
+        <div className="toolbar">
+          <div className="toolbar-tools">
+            <div className="tool-group">
               <button
-                disabled={!hasDocument}
-                key={t.id}
-                className={`tool ${tool === t.id ? "active" : ""}`}
-                title={t.label}
-                onClick={() =>
-                  t.id === "image" ? action("image") : setTool(t.id as Tool)
-                }
+                title="元に戻す (Ctrl+Z)"
+                disabled={!canUndo}
+                onClick={() => action("undo")}
               >
-                <t.icon size={20} />
-                <span>{t.label}</span>
+                <Undo2 size={19} />
               </button>
-            ))}
-          </div>
-        )}
-        {category === "注釈" && (
-          <div className="tool-group">
-            {tools
-              .filter((t) =>
-                [
-                  "select",
-                  "ink",
-                  "highlight",
-                  "underline",
-                  "strike",
-                  "note",
-                ].includes(t.id),
-              )
-              .map((t) => (
+              <button
+                title="やり直す (Ctrl+Y)"
+                disabled={!canRedo}
+                onClick={() => action("redo")}
+              >
+                <Redo2 size={19} />
+              </button>
+            </div>
+            {category === "編集" && (
+              <div className="tool-group">
                 <button
                   disabled={!hasDocument}
-                  key={t.id}
-                  className={`tool ${tool === t.id ? "active" : ""}`}
-                  onClick={() => setTool(t.id as Tool)}
+                  className={`tool ${tool === "link" ? "active" : ""}`}
+                  aria-pressed={tool === "link"}
+                  onClick={() => setTool("link")}
                 >
-                  <t.icon size={20} />
-                  <span>{t.label}</span>
+                  <Link2 size={20} />
+                  <span>リンク</span>
                 </button>
-              ))}
-            <button
-              disabled={!hasDocument}
-              className="tool"
-              onClick={() => action("signature")}
-            >
-              <PenTool size={20} />
-              <span>簡易署名</span>
-            </button>
-            <button
-              disabled={!hasDocument}
-              className="tool"
-              onClick={() => action("savedSignature")}
-            >
-              <Stamp size={20} />
-              <span>登録署名</span>
-            </button>
+                {tools.slice(0, 8).map((t) => (
+                  <button
+                    disabled={!hasDocument}
+                    key={t.id}
+                    className={`tool ${tool === t.id ? "active" : ""}`}
+                    aria-pressed={tool === t.id}
+                    title={t.label}
+                    onClick={() =>
+                      t.id === "image" ? action("image") : setTool(t.id as Tool)
+                    }
+                  >
+                    <t.icon size={20} />
+                    <span>{t.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {category === "注釈" && (
+              <div className="tool-group">
+                {tools
+                  .filter((t) =>
+                    [
+                      "select",
+                      "ink",
+                      "highlight",
+                      "underline",
+                      "strike",
+                      "note",
+                    ].includes(t.id),
+                  )
+                  .map((t) => (
+                    <button
+                      disabled={!hasDocument}
+                      key={t.id}
+                      className={`tool ${tool === t.id ? "active" : ""}`}
+                      aria-pressed={tool === t.id}
+                      onClick={() => setTool(t.id as Tool)}
+                    >
+                      <t.icon size={20} />
+                      <span>{t.label}</span>
+                    </button>
+                  ))}
+                <button
+                  disabled={!hasDocument}
+                  className="tool"
+                  onClick={() => action("signature")}
+                >
+                  <PenTool size={20} />
+                  <span>簡易署名</span>
+                </button>
+                <button
+                  disabled={!hasDocument}
+                  className="tool"
+                  onClick={() => action("savedSignature")}
+                >
+                  <Stamp size={20} />
+                  <span>登録署名</span>
+                </button>
+              </div>
+            )}
+            {category === "ページ管理" && (
+              <div className="tool-group">
+                {[
+                  { id: "rotate", label: "回転", icon: RotateCw },
+                  { id: "duplicate", label: "複製", icon: Copy },
+                  { id: "delete", label: "削除", icon: Trash2 },
+                  { id: "blank", label: "空白ページ", icon: FilePlus2 },
+                  { id: "merge", label: "PDF追加", icon: FileStack },
+                  { id: "extract", label: "抽出", icon: Download },
+                  { id: "split", label: "分割", icon: Scissors },
+                  { id: "splitZip", label: "分割ZIP", icon: FileStack },
+                  { id: "pageBatch", label: "一括操作", icon: Copy },
+                  { id: "crop", label: "トリミング", icon: Square },
+                ].map((t) => (
+                  <button
+                    className="tool"
+                    key={t.id}
+                    disabled={!hasDocument}
+                    onClick={() => action(t.id as Action)}
+                  >
+                    <t.icon size={20} />
+                    <span>{t.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {category === "ツール" && (
+              <div className="tool-group">
+                {[
+                  { id: "ocr", label: "OCR", icon: ScanText },
+                  { id: "forms", label: "フォーム入力", icon: FormInput },
+                  { id: "links", label: "リンク管理", icon: Link2 },
+                  { id: "decorate", label: "ページ装飾", icon: Stamp },
+                  { id: "metadata", label: "文書情報", icon: FileText },
+                  { id: "encrypt", label: "パスワード", icon: Lock },
+                ].map((t) => (
+                  <button
+                    className="tool"
+                    key={t.id}
+                    disabled={!hasDocument}
+                    onClick={() => action(t.id as Action)}
+                  >
+                    <t.icon size={20} />
+                    <span>{t.label}</span>
+                  </button>
+                ))}
+                <button
+                  className={`tool ${tool === "editText" ? "active" : ""}`}
+                  aria-pressed={tool === "editText"}
+                  disabled={!hasDocument}
+                  onClick={() => setTool("editText")}
+                >
+                  <TextCursorInput size={20} />
+                  <span>既存文字</span>
+                </button>
+                <button
+                  className={`tool ${tool === "appearanceText" ? "active" : ""}`}
+                  aria-pressed={tool === "appearanceText"}
+                  disabled={!hasDocument}
+                  onClick={() => setTool("appearanceText")}
+                  title="元の文字情報が残る見た目だけの置換"
+                >
+                  <Type size={20} />
+                  <span>見た目の置換</span>
+                </button>
+                <button
+                  className={`tool ${tool === "redaction" ? "active" : ""}`}
+                  aria-pressed={tool === "redaction"}
+                  disabled={!hasDocument}
+                  onClick={() => setTool("redaction")}
+                >
+                  <Square size={20} />
+                  <span>墨消し候補</span>
+                </button>
+                <button
+                  className="tool"
+                  disabled={!hasDocument}
+                  onClick={() => action("redact")}
+                >
+                  <Shield size={20} />
+                  <span>墨消しを適用</span>
+                </button>
+              </div>
+            )}
           </div>
-        )}
-        {category === "ページ管理" && (
-          <div className="tool-group">
-            {[
-              { id: "rotate", label: "回転", icon: RotateCw },
-              { id: "duplicate", label: "複製", icon: Copy },
-              { id: "delete", label: "削除", icon: Trash2 },
-              { id: "blank", label: "空白ページ", icon: FilePlus2 },
-              { id: "merge", label: "PDF追加", icon: FileStack },
-              { id: "extract", label: "抽出", icon: Download },
-              { id: "split", label: "分割", icon: Scissors },
-              { id: "splitZip", label: "分割ZIP", icon: FileStack },
-              { id: "pageBatch", label: "一括操作", icon: Copy },
-              { id: "crop", label: "トリミング", icon: Square },
-            ].map((t) => (
-              <button
-                className="tool"
-                key={t.id}
-                disabled={!hasDocument}
-                onClick={() => action(t.id as Action)}
-              >
-                <t.icon size={20} />
-                <span>{t.label}</span>
-              </button>
-            ))}
-          </div>
-        )}
-        {category === "ツール" && (
-          <div className="tool-group">
-            {[
-              { id: "ocr", label: "OCR", icon: ScanText },
-              { id: "forms", label: "フォーム入力", icon: FormInput },
-              { id: "links", label: "リンク管理", icon: Link2 },
-              { id: "decorate", label: "ページ装飾", icon: Stamp },
-              { id: "metadata", label: "文書情報", icon: FileText },
-              { id: "encrypt", label: "パスワード", icon: Lock },
-            ].map((t) => (
-              <button
-                className="tool"
-                key={t.id}
-                disabled={!hasDocument}
-                onClick={() => action(t.id as Action)}
-              >
-                <t.icon size={20} />
-                <span>{t.label}</span>
-              </button>
-            ))}
-            <button
-              className={`tool ${tool === "editText" ? "active" : ""}`}
-              disabled={!hasDocument}
-              onClick={() => setTool("editText")}
-            >
-              <TextCursorInput size={20} />
-              <span>既存文字</span>
-            </button>
-            <button
-              className={`tool ${tool === "redaction" ? "active" : ""}`}
-              disabled={!hasDocument}
-              onClick={() => setTool("redaction")}
-            >
-              <Square size={20} />
-              <span>墨消し候補</span>
-            </button>
-            <button
-              className="tool"
-              disabled={!hasDocument}
-              onClick={() => action("redact")}
-            >
-              <Shield size={20} />
-              <span>墨消しを適用</span>
-            </button>
-          </div>
-        )}
-        <div className="menubar-spacer" />
-        <span className="toolbar-hint">
-          {tool === "select"
-            ? "選択・テキストをコピー"
-            : tool === "editText"
-              ? "文字をダブルクリックして編集"
-              : "ページ上でドラッグして配置"}
-        </span>
-        <ChevronDown size={14} />
-      </div>
+          <span className="toolbar-hint">{toolHint}</span>
+        </div>
+      )}
     </>
   );
 }

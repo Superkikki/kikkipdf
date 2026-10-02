@@ -1,4 +1,6 @@
+import type { SourceTextReference } from "../direct/model";
 export type ObjectKind =
+  | "direct-text"
   | "text"
   | "image"
   | "rect"
@@ -39,7 +41,9 @@ export interface EditObject extends Box {
   strokeWidth: number;
   text?: string;
   fontSize: number;
-  font: "sans" | "serif" | "mono" | "japanese";
+  font: "sans" | "serif" | "mono" | "japanese" | "custom";
+  fontId?: string;
+  sourceText?: SourceTextReference;
   bold: boolean;
   italic: boolean;
   align: "left" | "center" | "right";
@@ -75,6 +79,13 @@ export interface ImageAsset {
   bytes: Uint8Array;
   mime: "image/png" | "image/jpeg";
 }
+export interface FontAsset {
+  id: string;
+  name: string;
+  family: string;
+  format: "ttf" | "otf";
+  bytes: Uint8Array;
+}
 export interface AttachmentAsset {
   id: string;
   name: string;
@@ -94,6 +105,16 @@ export interface Metadata {
 }
 export type FieldValue = string | boolean | string[];
 export type FormKind = "text" | "checkbox" | "radio" | "dropdown" | "list";
+export interface ImportedFormEdit {
+  name?: string;
+  required?: boolean;
+  readOnly?: boolean;
+  multiline?: boolean;
+  multiSelect?: boolean;
+  /** null explicitly removes the original maximum length. */
+  maxLength?: number | null;
+  options?: string[];
+}
 export interface FormFieldModel extends Box {
   id: string;
   pageId: string;
@@ -120,11 +141,14 @@ export interface DocumentModel {
   path?: string;
   sources: Record<string, Source>;
   images: Record<string, ImageAsset>;
+  fonts?: Record<string, FontAsset>;
   attachments?: AttachmentAsset[];
   attachmentEdits?: Record<string, AttachmentEdit>;
   pages: PageModel[];
   metadata: Metadata;
   formValues: Record<string, FieldValue>;
+  /** Keys retain the immutable source field name even after a rename. */
+  importedFormEdits?: Record<string, ImportedFormEdit>;
   formFields?: FormFieldModel[];
   flattenForms?: boolean;
   bookmarks?: BookmarkModel[];

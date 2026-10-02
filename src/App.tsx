@@ -1,11 +1,13 @@
+import { useEffect, useState } from "react";
 import {
   FileText,
   FolderOpen,
   Plus,
   ArrowRight,
   ShieldCheck,
-  ChevronLeft,
   ChevronRight,
+  PanelLeft,
+  SlidersHorizontal,
   Minus,
   Plus as ZoomIn,
   X,
@@ -13,6 +15,7 @@ import {
   Images,
 } from "lucide-react";
 import { useWorkspace } from "./editor/useWorkspace";
+import { PageNavigation } from "./components/PageNavigation";
 import { Toolbar } from "./components/Toolbar";
 import { Sidebar } from "./components/Sidebar";
 import { Properties } from "./components/Properties";
@@ -26,7 +29,12 @@ import { isTauri } from "./platform/files";
 export function App() {
   const w = useWorkspace();
   const doc = w.document;
-  const index = doc?.pages.findIndex((p) => p.id === w.active) ?? 0;
+  const index = Math.max(0, doc?.pages.findIndex((p) => p.id === w.active) ?? 0);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [showProperties, setShowProperties] = useState(() => window.innerWidth > 1150);
+  useEffect(() => {
+    if (w.selected) setShowProperties(true);
+  }, [w.selected]);
   return (
     <div
       className="app"
@@ -65,12 +73,38 @@ export function App() {
         <>
           <div className="document-tab">
             <FileText size={16} />
-            <strong>{doc.name}</strong>
+            <strong title={doc.name}>{doc.name}</strong>
             {w.dirty && <span className="unsaved-dot" title="未保存の変更" />}
             <span className="tab-type">PDF</span>
+            <div className="document-panel-controls">
+              <button
+                aria-label="サイドバー"
+                aria-expanded={showSidebar}
+                aria-controls="document-sidebar"
+                className={showSidebar ? "active" : ""}
+                title={showSidebar ? "サイドバーを閉じる" : "サイドバーを表示"}
+                onClick={() => setShowSidebar(!showSidebar)}
+              >
+                <PanelLeft size={16} />
+                <span>サイドバー</span>
+              </button>
+              <button
+                aria-label="プロパティパネル"
+                aria-expanded={showProperties}
+                aria-controls="document-properties"
+                className={showProperties ? "active" : ""}
+                title={showProperties ? "プロパティを閉じる" : "プロパティを表示"}
+                onClick={() => setShowProperties(!showProperties)}
+              >
+                <SlidersHorizontal size={16} />
+                <span>プロパティ</span>
+              </button>
+            </div>
           </div>
           <main className="workspace" inert={!!w.busy}>
             <Sidebar
+              hidden={!showSidebar}
+              onClose={() => setShowSidebar(false)}
               model={doc}
               active={w.active}
               jump={w.jump}
@@ -94,7 +128,12 @@ export function App() {
               }}
               onError={w.report}
             />
-            <Properties page={w.page} selected={w.selected} />
+            <Properties
+              page={w.page}
+              selected={w.selected}
+              hidden={!showProperties}
+              onClose={() => setShowProperties(false)}
+            />
           </main>
         </>
       ) : (
@@ -183,41 +222,17 @@ export function App() {
         </main>
       )}
       <footer className="statusbar">
-        <span className="status-message">
+        <span className="status-message" title={w.status}>
           <span className="local-dot" />
           {w.status}
         </span>
         {doc && (
           <>
-            <div className="page-navigation">
-              <button
-                title="前のページ"
-                disabled={index <= 0}
-                onClick={() => w.jump(doc.pages[index - 1].id)}
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <input
-                aria-label="ページ番号"
-                type="number"
-                min="1"
-                max={doc.pages.length}
-                value={index + 1}
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  if (n >= 1 && n <= doc.pages.length)
-                    w.jump(doc.pages[n - 1].id);
-                }}
-              />
-              <span>/ {doc.pages.length}</span>
-              <button
-                title="次のページ"
-                disabled={index >= doc.pages.length - 1}
-                onClick={() => w.jump(doc.pages[index + 1].id)}
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
+            <PageNavigation
+              index={index}
+              count={doc.pages.length}
+              jump={(n) => w.jump(doc.pages[n].id)}
+            />
             <div className="zoom-controls">
               <button
                 title="縮小"

@@ -1,5 +1,6 @@
 import {
   SlidersHorizontal,
+  X,
   Trash2,
   Bold,
   Italic,
@@ -10,48 +11,98 @@ import {
 import type { EditObject, PageModel } from "../state/model";
 import { documentStore } from "../state/store";
 import { pasteObject, reorderObject } from "../editor/objectActions";
-import { deleteObject, updateObject } from "../commands/document";
+import {
+  deleteObject,
+  updateObject,
+  revertDirectText,
+} from "../commands/document";
 import { LinkTargetEditor } from "../links/LinkTargetEditor";
 import { useTextLayout } from "../text/useTextLayout";
+import { FontPicker } from "../fonts/FontPicker";
 export function Properties({
   page,
   selected,
+  hidden = false,
+  onClose,
 }: {
+  hidden?: boolean;
+  onClose?: () => void;
   page?: PageModel;
   selected: string | null;
 }) {
   const o = page?.objects.find((o) => o.id === selected);
   const { layout, error: layoutError } = useTextLayout(
-    o?.kind === "text" || o?.kind === "replacement" ? o : undefined,
+    o?.kind === "text" || o?.kind === "replacement" || o?.kind === "direct-text"
+      ? o
+      : undefined,
+    false,
+    o?.fontId ? documentStore.document?.fonts?.[o.fontId] : undefined,
   );
   const patch = (p: Partial<EditObject>) => {
     if (page && o) documentStore.execute(updateObject(page.id, o.id, p));
   };
   return (
-    <aside className="properties">
+    <aside
+      className="properties"
+      id="document-properties"
+      aria-label="プロパティ"
+      hidden={hidden}
+    >
       <div className="side-heading">
         <strong>プロパティ</strong>
-        <SlidersHorizontal size={16} />
+        <button
+          className="panel-close"
+          title="プロパティを閉じる"
+          onClick={onClose}
+        >
+          <X size={16} />
+        </button>
       </div>
       {o ? (
         <div className="property-content">
           <div className="object-type">
             {o.kind === "ocr"
               ? "OCRの認識文字を校正"
-              : o.kind === "replacement"
-                ? "既存テキストの見た目を編集"
-                : o.kind === "note"
-                  ? "付箋コメント"
-                  : o.kind === "redaction"
-                    ? "墨消し候補"
-                    : o.kind === "image"
-                      ? "画像"
-                      : "オブジェクト"}
+              : o.kind === "direct-text"
+                ? "既存テキストを直接編集"
+                : o.kind === "replacement"
+                  ? "既存テキストの見た目を編集"
+                  : o.kind === "note"
+                    ? "付箋コメント"
+                    : o.kind === "redaction"
+                      ? "墨消し候補"
+                      : o.kind === "image"
+                        ? "画像"
+                        : o.kind === "text"
+                          ? "テキスト"
+                          : o.kind === "rect"
+                            ? "矩形"
+                            : o.kind === "ellipse"
+                              ? "円"
+                              : o.kind === "line"
+                                ? "直線"
+                                : o.kind === "arrow"
+                                  ? "矢印"
+                                  : "オブジェクト"}
           </div>
           {o.kind === "replacement" && (
             <p className="warning small">
               元の文字情報は残ります。機密情報の削除には墨消しを使ってください。
             </p>
+          )}
+          {o.kind === "direct-text" && (
+            <>
+              <p className="hint">
+                対象の元文字描画命令を置換・削除します。他の箇所や注釈の文字は残ります。機密情報の削除には墨消しを使ってください。
+              </p>
+              <button
+                onClick={() =>
+                  page && documentStore.execute(revertDirectText(page.id, o.id))
+                }
+              >
+                元の文字に戻す
+              </button>
+            </>
           )}
           {o.kind === "ocr" && (
             <p className="hint">
@@ -108,24 +159,17 @@ export function Properties({
             </div>
             <span className="hint">単位: pt（1/72インチ）</span>
           </div>
-          {["text", "replacement", "ocr"].includes(o.kind) && (
+          {["text", "replacement", "ocr", "direct-text"].includes(o.kind) && (
             <div className="property-group">
               <h3>テキスト</h3>
-              <label>
-                フォント
-                <select
-                  aria-label="フォント"
-                  value={o.font}
-                  onChange={(e) =>
-                    patch({ font: e.target.value as EditObject["font"] })
-                  }
-                >
-                  <option value="japanese">Noto Sans JP（日本語）</option>
-                  <option value="sans">Helvetica</option>
-                  <option value="serif">Times</option>
-                  <option value="mono">Courier</option>
-                </select>
-              </label>
+              {page && (
+                <FontPicker
+                  key={o.id}
+                  object={o}
+                  pageId={page.id}
+                  patch={patch}
+                />
+              )}
               <div className="row">
                 <label>
                   サイズ
@@ -170,7 +214,9 @@ export function Properties({
                   <option value="right">右揃え</option>
                 </select>
               </label>
-              {(o.kind === "text" || o.kind === "replacement") && (
+              {(o.kind === "text" ||
+                o.kind === "replacement" ||
+                o.kind === "direct-text") && (
                 <>
                   <label className="text-wrap-control">
                     <input
@@ -272,7 +318,7 @@ export function Properties({
                   }
                 />
               </label>
-              {["image", "text"].includes(o.kind) && (
+              {["image", "text", "direct-text"].includes(o.kind) && (
                 <label>
                   回転
                   <input
@@ -296,7 +342,13 @@ export function Properties({
                     ? documentStore.document?.images[o.imageId]
                     : undefined;
                   documentStore.execute(
-                    pasteObject(page.id, { object: o, image }).command,
+                    pasteObject(page.id, {
+                      object: o,
+                      image,
+                      font: o.fontId
+                        ? documentStore.document?.fonts?.[o.fontId]
+                        : undefined,
+                    }).command,
                   );
                 }
               }}

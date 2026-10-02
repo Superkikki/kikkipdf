@@ -1,7 +1,8 @@
 /// <reference lib="webworker" />
 import { PDFDocument, type PDFFont } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
-import { embedTextFont, fontKey } from "./fonts";
+import { embedTextFont, fontKey, assertGlyphs } from "./fonts";
+import type { FontAsset } from "../state/model";
 import { layoutText, type TextStyle } from "./layout";
 
 const document = PDFDocument.create().then((doc) => {
@@ -10,7 +11,9 @@ const document = PDFDocument.create().then((doc) => {
 });
 const fonts = new Map<string, Promise<PDFFont>>();
 let japanese: Promise<Uint8Array> | undefined;
-self.onmessage = async (e: MessageEvent<{ id: number; style: TextStyle }>) => {
+self.onmessage = async (
+  e: MessageEvent<{ id: number; style: TextStyle; font?: FontAsset }>,
+) => {
   const { id, style } = e.data;
   try {
     const key = fontKey(style);
@@ -30,12 +33,14 @@ self.onmessage = async (e: MessageEvent<{ id: number; style: TextStyle }>) => {
           await document,
           style,
           style.font === "japanese" ? await japanese : undefined,
+          e.data.font,
         );
       })();
       fonts.set(key, pending);
       pending.catch(() => fonts.delete(key));
     }
     const font = await pending;
+    if (style.font === "custom") assertGlyphs(font, style.text ?? "");
     postMessage({
       id,
       result: layoutText(style, (text) =>

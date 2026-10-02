@@ -223,7 +223,7 @@ test("fills a form, replaces existing text, and reads saved Japanese comments", 
     .getByLabel("Accepted", { exact: true })
     .check();
   await page.getByRole("button", { name: "完了", exact: true }).click();
-  await page.getByRole("button", { name: "既存文字", exact: true }).click();
+  await page.getByRole("button", { name: "見た目の置換", exact: true }).click();
   await page
     .locator(".viewer-scroll .textLayer span")
     .filter({ hasText: "Replace this text" })

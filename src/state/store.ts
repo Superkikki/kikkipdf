@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { History, type Command } from "../commands/history";
 import type { DocumentModel } from "./model";
+import { resetTextLayout } from "../text/client";
 let history: History | null = null;
 let version = 0;
 const listeners = new Set<() => void>();
@@ -16,6 +17,7 @@ export const documentStore = {
     return history?.current.document ?? null;
   },
   load(document: DocumentModel, recovered = false) {
+    resetTextLayout();
     history = new History(document);
     if (recovered) history.markRecovered();
     emit();
@@ -38,6 +40,7 @@ export const documentStore = {
     emit();
   },
   clear() {
+    resetTextLayout();
     history = null;
     emit();
   },

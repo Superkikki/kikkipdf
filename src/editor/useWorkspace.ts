@@ -931,7 +931,7 @@ export function useWorkspace() {
           const paths = await invoke<string[]>("startup_documents");
           if (paths.length)
             await latest.current.openFiles(
-              await Promise.all(paths.map(readPath)),
+              await Promise.all(paths.map((path) => readPath(path))),
             );
         }
       })
@@ -985,6 +985,9 @@ export function useWorkspace() {
             e.preventDefault();
             const data = {
               object: current,
+              font: current.fontId
+                ? documentStore.document?.fonts?.[current.fontId]
+                : undefined,
               image: current.imageId
                 ? documentStore.document?.images[current.imageId]
                 : undefined,
@@ -1088,7 +1091,7 @@ export function useWorkspace() {
     const offDrop = getCurrentWindow().onDragDropEvent((e) => {
       if (e.payload.type === "drop" && !busyRef.current) {
         const paths = e.payload.paths.filter((p) => /\.(pdf|kpdf)$/i.test(p));
-        void Promise.all(paths.map(readPath))
+        void Promise.all(paths.map((path) => readPath(path)))
           .then((files) => latest.current.openFiles(files))
           .catch(() => report("ドロップしたPDFを読み込めません。"));
       }

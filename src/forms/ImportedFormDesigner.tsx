@@ -5,6 +5,8 @@ import { pageSize } from "../state/model";
 import { documentStore } from "../state/store";
 import { PageView } from "../viewer/PageView";
 import { resetFormWidget, updateFormWidget } from "./commands";
+import { resolveImportedForm } from "./importedSettings";
+import { ImportedFormSettings } from "./ImportedFormSettings";
 
 export function ImportedFormDesigner({
   model,
@@ -26,7 +28,8 @@ export function ImportedFormDesigner({
             key: JSON.stringify([page.id, widget.id]),
             page,
             index,
-            field,
+            field: resolveImportedForm(field, model),
+            original: field,
             widget,
           })),
       ),
@@ -41,7 +44,7 @@ export function ImportedFormDesigner({
   return (
     <section
       className="imported-form-designer"
-      aria-label="既存フォームの配置編集"
+      aria-label="既存フォームの編集"
       tabIndex={-1}
       onKeyDown={(e) => {
         if (
@@ -58,23 +61,23 @@ export function ImportedFormDesigner({
         }
       }}
     >
-      <h3>既存フォームの配置</h3>
+      <h3>既存フォームの編集</h3>
       <div className="form-kind-buttons">
         <button
           disabled={!documentStore.history?.canUndo}
           onClick={() => documentStore.undo()}
         >
-          配置編集を元に戻す
+          既存フォーム編集を元に戻す
         </button>
         <button
           disabled={!documentStore.history?.canRedo}
           onClick={() => documentStore.redo()}
         >
-          配置編集をやり直す
+          既存フォーム編集をやり直す
         </button>
       </div>
       <p className="notice">
-        入力欄を選び、プレビューで移動・右下のハンドルでサイズ変更できます。座標は回転前のページ左上からのptです。同じ項目の値は共有し、配置は各欄ごとに変更します。
+        入力欄を選び、設定を変更するか、プレビューで移動・サイズ変更できます。座標は回転前のページ左上からのptです。同じ項目の値と設定は共有し、配置は各欄ごとに変更します。
       </p>
       {!widgets.length ? (
         <p>この文書に配置できる既存フォームはありません。</p>
@@ -98,6 +101,14 @@ export function ImportedFormDesigner({
           </label>
           {entry && box && (
             <>
+              <ImportedFormSettings
+                key={JSON.stringify([
+                  entry.field.key,
+                  model.importedFormEdits?.[entry.field.key],
+                ])}
+                model={model}
+                field={entry.original}
+              />
               <div className="property-grid">
                 {(["x", "y", "width", "height"] as const).map((key) => (
                   <label key={key}>

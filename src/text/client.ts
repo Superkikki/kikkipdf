@@ -1,12 +1,26 @@
 import type { TextLayout, TextStyle } from "./layout";
+import type { FontAsset } from "../state/model";
 let worker: Worker | undefined;
+const registered = new Map<string, number>();
 let serial = 0;
 const pending = new Map<
   number,
   { resolve: (result: TextLayout) => void; reject: (error: Error) => void }
 >();
 const inflight = new Map<string, Promise<TextLayout>>();
-export function requestTextLayout(style: TextStyle): Promise<TextLayout> {
+export function requestTextLayout(
+  style: TextStyle,
+  asset?: FontAsset,
+): Promise<TextLayout> {
+  if (
+    asset &&
+    !registered.has(asset.id) &&
+    (registered.size >= 32 ||
+      [...registered.values()].reduce((n, length) => n + length, 0) +
+        asset.bytes.length >
+        128 * 1024 * 1024)
+  )
+    resetTextLayout();
   const key = JSON.stringify(style);
   const existing = inflight.get(key);
   if (existing) return existing;
@@ -14,13 +28,15 @@ export function requestTextLayout(style: TextStyle): Promise<TextLayout> {
   const id = ++serial;
   const promise = new Promise<TextLayout>((resolve, reject) => {
     pending.set(id, { resolve, reject });
-    worker!.postMessage({ id, style });
+    const font = asset && !registered.has(asset.id) ? asset : undefined;
+    if (font) registered.set(font.id, font.bytes.length);
+    worker!.postMessage({ id, style, font });
   });
   inflight.set(key, promise);
-  promise.then(
-    () => inflight.delete(key),
-    () => inflight.delete(key),
-  );
+  const clear = () => {
+    if (inflight.get(key) === promise) inflight.delete(key);
+  };
+  promise.then(clear, clear);
   return promise;
 }
 function createWorker() {
@@ -37,11 +53,16 @@ function createWorker() {
     else entry?.resolve(result);
   };
   instance.onerror = () => {
-    for (const entry of pending.values())
-      entry.reject(Error("文字レイアウトWorkerでエラーが発生しました。"));
-    pending.clear();
-    instance.terminate();
-    worker = undefined;
+    resetTextLayout();
   };
   return instance;
+}
+export function resetTextLayout() {
+  for (const entry of pending.values())
+    entry.reject(Error("文字レイアウト処理を終了しました。"));
+  pending.clear();
+  inflight.clear();
+  registered.clear();
+  worker?.terminate();
+  worker = undefined;
 }

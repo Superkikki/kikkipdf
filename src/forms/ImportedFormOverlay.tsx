@@ -12,6 +12,7 @@ import { screenToPage } from "../viewer/coordinates";
 import { useImportedForms } from "./useImportedForms";
 import { updateFormWidget } from "./commands";
 import { FormOverlay } from "./FormOverlay";
+import { resolveImportedForm } from "./importedSettings";
 
 export interface FormEditSelection {
   widgetId: string;
@@ -42,6 +43,7 @@ export function ImportedFormOverlay({
     | undefined
   >(undefined);
   const widgets = fields
+    .map((f) => resolveImportedForm(f, model))
     .filter((f) => f.sourceId === page.sourceId)
     .flatMap((field) =>
       field.widgets
@@ -177,10 +179,10 @@ export function ImportedFormOverlay({
     pageId: page.id,
     name: field.name,
     kind: field.kind,
-    value: model.formValues[field.key] ?? field.value,
+    value: field.value,
     options: field.kind === "radio" ? [widget.option ?? ""] : field.options,
     fontSize: field.fontSize,
-    required: false,
+    required: !!field.required,
     readOnly: !!field.readOnly,
     multiline: !!field.multiline,
     multiSelect: field.multiSelect,

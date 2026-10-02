@@ -1,6 +1,15 @@
 import { z } from "zod";
+import {
+  importedFormEditSchema,
+  resolveImportedForm,
+  validateImportedFormEdit,
+} from "../forms/importedSettings";
+import { inspectForms } from "../export/engine";
 import { zipSync, unzipSync, strToU8, strFromU8 } from "fflate";
 import type { BookmarkModel, DocumentModel } from "./model";
+import { inspectFont } from "../fonts/inspect";
+import { checkFontBudget, MAX_FONT_BYTES } from "../fonts/budget";
+import { directReferences } from "../direct/model";
 
 const id = z
   .string()
@@ -33,6 +42,7 @@ const object = z.object({
   ...box,
   id,
   kind: z.enum([
+    "direct-text",
     "text",
     "image",
     "rect",
@@ -55,7 +65,31 @@ const object = z.object({
   strokeWidth: number.min(0).max(1000),
   text: text.optional(),
   fontSize: number.positive().max(10000),
-  font: z.enum(["sans", "serif", "mono", "japanese"]),
+  font: z.enum(["sans", "serif", "mono", "japanese", "custom"]),
+  fontId: z
+    .string()
+    .regex(/^font-[a-f0-9]{64}$/)
+    .optional(),
+  sourceText: z
+    .object({
+      sourceId: id,
+      sourceIndex: z.number().int().min(0).max(100000),
+      contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+      operatorIndex: z.number().int().min(0).max(200000),
+      originalText: text,
+      additional: z
+        .array(
+          z.object({
+            sourceIndex: z.number().int().min(0).max(100000),
+            contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+            operatorIndex: z.number().int().min(0).max(200000),
+            originalText: text,
+          }),
+        )
+        .max(200000)
+        .optional(),
+    })
+    .optional(),
   bold: z.boolean(),
   italic: z.boolean(),
   align: z.enum(["left", "center", "right"]),
@@ -89,6 +123,19 @@ const schema = z.object({
       id,
       z.object({ ...asset, mime: z.enum(["image/png", "image/jpeg"]) }),
     ),
+    fonts: z
+      .record(
+        id,
+        z.object({
+          id,
+          name: z.string().max(1000),
+          family: z.string().max(1000),
+          format: z.enum(["ttf", "otf"]),
+          file: z.string().regex(/^fonts\/\d+\.(ttf|otf)$/),
+          sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        }),
+      )
+      .optional(),
     attachments: z
       .array(z.object({ ...asset, description: text }))
       .max(10000)
@@ -143,6 +190,9 @@ const schema = z.object({
       keywords: text,
     }),
     formValues: z.record(z.string(), value),
+    importedFormEdits: z
+      .record(z.string().max(1500), importedFormEditSchema)
+      .optional(),
     formFields: z
       .array(
         z.object({
@@ -179,6 +229,9 @@ const hash = async (bytes: Uint8Array) =>
 
 /** Self-contained editable document, with no native paths or passwords. Runs in the export Worker. */
 export async function saveProject(model: DocumentModel): Promise<Uint8Array> {
+  await checkImportedFormSettings(model);
+  checkFontBudget(model.fonts ?? {});
+  for (const page of model.pages) directReferences(page);
   const files: Record<string, Uint8Array> = {},
     sources: Record<
       string,
@@ -191,7 +244,27 @@ export async function saveProject(model: DocumentModel): Promise<Uint8Array> {
   const attachments: NonNullable<
     z.infer<typeof schema>["document"]["attachments"]
   > = [];
+  const fonts: NonNullable<z.infer<typeof schema>["document"]["fonts"]> = {};
   let total = 0;
+  for (const [i, f] of Object.values(model.fonts ?? {}).entries()) {
+    const checked = await inspectFont(f.bytes, f.name);
+    if (checked.id !== f.id) throw Error("フォントの整合性エラー");
+    const file = `fonts/${i}.${checked.format}`;
+    files[file] = f.bytes;
+    total += f.bytes.length;
+    fonts[f.id] = {
+      id: f.id,
+      name: checked.name,
+      family: checked.family,
+      format: checked.format,
+      file,
+      sha256: f.id.slice(5),
+    };
+  }
+  for (const p of model.pages)
+    for (const o of p.objects)
+      if (o.font === "custom" && (!o.fontId || !fonts[o.fontId]))
+        throw Error("参照フォントがありません。");
   for (const [i, s] of Object.values(model.sources).entries()) {
     const file = `sources/${i}.pdf`;
     files[file] = s.bytes;
@@ -234,7 +307,7 @@ export async function saveProject(model: DocumentModel): Promise<Uint8Array> {
   const manifest = schema.parse({
     format: "kikki-pdf-project",
     version: 1,
-    document: { ...model, sources, images, attachments },
+    document: { ...model, sources, images, attachments, fonts },
   });
   files["document.json"] = strToU8(JSON.stringify(manifest));
   return zipSync(files, { level: 1 });
@@ -243,7 +316,9 @@ export async function saveProject(model: DocumentModel): Promise<Uint8Array> {
 export async function openProject(bytes: Uint8Array): Promise<DocumentModel> {
   try {
     let total = 0,
-      count = 0;
+      count = 0,
+      fontCount = 0,
+      fontTotal = 0;
     const names = new Set<string>();
     const files = unzipSync(bytes, {
       filter(file) {
@@ -252,11 +327,21 @@ export async function openProject(bytes: Uint8Array): Promise<DocumentModel> {
           names.has(file.name) ||
           !(
             /^(sources|images|attachments)\/\d+\.(pdf|bin)$/.test(file.name) ||
+            /^fonts\/\d+\.(ttf|otf)$/.test(file.name) ||
             file.name === "document.json"
           )
         )
           throw Error("不正なアーカイブ項目");
         names.add(file.name);
+        if (file.name.startsWith("fonts/")) {
+          fontTotal += file.originalSize;
+          if (
+            ++fontCount > 32 ||
+            file.originalSize > MAX_FONT_BYTES ||
+            fontTotal > 128 * 1024 * 1024
+          )
+            throw Error("フォントのサイズ上限を超えています");
+        }
         total += file.originalSize;
         if (
           total > MAX_BYTES ||
@@ -283,8 +368,19 @@ export async function openProject(bytes: Uint8Array): Promise<DocumentModel> {
       ...d,
       sources: {},
       images: {},
+      fonts: {},
       attachments: [],
     };
+    for (const [key, f] of Object.entries(d.fonts ?? {})) {
+      const data = files[f.file];
+      if (!data || key !== f.id || key !== `font-${f.sha256}`)
+        throw Error("フォントの整合性エラー");
+      const asset = await inspectFont(data, f.name);
+      if (asset.id !== key || asset.format !== f.format)
+        throw Error("フォントの整合性エラー");
+      model.fonts![key] = asset;
+    }
+    checkFontBudget(model.fonts!);
     for (const [key, s] of Object.entries(d.sources)) {
       const data = files[s.file];
       if (key !== s.id || !data || (await hash(data)) !== s.sha256)
@@ -319,14 +415,26 @@ export async function openProject(bytes: Uint8Array): Promise<DocumentModel> {
     if (pages.size !== model.pages.length)
       throw Error("ページIDが重複しています");
     for (const page of model.pages) {
+      directReferences(page);
       if (page.sourceId && !model.sources[page.sourceId])
         throw Error("参照元PDFがありません");
-      for (const o of page.objects)
+      for (const o of page.objects) {
+        if (
+          o.kind === "direct-text" &&
+          (!o.sourceText ||
+            o.sourceText.sourceId !== page.sourceId ||
+            o.sourceText.sourceIndex !== page.sourceIndex)
+        )
+          throw Error("直接編集の参照先が不正です");
         if (o.imageId && !model.images[o.imageId])
           throw Error("参照画像がありません");
+        if (o.font === "custom" && (!o.fontId || !model.fonts?.[o.fontId]))
+          throw Error("参照フォントがありません");
+      }
     }
     if (model.formFields?.some((f) => !pages.has(f.pageId)))
       throw Error("フォームの配置ページがありません");
+    await checkImportedFormSettings(model);
     // Native paths from the archive are intentionally not part of the schema.
     return model;
   } catch (error) {
@@ -335,6 +443,24 @@ export async function openProject(bytes: Uint8Array): Promise<DocumentModel> {
         ? "編集プロジェクトの形式またはバージョンが不正です。"
         : `編集プロジェクトを開けません: ${error instanceof Error ? error.message : "データが不正です"}`,
     );
+  }
+}
+
+async function checkImportedFormSettings(model: DocumentModel) {
+  const edits = Object.entries(model.importedFormEdits ?? {});
+  if (!edits.length) return;
+  const fields = new Map((await inspectForms(model)).map((f) => [f.key, f]));
+  for (const [key, edit] of edits) {
+    const field = fields.get(key);
+    if (!field) throw Error("設定を変更した既存フォームの参照先がありません。");
+    validateImportedFormEdit(field, edit);
+    const resolved = resolveImportedForm(field, model);
+    if (
+      field.kind === "text" &&
+      resolved.maxLength !== undefined &&
+      String(resolved.value).length > resolved.maxLength
+    )
+      throw Error("既存フォームの入力値が最大文字数を超えています。");
   }
 }
 

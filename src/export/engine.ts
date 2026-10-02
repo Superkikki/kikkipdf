@@ -30,8 +30,11 @@ import { widgetKey } from "../forms/commands";
 import { APP_NAME } from "../config";
 import fontkit from "@pdf-lib/fontkit";
 import type { DocumentModel, EditObject } from "../state/model";
-import { embedTextFont, fontKey } from "../text/fonts";
+import { embedTextFont, fontKey, assertGlyphs } from "../text/fonts";
 import { layoutText } from "../text/layout";
+import { inspectFont } from "../fonts/inspect";
+import { checkFontBudget } from "../fonts/budget";
+import { directReferences } from "../direct/model";
 export interface ExportOptions {
   indices?: number[];
 }
@@ -50,13 +53,27 @@ export async function exportPdf(
   progress: (v: number) => void = () => {},
 ): Promise<Uint8Array> {
   const output = await PDFDocument.create();
+  checkFontBudget(model.fonts ?? {});
   output.registerFontkit(fontkit);
   const fonts = new Map<string, PDFFont>();
   const fontFor = async (o: EditObject) => {
     const key = fontKey(o);
     let f = fonts.get(key);
     if (!f) {
-      f = await embedTextFont(output, o, fontBytes);
+      if (o.font === "custom") {
+        const asset = o.fontId ? model.fonts?.[o.fontId] : undefined;
+        if (
+          !asset ||
+          (await inspectFont(asset.bytes, asset.name)).id !== asset.id
+        )
+          throw Error("登録フォントの整合性エラー");
+      }
+      f = await embedTextFont(
+        output,
+        o,
+        fontBytes,
+        o.fontId ? model.fonts?.[o.fontId] : undefined,
+      );
       fonts.set(key, f);
     }
     return f;
@@ -69,6 +86,7 @@ export async function exportPdf(
   );
   const transfers = new Map<string, FormTransfer>();
   const names = new Set<string>();
+  const importedKeys = new Set<string>();
   let formFont: PDFFont | undefined;
   const getFormFont = async () =>
     (formFont ??= await output.embedFont(fontBytes ?? StandardFonts.Helvetica, {
@@ -81,7 +99,10 @@ export async function exportPdf(
       throw Error(
         "XFAフォームには対応していません。標準AcroFormのPDFを使用してください。",
       );
-    if (input.getForm().getFields().length) {
+    const sourceFields = input.getForm().getFields();
+    for (const field of sourceFields)
+      importedKeys.add(`${source.id}:${field.getName()}`);
+    if (sourceFields.length) {
       const transfer = new FormTransfer(
         input,
         output,
@@ -94,15 +115,22 @@ export async function exportPdf(
     await input.flush();
     copiers.set(source.id, new PageCopier(input, output, attachments));
   }
+  if (
+    Object.keys(model.importedFormEdits ?? {}).some(
+      (key) => !importedKeys.has(key),
+    )
+  )
+    throw Error("設定を変更した既存フォームの参照先がありません。");
   const indices = options.indices ?? model.pages.map((_, i) => i);
   const pageMap = new Map<string, PDFPage>();
   for (let n = 0; n < indices.length; n++) {
     const p = model.pages[indices[n]];
+    directReferences(p);
     let page: PDFPage;
     if (p.sourceId) {
       const copier = copiers.get(p.sourceId);
       if (!copier) throw Error("参照元のPDFが見つかりません。");
-      page = copier.copy(p);
+      page = await copier.copy(p);
     } else page = output.addPage([p.width, p.height]);
     if (!pageMap.has(p.id)) pageMap.set(p.id, page);
     if (p.sourceId) transfers.get(p.sourceId)?.attach(p, page);
@@ -124,7 +152,8 @@ export async function exportPdf(
         fill = o.fill === "none" ? undefined : color(o.fill);
       const x = px(o.x),
         y = py(o.y + o.height);
-      if (["text", "replacement", "ocr"].includes(o.kind)) {
+      if (["text", "replacement", "ocr", "direct-text"].includes(o.kind)) {
+        if (o.kind === "direct-text" && !(o.text ?? "").trim()) continue;
         if (o.kind === "replacement")
           page.drawRectangle({
             x,
@@ -140,6 +169,7 @@ export async function exportPdf(
           translate(-x, -y),
         );
         const font = await fontFor(o);
+        if (o.font === "custom") assertGlyphs(font, o.text ?? "");
         const { lines } = layoutText(
           o.kind === "ocr" ? { ...o, wrap: false, lineHeight: 1.25 } : o,
           (text) => font.widthOfTextAtSize(text, o.fontSize),
@@ -168,10 +198,14 @@ export async function exportPdf(
             font,
             color: c,
             opacity: o.kind === "ocr" ? 0 : o.opacity,
-            xSkew: degrees(o.font === "japanese" && o.italic ? 12 : 0),
+            xSkew: degrees(
+              (o.font === "japanese" || o.font === "custom") && o.italic
+                ? 12
+                : 0,
+            ),
           };
           page.drawText(line, textOptions);
-          if (o.font === "japanese" && o.bold)
+          if ((o.font === "japanese" || o.font === "custom") && o.bold)
             page.drawText(line, {
               ...textOptions,
               x: textOptions.x + o.fontSize * 0.025,
@@ -343,7 +377,9 @@ export interface FormDescriptor {
   kind: "text" | "checkbox" | "radio" | "dropdown" | "list";
   value: string | boolean | string[];
   options: string[];
+  hasExportValues?: boolean;
   readOnly?: boolean;
+  required?: boolean;
   multiline?: boolean;
   multiSelect?: boolean;
   maxLength?: number;
@@ -399,6 +435,7 @@ export async function inspectForms(
         key: `${s.id}:${f.getName()}`,
         name: f.getName(),
         readOnly: f.isReadOnly(),
+        required: f.isRequired(),
         options: [] as string[],
         sourceId: s.id,
         fontSize: Number(appearance.match(/([\d.]+)\s+Tf/)?.[1]) || 12,
@@ -428,6 +465,9 @@ export async function inspectForms(
           multiSelect: f.isMultiselect(),
           value: f.getSelected(),
           options: f.getOptions(),
+          hasExportValues: f.acroField
+            .getOptions()
+            .some((o) => o.value.decodeText() !== o.display?.decodeText()),
         });
     }
   }

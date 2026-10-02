@@ -10,10 +10,75 @@ import {
   uid,
   type DocumentModel,
   type Source,
+  type PageModel,
 } from "../state/model";
 import type { LocalFile } from "../platform/files";
+import { previewDirectPage } from "../export/client";
+import { directReferences } from "../direct/model";
 GlobalWorkerOptions.workerSrc = workerUrl;
 const cache = new Map<string, Promise<PDFDocumentProxy>>();
+interface PageLease {
+  ready: Promise<{ pdf: PDFDocumentProxy; index: number }>;
+  release(): void;
+}
+const previews = new Map<
+  string,
+  { users: number; ready: PageLease["ready"]; controller: AbortController }
+>();
+/** Share previews only while a visible viewer, thumbnail or search holds a lease. */
+export function acquirePagePdf(source: Source, page: PageModel): PageLease {
+  const refs = directReferences(page);
+  if (!refs.length)
+    return {
+      ready: sourcePdf(source).then((pdf) => ({
+        pdf,
+        index: page.sourceIndex,
+      })),
+      release() {},
+    };
+  const key = `${source.id}:${page.sourceIndex}:${JSON.stringify(refs)}`;
+  let entry = previews.get(key);
+  if (!entry) {
+    const controller = new AbortController();
+    const ready = previewDirectPage(
+      source,
+      {
+        ...page,
+        objects: page.objects.filter((o) => o.kind === "direct-text"),
+      },
+      controller.signal,
+    ).then(async (bytes) => ({
+      pdf: await getDocument({
+        data: bytes,
+        cMapUrl: "/assets/pdfjs/cmaps/",
+        cMapPacked: true,
+        standardFontDataUrl: "/assets/pdfjs/standard_fonts/",
+        wasmUrl: "/assets/pdfjs/wasm/",
+      }).promise,
+      index: 0,
+    }));
+    ready.catch(() => {});
+    entry = { ready, controller, users: 0 };
+    previews.set(key, entry);
+  }
+  entry.users++;
+  const captured = entry;
+  let released = false;
+  return {
+    ready: entry.ready,
+    release() {
+      if (released) return;
+      released = true;
+      if (--captured.users === 0) {
+        if (previews.get(key) === captured) previews.delete(key);
+        captured.controller.abort();
+        void captured.ready
+          .then(({ pdf }) => pdf.loadingTask.destroy())
+          .catch(() => {});
+      }
+    },
+  };
+}
 export function sourcePdf(source: Source): Promise<PDFDocumentProxy> {
   let p = cache.get(source.id);
   if (!p) {
@@ -29,6 +94,13 @@ export function sourcePdf(source: Source): Promise<PDFDocumentProxy> {
   return p;
 }
 export async function releasePdfs() {
+  for (const entry of previews.values()) {
+    entry.controller.abort();
+    void entry.ready
+      .then(({ pdf }) => pdf.loadingTask.destroy())
+      .catch(() => {});
+  }
+  previews.clear();
   for (const p of cache.values())
     void p.then((d) => d.loadingTask.destroy()).catch(() => {});
   cache.clear();

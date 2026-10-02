@@ -1,6 +1,62 @@
 # 検証記録
 
-対象: 0.6.0（過去版のWindows実機検証も含む）。実施日: 2026-09-15〜30。検証に使ったPDF・画像・フォームはテストコードで生成したものです。
+対象: 次期版の開発コードと0.8.2（過去版のWindows実機検証も含む）。実施日: 2026-09-15〜10-02。検証に使ったPDF・画像・フォームはテストコードで生成したものです。
+
+## 次期版のフォーム設定編集の検証（2026-10-02）
+
+- TypeScriptユニットテスト76件、Rustテスト5件、ESLint・TypeScript・Vite production buildが成功。
+- 追加ユニットテスト6件で、5種類の既存欄の名前・必須・読み取り専用、文字欄の複数行・最大文字数の変更／解除、選択肢変更に伴う値・既定値の更新、単一選択への変更を検証。
+- 元PDFを変更せず、名前変更後も共有値とWidget配置の識別子を保持すること、Undo/Redo・元の設定への復帰・ページ複製／並べ替え／抽出・結合時の名前衝突・プロジェクト保存／再読込を確認。旧プロジェクトも読み込み可能。
+- 不正な名前・選択肢・文字数制限・参照先・フィールド種類の設定を拒否。表示名と保存値が異なる選択欄では、名前・フラグ編集で元の値と選択肢を保持し、選択肢／複数選択の変更は拒否することを確認。
+- Playwright E2E全32件が成功。新規2件で画面の入力制限の拒否、設定一括適用、共有欄、Undo/Redo、プロジェクトの再読込、保存PDFを開いた後の再入力を検証。既存フォーム配置・固定保存・OCR・フォント・既存文字編集などの回帰確認も成功。
+- この変更のWindows実機テストとインストーラーの再生成は未実施。配布済み0.8.2のファイルには今回の変更を含まない。
+
+## 0.8.2の検証（2026-10-02）
+
+- ESLint・TypeScript・Vite production build、Windows MSVC releaseビルドとNSIS生成が成功。UI・Rustの挙動に変更はなく、文書読み込みのテスト結果は0.8.1を参照。
+- 製品と同じNSISフックをテスト専用のProgID・アプリ名でWindows上で実行。登録、二度目の登録、日本語と空白を含むexeパスの引用符、PDF / KPDFのOpenWithProgids・Capabilities・RegisteredApplicationsを確認。
+- 現在の拡張子の既定値、他アプリのOpenWithProgids、UserChoice（ProgID・Hash）の保持を確認。古いインストール先からの削除では新しい登録を保持し、正しいインストール先からの削除では自分の登録だけを削除。テスト登録・一時exeを最後に削除。
+- インストール済み0.8.0にも同じフックで候補登録を追加。PDF / KPDFの起動先がインストール済みexeを指し、現在のPDF既定アプリ（MSEdgePDF）を保持したことを確認。Windows設定画面は開いたが、UI Automationではタイトルバーだけを取得できたため、候補の画面表示と既定アプリの変更は未検証。
+- 配布exeは22,863,323 bytes、SHA-256は `16bb773d5b028b5892101549e9cf61762e4aa8195c6d198cb9b5a38282e199ec`。ZIPは22,823,800 bytes、SHA-256は `25c6191eae49f1b4ce606bca8ccdc3eefbb52ea9b838345d528dd8701762ee6a`。
+
+## 0.8.1の検証（2026-10-01〜10-02）
+
+- TypeScriptユニットテスト70件、Playwright E2E全30件が成功。ESLint・TypeScript・Vite production buildも成功。Rust実装の変更はなく、前版のRustテスト5件の結果を参照。
+- 右クリックした図形を選択してその場で削除し、Undo/Redo・保存に反映するE2Eを追加。保存PDFのページ描画命令に削除した矩形が残らず、別の円は保持されることを確認。
+- 描画ツールの選択中、回転・ズームした2ページ目の右クリックでページを切り替え、余分な図形やUndo履歴が生成されないことを確認。Esc・外側クリック・スクロールで閉じ、矢印キーで図形が移動しないこと、Deleteで一度だけ削除すること、ダークモード・画面端での配置も検証。
+- Windows MSVC productionビルドとdebugビルドに成功し、NSISを生成。配布exeは22,826,864 bytes、SHA-256は `d8f5d9d3d4f69f71185567d5ffd4cdfc5a1e1c6e13605428dd703734927ffd3c`。ビルド出力とのバイト列一致を確認。
+- 圧縮ZIPは22,785,766 bytes、SHA-256は `a82733428b7b0f5e27bee8a6e8221f6cf26e9c2a24ee544aa9129820519b0654`。ZIP整合性を確認。
+- Windows release版を対話デスクトップで実際に起動し、図形の右クリック削除・Undo/Redo・ネイティブ保存を確認。従来の既存文字直接編集、ローカルTTF、日本語/英語OCR、暗号化/復号、フォーム配置、日本語フォーム、しおり、添付、リンク、OCR校正、一括回転も成功。テスト本体140秒、JavaScriptエラー0件。
+- Windows debug版 + Vite開発モードでも、右クリック削除・Undo/Redo・ネイティブ保存を実機で検証。保存PDFのページ描画命令に削除した矩形が残らないことを確認。対象機能の短縮テスト本体2秒、JavaScriptエラー0件。
+
+## 0.8.0の検証（2026-10-01）
+
+- TypeScriptユニットテスト70件、Rustテスト5件が成功。Playwright E2E全28件が成功し、ストリーム境界の強化後に直接編集・ワークスペースの10件、最終のフォント幅・UserUnit対象判定後に直接編集4件を再実行して成功。ESLint・TypeScript・Vite production buildも成功。
+- PDF字句解析の文字列・エスケープ・8進/16進・ネスト・境界・サイズ制限と、ToUnicodeのbfchar/bfrange・サロゲート・合字を検証。不正な項目数・重複・未完了マップ・不正Unicodeを拒否。
+- UserUnitが1以外のページを拒否し、幅情報のないTrueTypeをBaseFont名だけで推測しないことを検証。標準14書体の未埋め込みType1だけが標準の幅を使用する。
+- 元フォントの幅、Tc/Tw/Tz/Ts、CTM、Tj/TJ、引用符の改行を含む文字を除去し、後続文字の位置が小数7桁で一致することを確認。Identity-Hの日本語と元CropBox原点も検証。
+- 保存PDFの全間接ストリームで対象の元ASCII文字列とその16進文字列が残らないこと、新文字と未変更文字を解析できること、背景マスク用の矩形が追加されないことを確認。独立した未編集の複製ページは元文字を保持し、編集ページだけの抽出には元描画命令をコピーしない。
+- 不一致ハッシュ・元文字・ページ/ソース参照・重複命令・参照欠落を拒否。連続した複数命令の一括編集、削除・復元・Undo/Redo、コピー時の通常テキスト化、`.kpdf`の参照保持を検証。
+- UIで非単色背景を保持し、元文字を画面と検索から除去して新文字を表示。隣の文字位置の保持、回転/CropBoxページでの編集・削除、保存PDFのPDF.js再表示、プロジェクト復帰と元文字への復元を確認。Form XObject内の文字は警告し、明示的に選んだ「見た目の置換」だけがマスク方式を使う。
+- Windows MSVC productionビルドに成功しNSISを生成。配布exeは22,821,070 bytes、SHA-256は `55f329d194689c1c046c62889789c5b5dcb7dd9a827127948d8cecf2ac799c1f`。ビルド出力とのバイト列一致を確認。
+- 圧縮ZIPは22,779,944 bytes、SHA-256は `4b0dc633b81d9b1e2be40ca22829b55b2031f214166ae4831d919f3f6f26e7d5`。ZIP整合性を確認。
+- 最終コードのWindows release版を対話デスクトップで実際に起動し、回転ページの既存文字を直接編集してネイティブ保存。元のASCII glyph文字列の描画命令が出力ストリームに残らず、新しい文字列が保存されることを確認。ローカルTTF、日英OCR、暗号化/復号、既存フォーム配置、日本語フォーム、しおり、添付、リンク、OCR校正、一括回転も成功。テスト本体139秒、JavaScriptエラー0件。
+- 最終コードのWindows debug版 + Vite開発モードでも同じ実機テストが成功。直接編集・元glyph文字列の除去・新文字の保存を含めて128秒、JavaScriptエラー0件。インストーラー生成だけでなく両モードの起動・ファイル読み込み・保存まで確認。
+- この検証は対象の描画命令の置換を確認するもので、注釈・OCR・メタデータ・原本・プロジェクトなどからの機密情報の完全削除を保証するものではありません。直接編集は墨消しとは別機能です。
+
+## 0.7.0の検証（2026-10-01）
+
+- TypeScriptユニットテスト54件、Rustテスト5件、Playwright E2E24件が成功。ESLint・TypeScript・Vite production buildも成功。
+- 静的TTF/OTFの検証、壊れたテーブル・未対応形式・埋め込み権限の拒否、完全埋め込みのみのフォント受け入れを確認。検証用TTFは既に同梱しているPDF.jsのLiberation Sans、OTFは同梱Noto Sans JPを使用。
+- 登録と適用を1回のUndoで戻し、Redoで復帰。コピー・貼り付け・結合のフォント引き継ぎ、未使用フォントの削除/Undo、登録上限を検証。
+- `.kpdf`内のフォントバイト列が一致し、破損・参照欠落を拒否することを確認。PDFのFontFile2が元TTFの完全なバイト列と一致し、太字/斜体でも同じ埋め込みを共有すること、未収録文字を保存エラーにすることを検証。
+- UIでローカルTTF登録・字形プレビュー・折り返し・重複登録・Undo/Redo・保存を実行。PDF.jsで保存PDFの文字列と改行、実際の描画画素を確認し、フォントを含むプロジェクトを再読込して再編集。壊れたフォントは文書やUndo履歴を変更せず警告することを確認。
+- Windows MSVC productionビルドとdebugビルドに成功し、NSISインストーラーを生成。配布用exeは22,836,821 bytes、SHA-256は `b1c600bb157d4aa2c508791075b41cae92978d59fc92e328d904050626f35b25`。ビルド出力とのバイト列一致を確認。
+- 圧縮ZIPは22,795,617 bytes、SHA-256は `3d73337169cf29269b65c6b9d9b9d3213fdf7cdf26e0bdbb87b9659fe5f93f03`。ZIP整合性を確認。
+- 最初のWindows起動テストで、配列のmapコールバックが読み込み上限の数値として渡る不具合を検出。読み込みオプションをオブジェクト型へ変更し、起動引数とドロップの呼び出しを明示的に修正して再ビルド。
+- Windows release版を対話デスクトップで実際に起動し、ネイティブダイアログでTTFを選択、プレビュー・Undo/Redo・保存PDFのFontFile2を確認。日本語/英語OCR、暗号化/復号、既存フォーム配置と日本語入力、しおり、添付、リンク、OCR校正、一括回転も成功。テスト本体126秒、JavaScriptエラー0件。
+- Windows debug版 + Vite開発モードでも同じ実機テストが成功。ネイティブフォント選択と保存を含めて126秒、JavaScriptエラー0件。最後の読み込み引数・重複登録の修正後に、フォントと基本ワークスペースのE2E8件も再実行して成功。
+- Windows共通ダイアログのUI Automationではファイル名入力・Openボタンの操作パターンが取得できない環境だったため、テスト対象プロセスのダイアログ内だけでWin32コントロールへの入力・クリックを併用。テスト失敗時にもCDP接続を閉じるよう修正。これらはテストハーネスの対応で、製品に自動入力やシェルAPIを追加していません。
 
 ## 0.6.0の検証（2026-09-30）
 
@@ -107,9 +163,22 @@ WSLから直接起動すると、この環境ではプロセスが非対話Sessi
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-interactive-test.ps1
 # debug版ビルドとViteサーバー起動後
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-interactive-test.ps1 -Mode debug
+# 右クリック削除・Undo/Redo・保存だけを検証
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-interactive-test.ps1 -Mode debug -ContextOnly
 ```
 
-スクリプトはこのワークスペースのクロスビルド出力と `C:\Program Files\nodejs\node.exe` を使用します。別環境では `windows-smoke.ps1` の実行ファイルパスを合わせてください。スクリーンショットは `.tools/windows-native.png` と `.tools/windows-native-advanced.png` に保存します。
+スクリプトはこのワークスペースのクロスビルド出力と `C:\Program Files\nodejs\node.exe` を使用します。別環境では `windows-smoke.ps1` の実行ファイルパスを合わせてください。スクリーンショットは `.tools/windows-native.png`、`.tools/windows-native-advanced.png`、`.tools/windows-native-context.png` に保存します。
+
+## Windowsの関連付けテストの再実行
+
+NSISの `makensis` を用意して、ワークスペースのルートから実行します。テストは現在のユーザーに専用のアプリ名で候補登録し、終了時に削除します。現在のPDF / KPDFの既定値は保持します。
+
+```powershell
+makensis /DTEST_OUTFILE="$env:TEMP\kikki-file-associations-test.exe" tests/windows/file-associations.nsi
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-file-associations-test.ps1 -TestExe "$env:TEMP\kikki-file-associations-test.exe"
+```
+
+LinuxでのNSISコンパイルでは `/D` の代わりに `-D` を指定してください。`tests/windows/file-associations.nsi` は製品の `src-tauri/windows/file-associations.nsh` を直接使用します。
 
 ## 未検証・残る制約
 
@@ -119,4 +188,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-interactive-
 - 数GB級文書、壊れたPDFの網羅的検証、すべてのフォント/暗号化方式、長時間連続編集、アクセシビリティ監査は未実施です。
 - macOS/Linuxデスクトップ起動・パッケージ生成は未検証です。
 - 物理プリンターでの出力・両面/部数設定の実機試験は未実施です。印刷用PDFのレイアウトのみ自動検証しました。
-- 標準フォームは保持保存し、新規作成も実装しました。既存文字編集はマスク、墨消しは全ページ画像再構成です。Word型編集、暗号学的署名、Office変換などは未実装です。詳しくは [README](../README.md) の互換性と制約を参照してください。
+- 標準フォームは保持保存し、新規作成も実装しました。既存文字の直接編集は対応フォントのページ直下の水平文字に限定し、未対応形式は拒否します。従来のマスクは別の「見た目の置換」です。墨消しは全ページ画像再構成です。Word型編集、既存画像・ベクター直接編集、暗号学的署名、Office変換などは未実装です。詳しくは [README](../README.md) の互換性と制約を参照してください。

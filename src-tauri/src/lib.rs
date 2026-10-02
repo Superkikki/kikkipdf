@@ -23,13 +23,15 @@ async fn select_files(
     kind: String,
     multiple: bool,
 ) -> Result<Vec<String>, String> {
-    let remember_documents = kind != "attachment";
+    let remember_documents = kind != "attachment" && kind != "font";
     let paths = tauri::async_runtime::spawn_blocking(move || {
         let dialog = rfd::FileDialog::new();
         let dialog = if kind == "image" {
             dialog.add_filter("Images", &["png", "jpg", "jpeg"])
         } else if kind == "project" {
             dialog.add_filter("Kikki PDF Project", &["kpdf"])
+        } else if kind == "font" {
+            dialog.add_filter("Static TrueType / OpenType", &["ttf", "otf"])
         } else if kind == "attachment" {
             dialog
         } else {
@@ -61,12 +63,30 @@ async fn select_files(
 async fn read_document(
     app: tauri::AppHandle,
     path: String,
+    max_bytes: Option<u64>,
 ) -> Result<tauri::ipc::Response, String> {
     let p = authorized(&app.state::<Access>(), &path)?;
-    let bytes = tauri::async_runtime::spawn_blocking(move || fs::read(p))
-        .await
-        .map_err(|_| "ファイル読み込みを完了できません。")?
-        .map_err(|e| ui_error("ファイルを読み込めません", e))?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        if let Some(limit) = max_bytes {
+            use std::io::Read;
+            let limit = limit.min(32 * 1024 * 1024);
+            let file = fs::File::open(p)?;
+            let mut bytes = Vec::new();
+            file.take(limit + 1).read_to_end(&mut bytes)?;
+            if bytes.len() as u64 > limit {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "File exceeds font size limit",
+                ));
+            }
+            Ok(bytes)
+        } else {
+            fs::read(p)
+        }
+    })
+    .await
+    .map_err(|_| "ファイル読み込みを完了できません。")?
+    .map_err(|e| ui_error("ファイルを読み込めません", e))?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 #[tauri::command]

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Search, ChevronUp, ChevronDown } from "lucide-react";
 import type { DocumentModel } from "../state/model";
-import { sourcePdf } from "./pdf";
+import { acquirePagePdf } from "./pdf";
 export function SearchPanel({
   model,
   jump,
@@ -31,16 +31,23 @@ export function SearchPanel({
           for (const p of model.pages) {
             if (cancelled) return;
             let text = p.objects
-              .filter((o) => ["text", "replacement", "ocr"].includes(o.kind))
+              .filter((o) =>
+                ["text", "replacement", "ocr", "direct-text"].includes(o.kind),
+              )
               .map((o) => o.text ?? "")
               .join(" ");
             if (p.sourceId) {
-              const pdf = await sourcePdf(model.sources[p.sourceId]);
-              const page = await pdf.getPage(p.sourceIndex + 1);
-              const content = await page.getTextContent();
-              text +=
-                " " +
-                content.items.map((i) => ("str" in i ? i.str : "")).join(" ");
+              const lease = acquirePagePdf(model.sources[p.sourceId], p);
+              try {
+                const { pdf, index } = await lease.ready;
+                const page = await pdf.getPage(index + 1);
+                const content = await page.getTextContent();
+                text +=
+                  " " +
+                  content.items.map((i) => ("str" in i ? i.str : "")).join(" ");
+              } finally {
+                lease.release();
+              }
             }
             const lower = text.toLocaleLowerCase(),
               q = query.toLocaleLowerCase();

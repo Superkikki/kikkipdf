@@ -5,6 +5,7 @@ import {
   MessageSquare,
   Search,
   GripVertical,
+  X,
   Paperclip,
   ScanText,
 } from "lucide-react";
@@ -24,7 +25,11 @@ export function Sidebar({
   jump,
   selected,
   selectObject,
+  hidden = false,
+  onClose,
 }: {
+  hidden?: boolean;
+  onClose?: () => void;
   model: DocumentModel;
   active: string;
   jump: (id: string) => void;
@@ -33,7 +38,12 @@ export function Sidebar({
 }) {
   const [tab, setTab] = useState("pages");
   return (
-    <aside className="sidebar">
+    <aside
+      className="sidebar"
+      id="document-sidebar"
+      aria-label="文書のサイドバー"
+      hidden={hidden}
+    >
       <div className="side-tabs">
         {[
           { id: "pages", label: "ページ", icon: Files },
@@ -45,6 +55,7 @@ export function Sidebar({
         ].map((t) => (
           <button
             title={t.label}
+            aria-pressed={tab === t.id}
             aria-label={t.label}
             className={tab === t.id ? "active" : ""}
             key={t.id}
@@ -69,6 +80,13 @@ export function Sidebar({
                     : "文書内を検索"}
         </strong>
         <span>{model.pages.length} ページ</span>
+        <button
+          className="panel-close"
+          title="サイドバーを閉じる"
+          onClick={onClose}
+        >
+          <X size={15} />
+        </button>
       </div>
       <div className="side-scroll">
         {tab === "pages" &&
@@ -77,6 +95,16 @@ export function Sidebar({
               key={p.id}
               className={`thumbnail ${active === p.id ? "selected" : ""}`}
               draggable
+              role="button"
+              tabIndex={0}
+              aria-label={`ページ ${i + 1}`}
+              aria-current={active === p.id ? "page" : undefined}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  jump(p.id);
+                }
+              }}
               onDragStart={(e) => {
                 e.dataTransfer.setData("application/x-kikki-page", p.id);
               }}

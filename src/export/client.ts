@@ -1,4 +1,10 @@
-import type { DocumentModel } from "../state/model";
+import type {
+  DocumentModel,
+  FontAsset,
+  Source,
+  PageModel,
+} from "../state/model";
+import type { DirectInspection } from "../direct/model";
 import type { FormDescriptor, imagesToPdf } from "./engine";
 import type { WorkerRequest } from "./worker";
 import type { AttachmentInfo } from "../attachments/model";
@@ -8,6 +14,24 @@ type Request = WorkerRequest extends infer R
     : never
   : never;
 let serial = 0;
+export const inspectExistingText = (
+  bytes: Uint8Array,
+  index: number,
+  signal?: AbortSignal,
+) =>
+  run<DirectInspection>(
+    { type: "directInspect", bytes, index },
+    undefined,
+    signal,
+  );
+export const previewDirectPage = (
+  source: Source,
+  page: PageModel,
+  signal: AbortSignal,
+) =>
+  run<Uint8Array>({ type: "directPreview", source, page }, undefined, signal);
+export const inspectLocalFont = (bytes: Uint8Array, name: string) =>
+  run<FontAsset>({ type: "fontInspect", bytes, name });
 function run<T>(
   request: Request,
   progress?: (v: number) => void,

@@ -13,12 +13,15 @@ import type {
 } from "../state/model";
 import { newObject, pageSize } from "../state/model";
 import { screenToPage } from "./coordinates";
-import { sourcePdf } from "./pdf";
+import { acquirePagePdf } from "./pdf";
 import { Overlay } from "../editor/Overlay";
 import { documentStore } from "../state/store";
 import { addObject } from "../commands/document";
 import { appearanceTextEngine } from "../editor/textEngine";
-export type Tool = "select" | "editText" | ObjectKind;
+import { inspectExistingText } from "../export/client";
+import { directTextObject } from "../direct/editor";
+import { directReferences } from "../direct/model";
+export type Tool = "select" | "editText" | "appearanceText" | ObjectKind;
 export function PageView({
   model,
   page,
@@ -47,10 +50,19 @@ export function PageView({
     text = useRef<HTMLDivElement>(null),
     content = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false),
-    [ready, setReady] = useState(false);
+    [ready, setReady] = useState(false),
+    [inspecting, setInspecting] = useState(false);
   const drawing = useRef<{ start: Point; points: Point[] } | null>(null);
   const [draft, setDraft] = useState<{ a: Point; b: Point } | null>(null);
   const source = page.sourceId ? model.sources[page.sourceId] : undefined;
+  const directKey = JSON.stringify(directReferences(page));
+  const currentPage = useRef(page);
+  currentPage.current = page;
+  const inspection = useRef<AbortController | null>(null);
+  useEffect(() => {
+    setInspecting(false);
+    return () => inspection.current?.abort();
+  }, [tool, model.id, page.id]);
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -69,15 +81,20 @@ export function PageView({
     let cancelled = false,
       render: RenderTask | undefined,
       layer: TextLayer | undefined;
+    let release: (() => void) | undefined;
     const canvasEl = canvas.current,
       textEl = text.current;
     async function draw() {
+      setReady(false);
       if (!source) {
         setReady(true);
         return;
       }
-      const pdf = await sourcePdf(source!);
-      const p = await pdf.getPage(page.sourceIndex + 1);
+      const lease = acquirePagePdf(source!, currentPage.current);
+      release = lease.release;
+      const { pdf, index } = await lease.ready;
+      if (cancelled) return;
+      const p = await pdf.getPage(index + 1);
       if (cancelled || !canvasEl) return;
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
       const rasterScale = Math.min(
@@ -112,6 +129,7 @@ export function PageView({
       cancelled = true;
       render?.cancel();
       layer?.cancel();
+      release?.();
       textEl?.replaceChildren();
       if (canvasEl) {
         canvasEl.width = 0;
@@ -127,6 +145,7 @@ export function PageView({
     scale,
     thumbnail,
     onError,
+    directKey,
   ]);
   const crop = page.crop ?? {
     x: 0,
@@ -160,11 +179,13 @@ export function PageView({
   }
 
   function down(e: React.PointerEvent) {
+    if (e.button !== 0) return;
     onActive();
     if (
       thumbnail ||
       tool === "select" ||
       tool === "editText" ||
+      tool === "appearanceText" ||
       tool === "image"
     )
       return;
@@ -181,12 +202,14 @@ export function PageView({
     setDraft({ a: drawing.current.start, b: p });
   }
   function up(e: React.PointerEvent) {
+    if (e.button !== 0) return;
     if (!drawing.current) return;
     const d = drawing.current;
     const end = point(e);
     drawing.current = null;
     setDraft(null);
-    if (tool === "select" || tool === "editText") return;
+    if (tool === "select" || tool === "editText" || tool === "appearanceText")
+      return;
     const o = newObject(
       tool,
       Math.min(d.start.x, end.x),
@@ -210,7 +233,7 @@ export function PageView({
     onSelect(o.id);
   }
   async function existing(e: React.MouseEvent) {
-    if (tool !== "editText" || !source) return;
+    if ((tool !== "editText" && tool !== "appearanceText") || !source) return;
     const target = e.target as HTMLElement;
     if (!target.closest(".textLayer span")) return;
     const textValue = target.textContent ?? "";
@@ -231,13 +254,53 @@ export function PageView({
       width: Math.max(...xs) - Math.min(...xs),
       height: Math.max(...ys) - Math.min(...ys),
     };
-    const o = appearanceTextEngine.replace(
-      textValue,
-      box,
-      Math.max(8, box.height * 0.85),
-    );
-    documentStore.execute(addObject(page.id, o));
-    onSelect(o.id);
+    let request: AbortController | undefined;
+    try {
+      let o;
+      if (tool === "editText") {
+        inspection.current?.abort();
+        const controller = new AbortController();
+        request = controller;
+        inspection.current = controller;
+        setInspecting(true);
+        const result = await inspectExistingText(
+          source.bytes,
+          page.sourceIndex,
+          controller.signal,
+        );
+        if (
+          controller.signal.aborted ||
+          documentStore.document?.id !== model.id ||
+          !documentStore.document.pages.some((p) => p.id === page.id)
+        )
+          return;
+        const current = documentStore.document.pages.find(
+          (p) => p.id === page.id,
+        )!;
+        o = directTextObject(result, current, textValue, box);
+      } else
+        o = appearanceTextEngine.replace(
+          textValue,
+          box,
+          Math.max(8, box.height * 0.85),
+        );
+      documentStore.execute(addObject(page.id, o));
+      onSelect(o.id);
+    } catch (e) {
+      if (!(e instanceof DOMException && e.name === "AbortError"))
+        onError?.(
+          `${e instanceof Error ? e.message : "文字を解析できません。"} 見た目だけの置換には「見た目の置換」を選んでください。`,
+        );
+    } finally {
+      if (
+        request &&
+        inspection.current === request &&
+        !request.signal.aborted
+      ) {
+        inspection.current = null;
+        setInspecting(false);
+      }
+    }
   }
   return (
     <div
@@ -247,6 +310,11 @@ export function PageView({
       data-page-id={page.id}
       data-rendered={visible && ready ? "true" : "false"}
     >
+      {inspecting && !thumbnail && (
+        <div className="page-loading" role="status">
+          文字描画命令を解析中…
+        </div>
+      )}
       {visible ? (
         <div
           style={{
@@ -311,7 +379,9 @@ export function PageView({
                     width: page.width,
                     height: page.height,
                     pointerEvents:
-                      tool === "select" || tool === "editText"
+                      tool === "select" ||
+                      tool === "editText" ||
+                      tool === "appearanceText"
                         ? "auto"
                         : "none",
                   }}
@@ -321,8 +391,12 @@ export function PageView({
                 model={model}
                 page={page}
                 selected={selected}
-                onSelect={onSelect}
+                onSelect={(id) => {
+                  onActive();
+                  onSelect(id);
+                }}
                 interactive={!thumbnail && tool === "select"}
+                contextEnabled={!thumbnail}
               />
               {draft && (
                 <svg

@@ -6,6 +6,7 @@ import { documentStore } from "../state/store";
 import { FormDesigner } from "./FormDesigner";
 import { updateFormField } from "./commands";
 import { change } from "../commands/document";
+import { resolveImportedForm } from "./importedSettings";
 export function FormPanel({
   model,
   active,
@@ -79,22 +80,23 @@ export function FormPanel({
               <p>このPDFには対応するフォームフィールドがありません。</p>
             )}
           {[
-            ...fields.filter((f) =>
-              f.widgets.some((w) =>
-                model.pages.some(
-                  (p) =>
-                    p.sourceId === f.sourceId && p.sourceIndex === w.pageIndex,
+            ...fields
+              .map((f) => resolveImportedForm(f, model))
+              .filter((f) =>
+                f.widgets.some((w) =>
+                  model.pages.some(
+                    (p) =>
+                      p.sourceId === f.sourceId &&
+                      p.sourceIndex === w.pageIndex,
+                  ),
                 ),
               ),
-            ),
             ...(model.formFields ?? []).map((f) => ({
               ...f,
               key: "new:" + f.id,
             })),
           ].map((f) => {
-            const value = f.key.startsWith("new:")
-              ? f.value
-              : (model.formValues[f.key] ?? f.value);
+            const value = f.value;
             return (
               <label key={f.key}>
                 {f.name}

@@ -21,10 +21,15 @@ import {
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { widgetKey } from "./commands";
+import {
+  normalizeChoiceValue,
+  validateImportedFormEdit,
+} from "./importedSettings";
 import type {
   DocumentModel,
   FieldValue,
   FormFieldModel,
+  ImportedFormEdit,
   PageModel,
 } from "../state/model";
 
@@ -55,6 +60,7 @@ export class FormTransfer {
     { field: PDFField; widget: PDFDict; id: string }[]
   >();
   private fields = new Map<PDFRef, { dict: PDFDict; ref: PDFRef }>();
+  private edits = new Map<PDFRef, ImportedFormEdit>();
   private copier: PDFObjectCopier;
   constructor(
     private input: PDFDocument,
@@ -82,8 +88,76 @@ export class FormTransfer {
         "署名フィールドの再保存は署名を無効にします。必要ならフォーム画面で「固定して保存」を選び、別名保存してください。",
       );
     for (const field of fields) {
-      const value = model.formValues[`${sourceId}:${field.getName()}`];
+      const key = `${sourceId}:${field.getName()}`;
+      let value = model.formValues[key];
+      const edit = model.importedFormEdits?.[key];
+      if (edit) {
+        const kind =
+          field instanceof PDFTextField
+            ? "text"
+            : field instanceof PDFCheckBox
+              ? "checkbox"
+              : field instanceof PDFRadioGroup
+                ? "radio"
+                : field instanceof PDFDropdown
+                  ? "dropdown"
+                  : field instanceof PDFOptionList
+                    ? "list"
+                    : undefined;
+        if (!kind)
+          throw Error("この種類の既存フォームの設定編集には対応していません。");
+        const checked = validateImportedFormEdit(
+          {
+            name: field.getName(),
+            kind,
+            hasExportValues:
+              (field instanceof PDFDropdown ||
+                field instanceof PDFOptionList) &&
+              field.acroField
+                .getOptions()
+                .some((o) => o.value.decodeText() !== o.display?.decodeText()),
+          },
+          edit,
+        );
+        this.edits.set(field.ref, checked);
+        if (checked.required !== undefined) {
+          if (checked.required) field.enableRequired();
+          else field.disableRequired();
+        }
+        if (checked.readOnly !== undefined) {
+          if (checked.readOnly) field.enableReadOnly();
+          else field.disableReadOnly();
+        }
+        if (field instanceof PDFTextField) {
+          if (checked.maxLength !== undefined) field.removeMaxLength();
+          if (checked.multiline !== undefined) {
+            if (checked.multiline) field.enableMultiline();
+            else field.disableMultiline();
+          }
+        }
+        if (field instanceof PDFDropdown || field instanceof PDFOptionList) {
+          if (
+            checked.options !== undefined ||
+            checked.multiSelect !== undefined
+          ) {
+            value = normalizeChoiceValue(
+              value ?? field.getSelected(),
+              checked.options ?? field.getOptions(),
+              checked.multiSelect ?? field.isMultiselect(),
+            );
+          }
+          if (checked.options !== undefined) field.setOptions(checked.options);
+          if (checked.multiSelect !== undefined) {
+            if (checked.multiSelect) field.enableMultiselect();
+            else field.disableMultiselect();
+          }
+        }
+        if (checked.options !== undefined || checked.multiSelect !== undefined)
+          form.markFieldAsDirty(field.ref);
+      }
       if (value !== undefined) setFieldValue(field, value);
+      if (edit?.maxLength !== undefined && field instanceof PDFTextField)
+        field.setMaxLength(edit.maxLength ?? undefined);
     }
     if (fields.length) {
       this.input.registerFontkit(fontkit);
@@ -126,6 +200,7 @@ export class FormTransfer {
       let target = this.fields.get(field.ref);
       if (!target) {
         const dict = context.obj({});
+        const edit = this.edits.get(field.ref);
         for (const key of [
           "FT",
           "Ff",
@@ -143,9 +218,50 @@ export class FormTransfer {
           const value = field.acroField.getInheritableAttribute(
             PDFName.of(key),
           );
+          if (key === "DV" && value && edit) {
+            if (
+              field instanceof PDFTextField &&
+              edit.maxLength !== undefined &&
+              edit.maxLength !== null &&
+              (value instanceof PDFString || value instanceof PDFHexString) &&
+              value.decodeText().length > edit.maxLength
+            )
+              continue;
+            if (
+              (field instanceof PDFDropdown ||
+                field instanceof PDFOptionList) &&
+              (edit.options !== undefined || edit.multiSelect !== undefined)
+            ) {
+              const values = (
+                value instanceof PDFArray ? value.asArray() : [value]
+              )
+                .map((v) => this.input.context.lookup(v))
+                .filter(
+                  (v): v is PDFString | PDFHexString =>
+                    v instanceof PDFString || v instanceof PDFHexString,
+                )
+                .map((v) => v.decodeText());
+              const normalized = normalizeChoiceValue(
+                values,
+                field.getOptions(),
+                field.isMultiselect(),
+              );
+              if (Array.isArray(normalized) ? normalized.length : normalized) {
+                dict.set(
+                  PDFName.of("DV"),
+                  Array.isArray(normalized)
+                    ? context.obj(
+                        normalized.map((v) => PDFHexString.fromText(v)),
+                      )
+                    : PDFHexString.fromText(String(normalized)),
+                );
+              }
+              continue;
+            }
+          }
           if (value) dict.set(PDFName.of(key), this.copier.copy(value));
         }
-        const name = uniqueFieldName(field.getName(), this.names);
+        const name = uniqueFieldName(edit?.name ?? field.getName(), this.names);
         dict.set(PDFName.of("T"), PDFHexString.fromText(name));
         const da =
           field.acroField.getDefaultAppearance() ?? "/KikkiForm 0 Tf 0 g";

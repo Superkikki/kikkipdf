@@ -6,9 +6,48 @@ const {
   PDFArray,
   PDFDict,
   PDFHexString,
+  PDFRawStream,
+  decodePDFRawStream,
 } = require("pdf-lib");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { execFile } = require("node:child_process");
+const { promisify } = require("node:util");
+let testBrowser;
+async function verifyObjectContext(page, root) {
+  await page.getByRole("button", { name: "編集", exact: true }).click();
+  const objects = page
+    .locator(".viewer-scroll .page-view")
+    .first()
+    .locator(".object-layer > g");
+  const countBefore = await objects.count();
+  await page.getByRole("button", { name: "矩形", exact: true }).click();
+  const shapePage = await page
+    .locator(".viewer-scroll .page-view")
+    .first()
+    .boundingBox();
+  await page.mouse.click(shapePage.x + 190, shapePage.y + 160);
+  await expect(objects).toHaveCount(countBefore + 1);
+  const shape = objects.last(),
+    shapeId = await shape.getAttribute("data-object-id");
+  await shape.click({ button: "right" });
+  const objectMenu = page.getByRole("menu", { name: "オブジェクトの操作" });
+  await expect(objectMenu).toBeVisible();
+  await page.screenshot({
+    path: path.join(root, ".tools", "windows-native-context.png"),
+  });
+  await objectMenu.getByRole("menuitem", { name: "削除", exact: true }).click();
+  await expect(
+    page.locator(`.viewer-scroll g[data-object-id="${shapeId}"]`),
+  ).toHaveCount(0);
+  await expect(objects).toHaveCount(countBefore);
+  await page.keyboard.press("Control+z");
+  await expect(objects).toHaveCount(countBefore + 1);
+  await page.keyboard.press("Control+y");
+  await expect(objects).toHaveCount(countBefore);
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+}
 (async () => {
   const started = Date.now();
   let browser;
@@ -21,6 +60,7 @@ const path = require("node:path");
     }
   }
   if (!browser) throw Error("WebView2 debugging endpoint did not start");
+  testBrowser = browser;
   const context = browser.contexts()[0];
   let page = context.pages()[0];
   if (!page) page = await context.waitForEvent("page");
@@ -36,6 +76,44 @@ const path = require("node:path");
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_CONTEXT_ONLY === "1") {
+    const root = path.resolve(__dirname, "..");
+    await verifyObjectContext(page, root);
+    const pdf = await PDFDocument.load(
+      await fs.readFile(
+        path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf"),
+      ),
+    );
+    const contents = pdf.getPage(0).node.Contents();
+    const streams =
+      contents instanceof PDFArray
+        ? contents.asArray().map((ref) => pdf.context.lookup(ref))
+        : contents
+          ? [contents]
+          : [];
+    if (
+      streams.some(
+        (s) =>
+          s instanceof PDFRawStream &&
+          /\bre\b/.test(Buffer.from(decodePDFRawStream(s).decode()).toString()),
+      )
+    )
+      throw Error("Deleted rectangle was written to saved PDF");
+    console.log(
+      JSON.stringify({
+        native: true,
+        contextOnly: true,
+        objectContextDeletion: true,
+        nativeSave: true,
+        pageCount: pdf.getPageCount(),
+        elapsedSeconds: Math.round((Date.now() - started) / 1000),
+        errors,
+      }),
+    );
+    if (errors.length) throw Error(errors.join("\n"));
+    await browser.close();
+    return;
+  }
   await page.getByRole("button", { name: "ページ管理", exact: true }).click();
   await page.getByRole("button", { name: "回転", exact: true }).click();
   await page
@@ -66,6 +144,45 @@ const path = require("node:path");
   await page.getByLabel("x", { exact: true }).fill("60");
   await page.getByLabel("y", { exact: true }).fill("140");
   await page.getByLabel("行間", { exact: true }).fill("1.6");
+  const picker = promisify(execFile)(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      path.join(__dirname, "windows-pick-test-file.ps1"),
+      "-TargetProcessId",
+      process.env.KIKKI_SMOKE_PROCESS,
+      "-FilePath",
+      path.join(process.env.KIKKI_SMOKE_DIR, "local-test-font.ttf"),
+    ],
+    { timeout: 30000 },
+  );
+  // Attach a rejection handler immediately while the modal dialog is opening.
+  const picked = picker.then(
+    (result) => ({ result }),
+    (error) => ({ error }),
+  );
+  await page
+    .getByRole("button", { name: "フォントを追加", exact: true })
+    .click();
+  const selection = await picked;
+  if (selection.error) throw selection.error;
+  await expect(page.getByLabel("フォント", { exact: true })).toHaveValue(
+    /^font-/,
+  );
+  await expect(
+    page.locator(".viewer-scroll .editable-text[data-layout-ready=true]"),
+  ).toHaveAttribute("font-family", /^Kikki[a-f0-9]{64}$/);
+  await page.keyboard.press("Control+z");
+  await expect(page.getByLabel("フォント", { exact: true })).toHaveValue(
+    "japanese",
+  );
+  await page.keyboard.press("Control+y");
+  await expect(page.getByLabel("フォント", { exact: true })).toHaveValue(
+    /^font-/,
+  );
   await expect
     .poll(() =>
       page
@@ -85,6 +202,13 @@ const path = require("node:path");
   await fs.mkdir(path.join(root, ".tools"), { recursive: true });
   const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf");
   const pdf = await PDFDocument.load(await fs.readFile(fixture));
+  const customFont = pdf.context
+    .enumerateIndirectObjects()
+    .find(
+      ([, object]) =>
+        object instanceof PDFDict && object.has(PDFName.of("FontFile2")),
+    );
+  if (!customFont) throw Error("Native custom font was not embedded");
   if (pdf.getPage(0).getRotation().angle !== 90)
     throw Error("Native rotation did not persist");
   const markup = pdf.getPage(0).node.Annots();
@@ -282,6 +406,40 @@ const path = require("node:path");
     reviewed.getPage(2).getRotation().angle !== 270
   )
     throw Error("Native batch rotation did not persist");
+  await page.getByRole("button", { name: "ページ", exact: true }).click();
+  await page.locator(".thumbnail").first().click();
+  await page.getByRole("button", { name: "ツール", exact: true }).click();
+  await page.getByRole("button", { name: "既存文字", exact: true }).click();
+  const originalText = "Native Windows fixture 1";
+  const originalSpan = page
+    .locator(".viewer-scroll .textLayer span")
+    .filter({ hasText: new RegExp(`^${originalText}$`) });
+  await originalSpan.dblclick();
+  await expect(page.locator(".properties")).toContainText(
+    "既存テキストを直接編集",
+  );
+  await page.getByLabel("テキスト内容").fill("Direct Windows edit");
+  await expect(originalSpan).toHaveCount(0);
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+  const directPdf = await PDFDocument.load(await fs.readFile(fixture));
+  const originalHex = Buffer.from(originalText).toString("hex").toUpperCase();
+  const streams = directPdf.context
+    .enumerateIndirectObjects()
+    .filter(([, o]) => o instanceof PDFRawStream)
+    .map(([, o]) =>
+      Buffer.from(decodePDFRawStream(o).decode()).toString("latin1"),
+    );
+  if (streams.some((s) => s.includes(originalHex)))
+    throw Error("Original page glyph string survived direct editing");
+  // Editing removes the selected content operation, not independently created OCR,
+  // annotation comments or metadata. This test never presents it as redaction.
+  const replacementHex = Buffer.from("Direct Windows edit")
+    .toString("hex")
+    .toUpperCase();
+  if (!streams.some((s) => s.includes(replacementHex)))
+    throw Error("Direct replacement was not saved");
+  await verifyObjectContext(page, root);
   await page.screenshot({
     path: path.join(root, ".tools", "windows-native-advanced.png"),
   });
@@ -303,13 +461,17 @@ const path = require("node:path");
       textBoxWrap: true,
       selectedTextMarkup: true,
       importedFormLayout: true,
+      localFontPickerAndEmbedding: true,
+      directSourceGlyphRemoval: true,
+      objectContextDeletion: true,
       elapsedSeconds: Math.round((Date.now() - started) / 1000),
       errors,
     }),
   );
   if (errors.length) throw Error(errors.join("\n"));
   await browser.close();
-})().catch((error) => {
+})().catch(async (error) => {
   console.error(error);
+  await testBrowser?.close().catch(() => {});
   process.exitCode = 1;
 });

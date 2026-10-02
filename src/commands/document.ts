@@ -8,6 +8,7 @@ import {
 } from "../state/model";
 import { patchObject } from "./objects";
 import type { Command } from "./history";
+import { checkFontBudget } from "../fonts/budget";
 export const change = (label: string, apply: Command["apply"]): Command => ({
   label,
   apply,
@@ -46,8 +47,24 @@ export function updateObject(
 export function deleteObject(pageId: string, id: string) {
   return editPage(
     pageId,
-    (p) => ({ ...p, objects: p.objects.filter((o) => o.id !== id) }),
+    (p) => ({
+      ...p,
+      objects: p.objects.flatMap((o) =>
+        o.id !== id
+          ? [o]
+          : o.kind === "direct-text"
+            ? [{ ...o, text: "" }]
+            : [],
+      ),
+    }),
     "オブジェクト削除",
+  );
+}
+export function revertDirectText(pageId: string, id: string) {
+  return editPage(
+    pageId,
+    (p) => ({ ...p, objects: p.objects.filter((o) => o.id !== id) }),
+    "元の文字に戻す",
   );
 }
 export function rotatePage(id: string) {
@@ -124,14 +141,20 @@ export function insertBlank(afterId?: string): Command {
   });
 }
 export const mergeDocuments = (other: DocumentModel): Command =>
-  change("PDFを追加", (d) => ({
-    ...d,
-    sources: { ...d.sources, ...other.sources },
-    pages: [...d.pages, ...other.pages],
-    images: { ...d.images, ...other.images },
-    attachments: [...(d.attachments ?? []), ...(other.attachments ?? [])],
-    attachmentEdits: { ...d.attachmentEdits, ...other.attachmentEdits },
-    formValues: { ...d.formValues, ...other.formValues },
-    formFields: [...(d.formFields ?? []), ...(other.formFields ?? [])],
-    bookmarks: [...(d.bookmarks ?? []), ...(other.bookmarks ?? [])],
-  }));
+  change("PDFを追加", (d) => {
+    const fonts = { ...d.fonts, ...other.fonts };
+    checkFontBudget(fonts);
+    return {
+      ...d,
+      sources: { ...d.sources, ...other.sources },
+      pages: [...d.pages, ...other.pages],
+      images: { ...d.images, ...other.images },
+      fonts,
+      attachments: [...(d.attachments ?? []), ...(other.attachments ?? [])],
+      attachmentEdits: { ...d.attachmentEdits, ...other.attachmentEdits },
+      formValues: { ...d.formValues, ...other.formValues },
+      importedFormEdits: { ...d.importedFormEdits, ...other.importedFormEdits },
+      formFields: [...(d.formFields ?? []), ...(other.formFields ?? [])],
+      bookmarks: [...(d.bookmarks ?? []), ...(other.bookmarks ?? [])],
+    };
+  });

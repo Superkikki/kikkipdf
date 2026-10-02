@@ -6,6 +6,7 @@ export type TextStyle = Pick<
   | "width"
   | "fontSize"
   | "font"
+  | "fontId"
   | "bold"
   | "italic"
   | "wrap"
