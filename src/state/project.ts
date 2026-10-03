@@ -35,6 +35,7 @@ const bookmark: z.ZodType<BookmarkModel> = z.lazy(() =>
     id,
     title: text,
     pageId: id.optional(),
+    expanded: z.boolean().optional(),
     children: z.array(bookmark).max(10000),
   }),
 );

@@ -159,7 +159,7 @@ export function Sidebar({
             </div>
           ))}
         {tab === "bookmarks" && (
-          <BookmarkPanel model={model} active={active} jump={jump} />
+          <BookmarkPanel key={model.id} model={model} active={active} jump={jump} />
         )}
         {tab === "comments" && <CommentsPanel model={model} jump={jump} />}
         {tab === "search" && (

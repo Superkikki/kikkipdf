@@ -36,6 +36,7 @@ export async function readBookmarks(
         id: uid(),
         title: item.title,
         pageId,
+        ...(item.count !== undefined ? { expanded: item.count >= 0 } : {}),
         children: await walk(item.items ?? [], depth + 1),
       });
     }
@@ -66,7 +67,7 @@ export const addBookmark = (bookmark: BookmarkModel, parentId?: string) =>
   }));
 export const updateBookmark = (
   id: string,
-  patch: Pick<Partial<BookmarkModel>, "title" | "pageId">,
+  patch: Pick<Partial<BookmarkModel>, "title" | "pageId" | "expanded">,
 ) =>
   change("しおり編集", (d) => ({
     ...d,
@@ -131,4 +132,38 @@ export const moveBookmark = (
           }))
         : insert(trimmed),
     };
+  });
+
+export function filterBookmarks(
+  nodes: BookmarkModel[],
+  query: string,
+): BookmarkModel[] {
+  const needle = query.trim().normalize("NFKC").toLocaleLowerCase();
+  if (!needle) return nodes;
+  const walk = (items: BookmarkModel[]): BookmarkModel[] =>
+    items.flatMap((node) => {
+      if (node.title.normalize("NFKC").toLocaleLowerCase().includes(needle))
+        return [node];
+      const children = walk(node.children);
+      return children.length ? [{ ...node, children }] : [];
+    });
+  return walk(nodes);
+}
+export const setBookmarksExpanded = (expanded: boolean) =>
+  change(expanded ? "しおりをすべて展開" : "しおりをすべて折りたたむ", (d) => {
+    const walk = (nodes: BookmarkModel[]): BookmarkModel[] => {
+      let changed = false;
+      const next = nodes.map((b) => {
+        if (!b.children.length) return b;
+        const children = walk(b.children);
+        if ((b.expanded !== false) === expanded && children === b.children)
+          return b;
+        changed = true;
+        return { ...b, expanded, children };
+      });
+      return changed ? next : nodes;
+    };
+    const original = d.bookmarks ?? [];
+    const bookmarks = walk(original);
+    return bookmarks === original ? d : { ...d, bookmarks };
   });

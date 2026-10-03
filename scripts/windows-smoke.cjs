@@ -76,6 +76,26 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_BOOKMARK_ONLY === "1") {
+    await page.getByRole("button", { name: "しおり", exact: true }).click();
+    const panel = page.locator(".bookmark-panel"), search = panel.getByLabel("しおりを検索", { exact: true });
+    await expect(panel.getByRole("button", { name: "Closed chapter", exact: true })).toHaveCount(0);
+    await search.fill("Needle"); await expect(panel.getByRole("button", { name: "Needle", exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "Needle", exact: true }).click();
+    await expect(page.getByLabel("ページ番号", { exact: true })).toHaveValue("2"); await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+    await search.fill(""); await expect(panel.getByRole("button", { name: "Closed chapter", exact: true })).toHaveCount(0);
+    await panel.getByRole("button", { name: "すべて展開", exact: true }).click(); await expect(panel.getByRole("button", { name: "Needle", exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "すべて折りたたむ", exact: true }).click(); await expect(panel.getByRole("button", { name: "Closed chapter", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: /^元に戻す/ }).click(); await expect(panel.getByRole("button", { name: "Needle", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: /^やり直す/ }).click(); await expect(panel.getByRole("button", { name: "Closed chapter", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "保存", exact: true }).click(); await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const pdf = await PDFDocument.load(await fs.readFile(path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf")));
+    const outline = pdf.catalog.lookup(PDFName.of("Outlines"), PDFDict), root = outline.lookup(PDFName.of("First"), PDFDict);
+    if (outline.get(PDFName.of("Count")).toString() !== "1" || root.get(PDFName.of("Count")).toString() !== "-2" || root.lookup(PDFName.of("First"), PDFDict).get(PDFName.of("Count")).toString() !== "-1") throw Error("Bookmark folding or visible counts changed");
+    if (errors.length) throw Error(JSON.stringify(errors));
+    console.log(JSON.stringify({ native: true, bookmarkSearch: true, preservedFolding: true, bulkExpandCollapse: true, undoRedo: true, nativeSave: true, errors }));
+    await browser.close(); return;
+  }
   if (process.env.KIKKI_SMOKE_CHOICE_ONLY === "1") {
     const direct = page.locator(".viewer-scroll .form-page-overlay");
     await expect(direct.getByLabel("ColorCode", { exact: true })).toHaveValue(

@@ -1,6 +1,6 @@
 # Runs only this project's smoke test in the current user's interactive desktop.
 # The temporary task is deleted in finally; no elevated run level is requested.
-param([string]$Mode = 'release', [switch]$ContextOnly, [switch]$NavigationOnly, [switch]$FormOnly, [switch]$ImageOnly, [switch]$VerticalOnly, [switch]$ChoiceOnly)
+param([string]$Mode = 'release', [switch]$ContextOnly, [switch]$NavigationOnly, [switch]$FormOnly, [switch]$ImageOnly, [switch]$VerticalOnly, [switch]$ChoiceOnly, [switch]$BookmarkOnly)
 $ErrorActionPreference='Stop'
 $Root=Split-Path $PSScriptRoot -Parent
 $Dir=Join-Path $env:TEMP 'kikki-pdf-interactive-test'
@@ -10,7 +10,7 @@ $Done=Join-Path $Dir 'done.txt'
 Remove-Item $Log,$Done -ErrorAction SilentlyContinue
 $Runner=Join-Path $Dir 'run.ps1'
 $Smoke=Join-Path $PSScriptRoot 'windows-smoke.ps1'
-$ContextArgument=if ($ContextOnly) {' -ContextOnly'} elseif ($NavigationOnly) {' -NavigationOnly'} elseif ($FormOnly) {' -FormOnly'} elseif ($ImageOnly) {' -ImageOnly'} elseif ($VerticalOnly) {' -VerticalOnly'} elseif ($ChoiceOnly) {' -ChoiceOnly'} else {''}
+$ContextArgument=if ($ContextOnly) {' -ContextOnly'} elseif ($NavigationOnly) {' -NavigationOnly'} elseif ($FormOnly) {' -FormOnly'} elseif ($ImageOnly) {' -ImageOnly'} elseif ($VerticalOnly) {' -VerticalOnly'} elseif ($ChoiceOnly) {' -ChoiceOnly'} elseif ($BookmarkOnly) {' -BookmarkOnly'} else {''}
 $Body=@"
 try {
  & '$Smoke' -Mode '$Mode'$ContextArgument *>&1 | Out-File -Encoding utf8 '$Log'

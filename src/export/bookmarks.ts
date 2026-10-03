@@ -18,8 +18,11 @@ export function writeBookmarks(
   const context = pdf.context,
     root = context.obj({ Type: "Outlines" }),
     rootRef = context.register(root);
-  const total = (items: BookmarkModel[]): number =>
-    items.reduce((n, b) => n + 1 + total(b.children), 0);
+  const visible = (items: BookmarkModel[]): number =>
+    items.reduce(
+      (n, b) => n + 1 + (b.expanded === false ? 0 : visible(b.children)),
+      0,
+    );
   function build(items: BookmarkModel[], parent: typeof rootRef) {
     const dicts = items.map(() => context.obj({})),
       refs = dicts.map((d) => context.register(d));
@@ -35,7 +38,10 @@ export function writeBookmarks(
         const children = build(b.children, refs[i]);
         dict.set(PDFName.of("First"), children[0]);
         dict.set(PDFName.of("Last"), children.at(-1)!);
-        dict.set(PDFName.of("Count"), context.obj(total(b.children)));
+        dict.set(
+          PDFName.of("Count"),
+          context.obj((b.expanded === false ? -1 : 1) * visible(b.children)),
+        );
       }
     });
     return refs;
@@ -43,6 +49,6 @@ export function writeBookmarks(
   const refs = build(tree, rootRef);
   root.set(PDFName.of("First"), refs[0]);
   root.set(PDFName.of("Last"), refs.at(-1)!);
-  root.set(PDFName.of("Count"), context.obj(total(tree)));
+  root.set(PDFName.of("Count"), context.obj(visible(tree)));
   pdf.catalog.set(PDFName.of("Outlines"), rootRef);
 }

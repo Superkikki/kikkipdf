@@ -1694,3 +1694,9 @@ progress {
 .existing-image-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 .existing-image-layer rect { pointer-events: all; cursor: pointer; }
 .existing-image-layer rect:hover, .existing-image-layer rect:focus { stroke-width: 2; fill: #078c7f25; outline: none; }
+
+.bookmark-row { display: flex; align-items: center; min-width: 0; }
+.bookmark-row .side-item { flex: 1; min-width: 0; }
+.bookmark-toggle, .bookmark-toggle-spacer { width: 24px; flex: 0 0 24px; }
+.bookmark-toggle { padding: 4px; border: 0; }
+.bookmark-search { margin-top: 12px; }

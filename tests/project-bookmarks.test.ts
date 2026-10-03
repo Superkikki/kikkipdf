@@ -103,3 +103,102 @@ describe("editable PDF outlines", () => {
     expect(root.get(PDFName.of("Count"))?.toString()).toBe("2");
   });
 });
+
+it("preserves closed outline state and counts only visible descendants in PDF and project round trips", async () => {
+  const { setBookmarksExpanded } = await import("../src/pages/bookmarks");
+  const model = emptyDocument();
+  model.pages = [blankPage()];
+  model.bookmarks = [
+    {
+      id: "root",
+      title: "Root",
+      expanded: false,
+      children: [
+        {
+          id: "a",
+          title: "A",
+          expanded: false,
+          children: [{ id: "a1", title: "A1", children: [] }],
+        },
+        {
+          id: "b",
+          title: "B",
+          expanded: true,
+          children: [
+            { id: "b1", title: "B1", children: [] },
+            { id: "b2", title: "B2", children: [] },
+          ],
+        },
+      ],
+    },
+  ];
+  const restored = await openProject(await saveProject(model));
+  expect(restored.bookmarks).toEqual(model.bookmarks);
+  const pdf = await PDFDocument.load(await exportPdf(restored));
+  const outline = pdf.catalog.lookup(PDFName.of("Outlines"), PDFDict),
+    root = outline.lookup(PDFName.of("First"), PDFDict);
+  expect(outline.get(PDFName.of("Count"))?.toString()).toBe("1");
+  expect(root.get(PDFName.of("Count"))?.toString()).toBe("-4");
+  expect(
+    root
+      .lookup(PDFName.of("First"), PDFDict)
+      .get(PDFName.of("Count"))
+      ?.toString(),
+  ).toBe("-1");
+  expect(
+    root
+      .lookup(PDFName.of("Last"), PDFDict)
+      .get(PDFName.of("Count"))
+      ?.toString(),
+  ).toBe("2");
+  const history = new History(restored);
+  history.execute(setBookmarksExpanded(true));
+  const opened = await PDFDocument.load(
+    await exportPdf(history.current.document),
+  );
+  const openedOutline = opened.catalog.lookup(PDFName.of("Outlines"), PDFDict);
+  expect(openedOutline.get(PDFName.of("Count"))?.toString()).toBe("6");
+  expect(
+    openedOutline
+      .lookup(PDFName.of("First"), PDFDict)
+      .get(PDFName.of("Count"))
+      ?.toString(),
+  ).toBe("5");
+  history.undo();
+  expect(history.current.document.bookmarks).toEqual(model.bookmarks);
+  history.redo();
+  history.execute(setBookmarksExpanded(false));
+  expect(
+    history.current.document.bookmarks![0].children.every(
+      (b) => b.expanded === false,
+    ),
+  ).toBe(true);
+  const collapsed = history.current.document;
+  expect(setBookmarksExpanded(false).apply(collapsed)).toBe(collapsed);
+  const empty = emptyDocument();
+  expect(setBookmarksExpanded(true).apply(empty)).toBe(empty);
+});
+
+it("searches bookmark names with normalized text and keeps ancestor paths without changing stored folding", async () => {
+  const { filterBookmarks } = await import("../src/pages/bookmarks");
+  const nodes = [
+    {
+      id: "root",
+      title: "Root",
+      expanded: false,
+      children: [
+        { id: "a", title: "ＡＢＣ資料", children: [] },
+        { id: "b", title: "別の章", children: [] },
+      ],
+    },
+  ];
+  expect(filterBookmarks(nodes, " abc ")[0]).toMatchObject({
+    id: "root",
+    expanded: false,
+    children: [{ id: "a" }],
+  });
+  expect(filterBookmarks(nodes, "ROOT")).toEqual(nodes);
+  expect(filterBookmarks(nodes, "missing")).toEqual([]);
+  expect(filterBookmarks(nodes, " ")).toBe(nodes);
+  expect(nodes[0].children).toHaveLength(2);
+});

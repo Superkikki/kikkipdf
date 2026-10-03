@@ -1,6 +1,8 @@
 import { useState } from "react";
 import {
   Bookmark,
+  ChevronDown,
+  ChevronRight,
   Plus,
   Trash2,
   ArrowUp,
@@ -16,6 +18,8 @@ import {
   removeBookmark,
   moveBookmark,
   locateBookmark,
+  filterBookmarks,
+  setBookmarksExpanded,
 } from "./bookmarks";
 export function BookmarkPanel({
   model,
@@ -27,8 +31,10 @@ export function BookmarkPanel({
   jump: (id: string) => void;
 }) {
   const [selected, setSelected] = useState("");
+  const [query, setQuery] = useState("");
   const nodes = model.bookmarks ?? [],
     found = locateBookmark(nodes, selected);
+  const filtered = filterBookmarks(nodes, query);
   function add() {
     const b = {
       id: uid(),
@@ -42,19 +48,43 @@ export function BookmarkPanel({
   function render(items: BookmarkModel[], depth = 0): React.ReactNode {
     return items.map((b) => (
       <div key={b.id}>
-        <button
-          className={`side-item ${b.id === selected ? "active" : ""}`}
-          style={{ paddingLeft: 12 + depth * 14 }}
-          onClick={() => {
-            setSelected(b.id);
-            if (b.pageId && model.pages.some((p) => p.id === b.pageId))
-              jump(b.pageId);
-          }}
-        >
-          <Bookmark size={14} />
-          <span>{b.title}</span>
-        </button>
-        {render(b.children, depth + 1)}
+        <div className="bookmark-row" style={{ paddingLeft: depth * 14 }}>
+          {b.children.length > 0 ? (
+            <button
+              className="bookmark-toggle"
+              aria-label={`${b.expanded === false && !query.trim() ? "展開" : "折りたたむ"}：${b.title}`}
+              aria-expanded={query.trim() ? true : b.expanded !== false}
+              disabled={!!query.trim()}
+              onClick={() =>
+                documentStore.execute(
+                  updateBookmark(b.id, { expanded: b.expanded === false }),
+                )
+              }
+            >
+              {b.expanded === false && !query.trim() ? (
+                <ChevronRight size={14} />
+              ) : (
+                <ChevronDown size={14} />
+              )}
+            </button>
+          ) : (
+            <span className="bookmark-toggle-spacer" />
+          )}
+          <button
+            className={`side-item ${b.id === selected ? "active" : ""}`}
+            style={{ paddingLeft: 12 }}
+            onClick={() => {
+              setSelected(b.id);
+              if (b.pageId && model.pages.some((p) => p.id === b.pageId))
+                jump(b.pageId);
+            }}
+          >
+            <Bookmark size={14} />
+            <span>{b.title}</span>
+          </button>
+        </div>
+        {(query.trim() || b.expanded !== false) &&
+          render(b.children, depth + 1)}
       </div>
     ));
   }
@@ -64,7 +94,33 @@ export function BookmarkPanel({
         <Plus size={15} />
         現在のページにしおり
       </button>
-      {render(nodes)}
+      <label className="bookmark-search">
+        しおりを検索
+        <input
+          aria-label="しおりを検索"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="名前で絞り込み"
+        />
+      </label>
+      <div className="form-kind-buttons">
+        <button
+          disabled={!nodes.some((b) => b.children.length) || !!query.trim()}
+          onClick={() => documentStore.execute(setBookmarksExpanded(true))}
+        >
+          すべて展開
+        </button>
+        <button
+          disabled={!nodes.some((b) => b.children.length) || !!query.trim()}
+          onClick={() => documentStore.execute(setBookmarksExpanded(false))}
+        >
+          すべて折りたたむ
+        </button>
+      </div>
+      {render(filtered)}
+      {nodes.length > 0 && query.trim() && !filtered.length && (
+        <p className="empty-panel">一致するしおりはありません。</p>
+      )}
       {!nodes.length && <p className="empty-panel">しおりはありません。</p>}
       {found && (
         <div className="bookmark-editor">

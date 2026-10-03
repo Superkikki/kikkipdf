@@ -1,6 +1,16 @@
 const { PDFDocument, StandardFonts, PDFName, PDFDict, PDFHexString } = require("pdf-lib");
 const { writeFile, readFile } = require("node:fs/promises");
 (async () => {
+  if (process.argv[3] === "bookmarks") {
+    const pdf = await PDFDocument.create(), a = pdf.addPage([420, 595]), b = pdf.addPage([420, 595]), context = pdf.context;
+    const outline = context.obj({ Type: "Outlines", Count: 1 }), root = context.obj({ Title: PDFHexString.fromText("Root"), Count: -2 }), branch = context.obj({ Title: PDFHexString.fromText("Closed chapter"), Count: -1 }), leaf = context.obj({ Title: PDFHexString.fromText("Needle"), Dest: [b.ref, "Fit"] }), other = context.obj({ Title: PDFHexString.fromText("Other"), Dest: [a.ref, "Fit"] });
+    const outlineRef = context.register(outline), rootRef = context.register(root), branchRef = context.register(branch), leafRef = context.register(leaf), otherRef = context.register(other);
+    outline.set(PDFName.of("First"), rootRef); outline.set(PDFName.of("Last"), rootRef); root.set(PDFName.of("Parent"), outlineRef);
+    root.set(PDFName.of("First"), branchRef); root.set(PDFName.of("Last"), otherRef);
+    branch.set(PDFName.of("Parent"), rootRef); branch.set(PDFName.of("Next"), otherRef); branch.set(PDFName.of("First"), leafRef); branch.set(PDFName.of("Last"), leafRef);
+    leaf.set(PDFName.of("Parent"), branchRef); other.set(PDFName.of("Parent"), rootRef); other.set(PDFName.of("Prev"), branchRef);
+    pdf.catalog.set(PDFName.of("Outlines"), outlineRef); await writeFile(process.argv[2], await pdf.save()); return;
+  }
   if (process.argv[3] === "choices") {
     const pdf = await PDFDocument.create(),
       page = pdf.addPage([420, 595]);
