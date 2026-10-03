@@ -92,6 +92,15 @@ async function verifyObjectContext(page, root) {
     await search.fill("Other"); await panel.getByRole("button", { name: "Other", exact: true }).click();
     const bookmarkUrl = panel.getByLabel("しおりURL", { exact: true });
     await expect(bookmarkUrl).toHaveValue("https://example.com/native");
+    await expect(panel.getByLabel("しおりの文字色", { exact: true })).toHaveValue("#336699");
+    await expect(panel.getByRole("checkbox", { name: "しおりの太字", exact: true })).toBeChecked();
+    await expect(panel.getByRole("checkbox", { name: "しおりの斜体", exact: true })).toBeChecked();
+    await panel.getByRole("button", { name: "書式を標準に戻す", exact: true }).click();
+    await expect(panel.getByLabel("しおりの文字色", { exact: true })).toHaveValue("#000000");
+    await page.getByRole("button", { name: /^元に戻す/ }).click();
+    await expect(panel.getByLabel("しおりの文字色", { exact: true })).toHaveValue("#336699");
+    await panel.getByLabel("しおりの文字色", { exact: true }).fill("#993366");
+    await panel.getByRole("checkbox", { name: "しおりの斜体", exact: true }).uncheck();
     await bookmarkUrl.fill("mailto:support@example.com?subject=Native");
     await panel.getByLabel("しおりの移動先", { exact: true }).selectOption({ label: "ページ 2" });
     await expect(bookmarkUrl).toHaveCount(0);
@@ -104,8 +113,9 @@ async function verifyObjectContext(page, root) {
     if (outline.get(PDFName.of("Count")).toString() !== "1" || root.get(PDFName.of("Count")).toString() !== "-2" || root.lookup(PDFName.of("First"), PDFDict).get(PDFName.of("Count")).toString() !== "-1") throw Error("Bookmark folding or visible counts changed");
     const external = root.lookup(PDFName.of("Last"), PDFDict);
     if (external.has(PDFName.of("Dest")) || external.lookup(PDFName.of("A"), PDFDict).lookup(PDFName.of("URI"), PDFString).decodeText() !== "mailto:support@example.com?subject=Native") throw Error("External bookmark destination changed");
+    if (external.get(PDFName.of("C")).toString() !== "[ 0.6 0.2 0.4 ]" || external.get(PDFName.of("F")).toString() !== "2") throw Error("Bookmark text formatting changed");
     if (errors.length) throw Error(JSON.stringify(errors));
-    console.log(JSON.stringify({ native: true, bookmarkSearch: true, externalBookmarkUrl: true, preservedFolding: true, bulkExpandCollapse: true, undoRedo: true, nativeSave: true, errors }));
+    console.log(JSON.stringify({ native: true, bookmarkSearch: true, externalBookmarkUrl: true, bookmarkTextStyle: true, preservedFolding: true, bulkExpandCollapse: true, undoRedo: true, nativeSave: true, errors }));
     await browser.close(); return;
   }
   if (process.env.KIKKI_SMOKE_CHOICE_ONLY === "1") {

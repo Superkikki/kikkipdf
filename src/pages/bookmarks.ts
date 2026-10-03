@@ -34,12 +34,18 @@ export async function readBookmarks(
         }
       }
       const url = !pageId ? importedLinkUrl(item.url ?? item.unsafeUrl) : undefined;
+      const color = item.color?.length === 3
+        ? `#${Array.from(item.color, (c) => c.toString(16).padStart(2, "0")).join("")}`
+        : undefined;
       result.push({
         id: uid(),
         title: item.title,
         pageId,
         ...(url ? { url } : {}),
         ...(item.count !== undefined ? { expanded: item.count >= 0 } : {}),
+        ...(color && color !== "#000000" ? { color } : {}),
+        ...(item.bold ? { bold: true } : {}),
+        ...(item.italic ? { italic: true } : {}),
         children: await walk(item.items ?? [], depth + 1),
       });
     }
@@ -70,7 +76,7 @@ export const addBookmark = (bookmark: BookmarkModel, parentId?: string) =>
   }));
 export const updateBookmark = (
   id: string,
-  patch: Pick<Partial<BookmarkModel>, "title" | "pageId" | "url" | "expanded">,
+  patch: Pick<Partial<BookmarkModel>, "title" | "pageId" | "url" | "expanded" | "color" | "bold" | "italic">,
 ) =>
   change("しおり編集", (d) => ({
     ...d,

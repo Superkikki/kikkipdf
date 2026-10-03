@@ -201,3 +201,35 @@ test("preserves and edits external bookmark URLs, switches to pages with undo an
   await expect(url).toHaveValue("mailto:support@example.com?subject=PDF");
   expect(externalRequests).toEqual([]); expect(errors).toEqual([]);
 });
+
+test("preserves bookmark text color, bold and italic across editing, undo, project and PDF saves", async ({ page }, info) => {
+  const model = emptyDocument(); model.pages = [blankPage()];
+  model.bookmarks = [{ id: "styled", title: "書式つき", color: "#336699", bold: true, italic: true, children: [] }];
+  await page.goto("/"); await open(page, Buffer.from(await exportPdf(model)), "styled-bookmarks.pdf");
+  const panel = page.locator(".bookmark-panel"), item = panel.getByRole("button", { name: "書式つき", exact: true });
+  const text = item.locator("span"), color = panel.getByLabel("しおりの文字色", { exact: true }), bold = panel.getByRole("checkbox", { name: "しおりの太字", exact: true }), italic = panel.getByRole("checkbox", { name: "しおりの斜体", exact: true });
+  await item.click();
+  await expect(color).toHaveValue("#336699"); await expect(bold).toBeChecked(); await expect(italic).toBeChecked();
+  await expect(text).toHaveCSS("color", "rgb(51, 102, 153)"); await expect(text).toHaveCSS("font-weight", "700"); await expect(text).toHaveCSS("font-style", "italic");
+  await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+  await panel.getByRole("button", { name: "書式を標準に戻す", exact: true }).click();
+  await expect(color).toHaveValue("#000000"); await expect(bold).not.toBeChecked(); await expect(italic).not.toBeChecked();
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await expect(color).toHaveValue("#336699"); await expect(bold).toBeChecked(); await expect(italic).toBeChecked();
+  await color.fill("#993366"); await italic.uncheck();
+  await expect(text).toHaveCSS("color", "rgb(153, 51, 102)"); await expect(text).toHaveCSS("font-style", "normal");
+  let download = page.waitForEvent("download");
+  await page.locator("summary").filter({ hasText: "ファイル" }).click();
+  await page.getByRole("button", { name: "編集プロジェクトを保存", exact: true }).click();
+  const projectPath = info.outputPath("styled.kpdf"); await (await download).saveAs(projectPath);
+  const restored = await openProject(new Uint8Array(await readFile(projectPath)));
+  expect(restored.bookmarks![0]).toMatchObject({ color: "#993366", bold: true, italic: false });
+  download = page.waitForEvent("download"); await page.getByRole("button", { name: "保存", exact: true }).click();
+  const saved = info.outputPath("styled.pdf"); await (await download).saveAs(saved);
+  const pdf = await PDFDocument.load(await readFile(saved));
+  const node = pdf.catalog.lookup(PDFName.of("Outlines"), PDFDict).lookup(PDFName.of("First"), PDFDict);
+  expect(node.get(PDFName.of("C"))?.toString()).toBe("[ 0.6 0.2 0.4 ]");
+  expect(node.get(PDFName.of("F"))?.toString()).toBe("2");
+  await page.reload(); await open(page, await readFile(saved)); await item.click();
+  await expect(color).toHaveValue("#993366"); await expect(bold).toBeChecked(); await expect(italic).not.toBeChecked();
+});

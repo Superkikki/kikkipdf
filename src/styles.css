@@ -1522,6 +1522,19 @@ progress {
   min-width: 0;
   width: 100%;
 }
+.bookmark-style-controls {
+  display: flex;
+  gap: 18px;
+  margin: 10px 0;
+}
+.bookmark-style-controls label {
+  flex-direction: row;
+  align-items: center;
+}
+.bookmark-style-controls input[type="checkbox"] {
+  width: 18px;
+  flex: none;
+}
 
 .comment-editor {
   padding: 12px;

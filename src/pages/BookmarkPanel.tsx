@@ -39,8 +39,11 @@ export function BookmarkPanel({
   const filtered = filterBookmarks(nodes, query);
   let urlError = "";
   if (found?.node.url !== undefined) {
-    try { validatedLinkUrl(found.node.url); }
-    catch (e) { urlError = e instanceof Error ? e.message : "URLが不正です。"; }
+    try {
+      validatedLinkUrl(found.node.url);
+    } catch (e) {
+      urlError = e instanceof Error ? e.message : "URLが不正です。";
+    }
   }
   function add() {
     const b = {
@@ -87,7 +90,11 @@ export function BookmarkPanel({
             }}
           >
             {b.url !== undefined ? <ExternalLink size={14} /> : <Bookmark size={14} />}
-            <span>{b.title}</span>
+            <span style={{
+              color: b.color,
+              fontWeight: b.bold ? 700 : undefined,
+              fontStyle: b.italic ? "italic" : undefined,
+            }}>{b.title}</span>
           </button>
         </div>
         {(query.trim() || b.expanded !== false) &&
@@ -143,6 +150,38 @@ export function BookmarkPanel({
               }
             />
           </label>
+          <label>
+            文字色
+            <input
+              type="color"
+              aria-label="しおりの文字色"
+              value={found.node.color ?? "#000000"}
+              onChange={(e) => documentStore.execute(
+                updateBookmark(selected, { color: e.target.value }),
+              )}
+            />
+          </label>
+          <div className="bookmark-style-controls">
+            <label>
+              <input type="checkbox" aria-label="しおりの太字"
+                checked={!!found.node.bold}
+                onChange={(e) => documentStore.execute(
+                  updateBookmark(selected, { bold: e.target.checked }),
+                )} />太字
+            </label>
+            <label>
+              <input type="checkbox" aria-label="しおりの斜体"
+                checked={!!found.node.italic}
+                onChange={(e) => documentStore.execute(
+                  updateBookmark(selected, { italic: e.target.checked }),
+                )} />斜体
+            </label>
+          </div>
+          <button className="full"
+            disabled={found.node.color === undefined && !found.node.bold && !found.node.italic}
+            onClick={() => documentStore.execute(
+            updateBookmark(selected, { color: undefined, bold: undefined, italic: undefined }),
+          )}>書式を標準に戻す</button>
           <label>
             移動先
             <select

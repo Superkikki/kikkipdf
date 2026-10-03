@@ -150,6 +150,9 @@ export interface BookmarkModel {
   pageId?: string;
   url?: string;
   expanded?: boolean;
+  color?: string;
+  bold?: boolean;
+  italic?: boolean;
   children: BookmarkModel[];
 }
 export interface DocumentModel {

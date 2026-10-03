@@ -37,6 +37,9 @@ const bookmark: z.ZodType<BookmarkModel> = z.lazy(() =>
     pageId: id.optional(),
     url: z.string().max(8192).optional(),
     expanded: z.boolean().optional(),
+    color: color.optional(),
+    bold: z.boolean().optional(),
+    italic: z.boolean().optional(),
     children: z.array(bookmark).max(10000),
   }).refine((b) => b.pageId === undefined || b.url === undefined, {
     message: "しおりの移動先はページかURLのいずれかにしてください。",

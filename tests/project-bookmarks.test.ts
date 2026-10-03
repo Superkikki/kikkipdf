@@ -1,5 +1,5 @@
 import { it, expect, describe } from "vitest";
-import { PDFDocument, PDFName, PDFDict, PDFArray, PDFString, PDFHexString } from "pdf-lib";
+import { PDFDocument, PDFName, PDFDict, PDFArray, PDFString, PDFHexString, PDFNumber } from "pdf-lib";
 import { zipSync, unzipSync, strToU8, strFromU8 } from "fflate";
 import { emptyDocument, blankPage, newObject } from "../src/state/model";
 import { saveProject, openProject } from "../src/state/project";
@@ -349,4 +349,120 @@ it("imports and validates outline URLs, decodes unsafe UTF-16 URLs, and prefers 
   expect(bookmarks[2].pageId).toBeUndefined();
   expect(bookmarks[3].pageId).toBe("page-1");
   expect(bookmarks[3].url).toBeUndefined();
+});
+
+it("imports outline RGB color and PDF bold/italic flag bits", async () => {
+  const outline = [
+    {
+      title: "色と両書式",
+      color: new Uint8ClampedArray([18, 52, 86]),
+      bold: true,
+      italic: true,
+      dest: null,
+      url: null,
+      unsafeUrl: undefined,
+      count: undefined,
+      items: [],
+    },
+    {
+      title: "黒と斜体",
+      color: new Uint8ClampedArray([0, 0, 0]),
+      bold: false,
+      italic: true,
+      dest: null,
+      url: null,
+      unsafeUrl: undefined,
+      count: undefined,
+      items: [],
+    },
+    {
+      title: "既定",
+      color: new Uint8ClampedArray([0, 0, 0]),
+      bold: false,
+      italic: false,
+      dest: null,
+      url: null,
+      unsafeUrl: undefined,
+      count: undefined,
+      items: [],
+    },
+  ];
+  const pdf = {
+    getOutline: async () => outline,
+    getDestination: async () => null,
+    getPageIndex: async () => 0,
+  } as unknown as PDFDocumentProxy;
+  const nodes = await readBookmarks(pdf, []);
+  expect(nodes[0]).toMatchObject({ color: "#123456", bold: true, italic: true });
+  expect(nodes[1]).toMatchObject({ italic: true });
+  expect(nodes[1].color).toBeUndefined();
+  expect(nodes[1].bold).toBeUndefined();
+  expect(nodes[2].color).toBeUndefined();
+  expect(nodes[2].bold).toBeUndefined();
+  expect(nodes[2].italic).toBeUndefined();
+});
+
+it("writes bookmark color and style flags, persists edits, and clears default formatting", async () => {
+  const model = emptyDocument();
+  model.pages = [blankPage()];
+  model.bookmarks = [{ id: "styled", title: "書式", children: [] }];
+  const history = new History(model);
+  history.execute(
+    updateBookmark("styled", {
+      color: "#123456",
+      bold: true,
+      italic: true,
+    }),
+  );
+  const savedProject = await openProject(
+    await saveProject(history.current.document),
+  );
+  expect(savedProject.bookmarks?.[0]).toMatchObject({
+    color: "#123456",
+    bold: true,
+    italic: true,
+  });
+  const output = await PDFDocument.load(await exportPdf(savedProject));
+  const styled = output.catalog
+    .lookup(PDFName.of("Outlines"), PDFDict)
+    .lookup(PDFName.of("First"), PDFDict);
+  const color = styled.lookup(PDFName.of("C"), PDFArray);
+  expect(color.size()).toBe(3);
+  expect((color.get(0) as PDFNumber).asNumber()).toBeCloseTo(18 / 255);
+  expect((color.get(1) as PDFNumber).asNumber()).toBeCloseTo(52 / 255);
+  expect((color.get(2) as PDFNumber).asNumber()).toBeCloseTo(86 / 255);
+  expect(styled.lookup(PDFName.of("F"), PDFNumber).asNumber()).toBe(3);
+
+  history.undo();
+  expect(history.current.document.bookmarks?.[0].color).toBeUndefined();
+  expect(history.current.document.bookmarks?.[0].bold).toBeUndefined();
+  expect(history.current.document.bookmarks?.[0].italic).toBeUndefined();
+  history.redo();
+  expect(history.current.document.bookmarks?.[0]).toMatchObject({
+    color: "#123456",
+    bold: true,
+    italic: true,
+  });
+
+  history.execute(
+    updateBookmark("styled", { color: undefined, bold: false, italic: false }),
+  );
+  const defaults = await PDFDocument.load(
+    await exportPdf(history.current.document),
+  );
+  const defaultNode = defaults.catalog
+    .lookup(PDFName.of("Outlines"), PDFDict)
+    .lookup(PDFName.of("First"), PDFDict);
+  expect(defaultNode.has(PDFName.of("C"))).toBe(false);
+  expect(defaultNode.has(PDFName.of("F"))).toBe(false);
+});
+
+it("rejects invalid bookmark colors in PDF and project saves", async () => {
+  const model = emptyDocument();
+  model.pages = [blankPage()];
+  model.bookmarks = [
+    { id: "invalid", title: "不正色", color: "#12xz56", children: [] },
+  ];
+  await expect(exportPdf(model)).rejects.toThrow();
+  await expect(saveProject(model)).rejects.toThrow();
 });

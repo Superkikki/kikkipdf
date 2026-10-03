@@ -9,6 +9,8 @@ export function writeBookmarks(
 ) {
   function prune(items: BookmarkModel[]): BookmarkModel[] {
     return items.flatMap((b) => {
+      if (b.color !== undefined && !/^#[\da-f]{6}$/i.test(b.color))
+        throw Error("しおりの文字色が不正です。");
       if (b.url !== undefined) {
         if (b.pageId !== undefined)
           throw Error("しおりの移動先はページかURLのいずれかにしてください。");
@@ -35,6 +37,12 @@ export function writeBookmarks(
     items.forEach((b, i) => {
       const dict = dicts[i];
       dict.set(PDFName.of("Title"), PDFHexString.fromText(b.title));
+      if (b.color !== undefined)
+        dict.set(PDFName.of("C"), context.obj(
+          [1, 3, 5].map((i) => parseInt(b.color!.slice(i, i + 2), 16) / 255),
+        ));
+      const flags = (b.italic ? 1 : 0) | (b.bold ? 2 : 0);
+      if (flags) dict.set(PDFName.of("F"), context.obj(flags));
       dict.set(PDFName.of("Parent"), parent);
       if (i) dict.set(PDFName.of("Prev"), refs[i - 1]);
       if (i + 1 < refs.length) dict.set(PDFName.of("Next"), refs[i + 1]);
