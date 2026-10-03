@@ -29,7 +29,7 @@ import { FormTransfer, createFormField } from "../forms/pdfForms";
 import { widgetKey } from "../forms/commands";
 import { APP_NAME } from "../config";
 import fontkit from "@pdf-lib/fontkit";
-import type { DocumentModel, EditObject } from "../state/model";
+import type { ChoiceOption, DocumentModel, EditObject } from "../state/model";
 import { embedTextFont, fontKey, assertGlyphs } from "../text/fonts";
 import { createVerticalWriter } from "../text/vertical";
 import { layoutText } from "../text/layout";
@@ -115,7 +115,10 @@ export async function exportPdf(
       transfers.set(source.id, transfer);
     }
     await input.flush();
-    copiers.set(source.id, new PageCopier(input, output, attachments, model.images));
+    copiers.set(
+      source.id,
+      new PageCopier(input, output, attachments, model.images),
+    );
   }
   if (
     Object.keys(model.importedFormEdits ?? {}).some(
@@ -146,7 +149,12 @@ export async function exportPdf(
     const px = (x: number) => base.x + x,
       py = (y: number) => base.y + p.height - y;
     for (const o of p.objects) {
-      if (o.kind === "redaction" || o.kind === "link" || o.kind === "direct-image") continue;
+      if (
+        o.kind === "redaction" ||
+        o.kind === "link" ||
+        o.kind === "direct-image"
+      )
+        continue;
       if (["highlight", "underline", "strike", "ink"].includes(o.kind)) {
         writeMarkup(output, page, o, base.x, base.y + p.height);
         continue;
@@ -167,11 +175,16 @@ export async function exportPdf(
           });
         if (o.writingMode === "vertical") {
           const asset = o.fontId ? model.fonts?.[o.fontId] : undefined;
-          if (o.font === "custom" && (!asset || (await inspectFont(asset.bytes, asset.name)).id !== asset.id))
+          if (
+            o.font === "custom" &&
+            (!asset ||
+              (await inspectFont(asset.bytes, asset.name)).id !== asset.id)
+          )
             throw Error("登録フォントの整合性エラー");
           const bytes = o.font === "japanese" ? fontBytes : asset?.bytes;
           if (!bytes) throw Error("縦書きフォントが見つかりません。");
-          await drawVertical(page, o, bytes, base.x, base.y + p.height); continue;
+          await drawVertical(page, o, bytes, base.x, base.y + p.height);
+          continue;
         }
         page.pushOperators(
           pushGraphicsState(),
@@ -389,6 +402,7 @@ export interface FormDescriptor {
   value: string | boolean | string[];
   options: string[];
   hasExportValues?: boolean;
+  choiceOptions?: ChoiceOption[];
   readOnly?: boolean;
   required?: boolean;
   multiline?: boolean;
@@ -476,9 +490,16 @@ export async function inspectForms(
           multiSelect: f.isMultiselect(),
           value: f.getSelected(),
           options: f.getOptions(),
+          choiceOptions: f.acroField.getOptions().map((o) => ({
+            value: o.value.decodeText(),
+            label: (o.display ?? o.value).decodeText(),
+          })),
           hasExportValues: f.acroField
             .getOptions()
-            .some((o) => o.value.decodeText() !== o.display?.decodeText()),
+            .some(
+              (o) =>
+                o.value.decodeText() !== (o.display ?? o.value).decodeText(),
+            ),
         });
     }
   }

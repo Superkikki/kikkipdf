@@ -19,6 +19,27 @@ export const importedFormEditSchema = z
     multiline: z.boolean().optional(),
     multiSelect: z.boolean().optional(),
     maxLength: z.number().int().min(1).max(1000000).nullable().optional(),
+    choiceOptions: z
+      .array(
+        z
+          .object({
+            value: z
+              .string()
+              .min(1)
+              .max(100000)
+              .refine((v) => !!v.trim()),
+            label: z
+              .string()
+              .min(1)
+              .max(100000)
+              .refine((v) => !!v.trim()),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(10000)
+      .refine((v) => new Set(v.map((o) => o.value)).size === v.length)
+      .optional(),
     options: z
       .array(
         z
@@ -32,7 +53,8 @@ export const importedFormEditSchema = z
       .refine((v) => new Set(v).size === v.length)
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine((v) => v.options === undefined || v.choiceOptions === undefined);
 
 export function validateImportedFormEdit(
   field: Pick<FormDescriptor, "name" | "kind" | "hasExportValues">,
@@ -52,15 +74,14 @@ export function validateImportedFormEdit(
   if (
     field.kind !== "dropdown" &&
     field.kind !== "list" &&
-    (result.options !== undefined || result.multiSelect !== undefined)
+    (result.options !== undefined ||
+      result.choiceOptions !== undefined ||
+      result.multiSelect !== undefined)
   )
     throw Error("選択肢と複数選択はドロップダウン・リストで変更できます。");
-  if (
-    field.hasExportValues &&
-    (result.options !== undefined || result.multiSelect !== undefined)
-  )
+  if (field.hasExportValues && result.options !== undefined)
     throw Error(
-      "表示名と保存値が異なる選択欄の選択肢・複数選択の変更は未対応です。",
+      "表示名と保存値が異なる選択欄では、表示名と保存値を指定してください。",
     );
   return result;
 }
@@ -87,15 +108,27 @@ export function resolveImportedForm(
     ...edit,
     maxLength:
       edit.maxLength === null ? undefined : (edit.maxLength ?? field.maxLength),
+    choiceOptions:
+      edit.choiceOptions ??
+      (edit.options
+        ? edit.options.map((value) => ({ value, label: value }))
+        : field.choiceOptions),
+    options:
+      edit.choiceOptions?.map((o) => o.label) ?? edit.options ?? field.options,
+    hasExportValues: edit.choiceOptions
+      ? edit.choiceOptions.some((o) => o.value !== o.label)
+      : field.hasExportValues,
     value,
   };
   if (
     (field.kind === "dropdown" || field.kind === "list") &&
-    (edit.options !== undefined || edit.multiSelect !== undefined)
+    (edit.options !== undefined ||
+      edit.choiceOptions !== undefined ||
+      edit.multiSelect !== undefined)
   )
     resolved.value = normalizeChoiceValue(
       value,
-      resolved.options,
+      resolved.choiceOptions?.map((o) => o.value) ?? resolved.options,
       !!resolved.multiSelect,
     );
   return resolved;

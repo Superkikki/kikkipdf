@@ -76,6 +76,88 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_CHOICE_ONLY === "1") {
+    const direct = page.locator(".viewer-scroll .form-page-overlay");
+    await expect(direct.getByLabel("ColorCode", { exact: true })).toHaveValue(
+      "G",
+    );
+    await expect(
+      direct.getByLabel("ColorCode", { exact: true }).locator("option:checked"),
+    ).toHaveText("Green");
+    await direct.getByLabel("ColorCode", { exact: true }).selectOption("R");
+    await page.getByRole("button", { name: "ツール", exact: true }).click();
+    await page
+      .getByRole("button", { name: "フォーム入力", exact: true })
+      .click();
+    const dialog = page.locator("dialog");
+    await expect(dialog.getByLabel("ColorCode", { exact: true })).toHaveValue(
+      "R",
+    );
+    await dialog
+      .getByLabel("TagCode", { exact: true })
+      .selectOption(["R", "B"]);
+    await page
+      .getByRole("button", { name: "フォームを作成・編集", exact: true })
+      .click();
+    const selector = page.getByLabel("既存の入力欄", { exact: true });
+    const option = selector
+      .locator("option")
+      .filter({ hasText: "ColorCode — ページ1" });
+    await selector.selectOption(await option.getAttribute("value"));
+    await page.getByLabel("選択肢1の表示名", { exact: true }).fill("Scarlet");
+    await page.getByRole("button", { name: "設定を適用", exact: true }).click();
+    await page.getByRole("button", { name: "完了", exact: true }).click();
+    await expect(
+      direct.getByLabel("ColorCode", { exact: true }).locator("option:checked"),
+    ).toHaveText("Scarlet");
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0, {
+      timeout: 30000,
+    });
+    const pdf = await PDFDocument.load(
+      await fs.readFile(
+        path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf"),
+      ),
+    );
+    const dropdown = pdf.getForm().getDropdown("ColorCode"),
+      list = pdf.getForm().getOptionList("TagCode");
+    if (
+      JSON.stringify(dropdown.getSelected()) !== '["R"]' ||
+      dropdown.getOptions()[0] !== "Scarlet" ||
+      dropdown.isEditable()
+    )
+      throw Error("Dropdown export value or label changed");
+    if (
+      JSON.stringify(list.getSelected()) !== '["R","B"]' ||
+      list.acroField.dict.lookup(PDFName.of("I"), PDFArray).toString() !==
+        "[ 0 2 ]"
+    )
+      throw Error("List export values or indices changed");
+    const appearance = dropdown.acroField
+      .getWidgets()[0]
+      .dict.lookup(PDFName.of("AP"), PDFDict)
+      .lookup(PDFName.of("N"), PDFRawStream);
+    // Japanese-capable production font uses CID glyphs; presence of a valid appearance is checked here, text content in unit tests.
+    if (!decodePDFRawStream(appearance).decode().length)
+      throw Error("Missing dropdown appearance");
+    await page.screenshot({
+      path: path.join(process.env.KIKKI_SMOKE_DIR, "choices-saved.png"),
+    });
+    if (errors.length) throw Error(JSON.stringify(errors));
+    console.log(
+      JSON.stringify({
+        ok: true,
+        pairedChoices: true,
+        preservedExportValues: true,
+        selectionIndices: true,
+        nativeSave: true,
+        errors,
+        elapsedMs: Date.now() - started,
+      }),
+    );
+    await browser.close();
+    return;
+  }
   if (process.env.KIKKI_SMOKE_VERTICAL_ONLY === "1") {
     const original = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^日本語の縦書き$/ });
     const neighbour = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^隣の列$/ });

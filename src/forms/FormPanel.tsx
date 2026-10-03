@@ -162,8 +162,13 @@ export function FormPanel({
                     {!f.multiSelect && (
                       <option value="">選択してください</option>
                     )}
-                    {f.options.map((o) => (
-                      <option key={o}>{o}</option>
+                    {(
+                      f.choiceOptions ??
+                      f.options.map((value) => ({ value, label: value }))
+                    ).map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
                     ))}
                   </select>
                 )}

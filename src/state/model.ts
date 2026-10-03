@@ -1,4 +1,7 @@
-import type { SourceTextReference, SourceImageReference } from "../direct/model";
+import type {
+  SourceTextReference,
+  SourceImageReference,
+} from "../direct/model";
 export type ObjectKind =
   | "direct-text"
   | "direct-image"
@@ -111,6 +114,10 @@ export interface Metadata {
 }
 export type FieldValue = string | boolean | string[];
 export type FormKind = "text" | "checkbox" | "radio" | "dropdown" | "list";
+export interface ChoiceOption {
+  value: string;
+  label: string;
+}
 export interface ImportedFormEdit {
   name?: string;
   required?: boolean;
@@ -120,6 +127,7 @@ export interface ImportedFormEdit {
   /** null explicitly removes the original maximum length. */
   maxLength?: number | null;
   options?: string[];
+  choiceOptions?: ChoiceOption[];
 }
 export interface FormFieldModel extends Box {
   id: string;
@@ -128,6 +136,7 @@ export interface FormFieldModel extends Box {
   kind: FormKind;
   value: FieldValue;
   options: string[];
+  choiceOptions?: ChoiceOption[];
   fontSize: number;
   required: boolean;
   readOnly: boolean;

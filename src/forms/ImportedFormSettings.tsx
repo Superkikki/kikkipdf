@@ -23,10 +23,14 @@ export function ImportedFormSettings({
     maxLength:
       resolved.maxLength === undefined ? "" : String(resolved.maxLength),
     options: resolved.options.join("\n"),
+    choiceOptions:
+      resolved.choiceOptions ??
+      resolved.options.map((value) => ({ value, label: value })),
   });
   const [error, setError] = useState("");
   const choice = field.kind === "dropdown" || field.kind === "list";
-  const editableChoice = choice && !field.hasExportValues;
+  const editableChoice = choice;
+  const pairedChoice = field.hasExportValues || !!resolved.choiceOptions?.some((o) => o.value !== o.label);
   const dirty =
     draft.name !== resolved.name ||
     draft.required !== !!resolved.required ||
@@ -39,7 +43,12 @@ export function ImportedFormSettings({
             : String(resolved.maxLength)))) ||
     (editableChoice &&
       (draft.multiSelect !== !!resolved.multiSelect ||
-        draft.options !== resolved.options.join("\n")));
+        draft.options !== resolved.options.join("\n") ||
+        JSON.stringify(draft.choiceOptions) !==
+          JSON.stringify(
+            resolved.choiceOptions ??
+              resolved.options.map((value) => ({ value, label: value })),
+          )));
   function apply() {
     const patch: ImportedFormEdit = {
       name: draft.name,
@@ -51,7 +60,16 @@ export function ImportedFormSettings({
       patch.maxLength = draft.maxLength === "" ? null : Number(draft.maxLength);
     }
     if (editableChoice) {
-      if (draft.options !== resolved.options.join("\n"))
+      if (
+        pairedChoice &&
+        JSON.stringify(draft.choiceOptions) !==
+          JSON.stringify(resolved.choiceOptions)
+      )
+        patch.choiceOptions = draft.choiceOptions;
+      if (
+        !pairedChoice &&
+        draft.options !== resolved.options.join("\n")
+      )
         patch.options = draft.options.split(/\r?\n/);
       if (draft.multiSelect !== !!resolved.multiSelect)
         patch.multiSelect = draft.multiSelect;
@@ -143,27 +161,96 @@ export function ImportedFormSettings({
           />
         </label>
       )}
-      {editableChoice && (
-        <>
-          <label>
-            選択肢（1行に1つ）
-            <textarea
-              aria-label="既存フィールド選択肢"
-              rows={4}
-              value={draft.options}
-              onChange={(e) => setDraft({ ...draft, options: e.target.value })}
-            />
-          </label>
-          <p className="hint">
-            削除した選択肢の入力値は解除されます。複数選択を解除すると先頭の選択だけを残します。
-          </p>
-        </>
-      )}
-      {choice && field.hasExportValues && (
-        <p className="notice">
-          この欄は表示名と保存値が異なるため、選択肢・複数選択の変更は未対応です。名前・必須・読み取り専用は変更できます。
-        </p>
-      )}
+      {editableChoice &&
+        !pairedChoice && (
+          <>
+            <label>
+              選択肢（1行に1つ）
+              <textarea
+                aria-label="既存フィールド選択肢"
+                rows={4}
+                value={draft.options}
+                onChange={(e) =>
+                  setDraft({ ...draft, options: e.target.value })
+                }
+              />
+            </label>
+            <p className="hint">
+              削除した選択肢の入力値は解除されます。複数選択を解除すると先頭の選択だけを残します。
+            </p>
+          </>
+        )}
+      {choice &&
+        pairedChoice && (
+          <div className="choice-option-editor">
+            <p className="hint">
+              表示名は画面に表示され、保存値はPDFに記録されます。保存値は重複できません。
+            </p>
+            {draft.choiceOptions.map((option, index) => (
+              <div className="form-kind-buttons" key={index}>
+                <label>
+                  表示名
+                  <input
+                    aria-label={`選択肢${index + 1}の表示名`}
+                    value={option.label}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        choiceOptions: draft.choiceOptions.map((o, i) =>
+                          i === index ? { ...o, label: e.target.value } : o,
+                        ),
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  保存値
+                  <input
+                    aria-label={`選択肢${index + 1}の保存値`}
+                    value={option.value}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        choiceOptions: draft.choiceOptions.map((o, i) =>
+                          i === index ? { ...o, value: e.target.value } : o,
+                        ),
+                      })
+                    }
+                  />
+                </label>
+                <button
+                  aria-label={`選択肢${index + 1}を削除`}
+                  onClick={() =>
+                    setDraft({
+                      ...draft,
+                      choiceOptions: draft.choiceOptions.filter(
+                        (_, i) => i !== index,
+                      ),
+                    })
+                  }
+                >
+                  削除
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() =>
+                setDraft({
+                  ...draft,
+                  choiceOptions: [
+                    ...draft.choiceOptions,
+                    { value: "", label: "" },
+                  ],
+                })
+              }
+            >
+              選択肢を追加
+            </button>
+            <p className="hint">
+              削除した保存値の選択は解除されます。複数選択を解除すると先頭の選択だけを残します。
+            </p>
+          </div>
+        )}
       {error && (
         <p className="warning" role="alert">
           {error}

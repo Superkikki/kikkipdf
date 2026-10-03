@@ -1,6 +1,36 @@
-const { PDFDocument, StandardFonts, PDFName, PDFDict } = require("pdf-lib");
+const { PDFDocument, StandardFonts, PDFName, PDFDict, PDFHexString } = require("pdf-lib");
 const { writeFile, readFile } = require("node:fs/promises");
 (async () => {
+  if (process.argv[3] === "choices") {
+    const pdf = await PDFDocument.create(),
+      page = pdf.addPage([420, 595]);
+    for (const kind of ["dropdown", "list"]) {
+      const field =
+        kind === "dropdown"
+          ? pdf.getForm().createDropdown("ColorCode")
+          : pdf.getForm().createOptionList("TagCode");
+      field.setOptions(["Red", "Green", "Blue"]);
+      field.addToPage(page, {
+        x: 40,
+        y: kind === "dropdown" ? 470 : 300,
+        width: 220,
+        height: 80,
+      });
+      if (kind === "list") field.enableMultiselect();
+      field.acroField.setOptions(
+        ["Red", "Green", "Blue"].map((label) => ({
+          value: PDFHexString.fromText(label[0]),
+          display: PDFHexString.fromText(label),
+        })),
+      );
+      field.acroField.dict.set(PDFName.of("V"), PDFHexString.fromText("G"));
+    }
+    await writeFile(
+      process.argv[2],
+      await pdf.save({ updateFieldAppearances: false }),
+    );
+    return;
+  }
   if (process.argv[3] === "vertical") {
     const pdf = await PDFDocument.create(); pdf.registerFontkit(require("@pdf-lib/fontkit"));
     const p = pdf.addPage([420, 595]);

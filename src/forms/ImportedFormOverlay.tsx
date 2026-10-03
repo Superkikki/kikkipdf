@@ -180,6 +180,7 @@ export function ImportedFormOverlay({
     name: field.name,
     kind: field.kind,
     value: field.value,
+    choiceOptions: field.choiceOptions,
     options: field.kind === "radio" ? [widget.option ?? ""] : field.options,
     fontSize: field.fontSize,
     required: !!field.required,

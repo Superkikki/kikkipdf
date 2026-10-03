@@ -1,6 +1,6 @@
 [package]
 name = "kikki-pdf"
-version = "0.9.5"
+version = "0.9.6"
 description = "Local desktop PDF editor"
 authors = ["Kikki PDF contributors"]
 edition = "2021"

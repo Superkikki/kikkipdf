@@ -66,6 +66,11 @@ export const updateImportedForm = (
     if (!d.sources[field.sourceId]) throw Error("参照元PDFがありません。");
     const edit = validateImportedFormEdit(field, {
       ...d.importedFormEdits?.[field.key],
+      ...(patch.choiceOptions
+        ? { options: undefined }
+        : patch.options
+          ? { choiceOptions: undefined }
+          : {}),
       ...patch,
     });
     const importedFormEdits = { ...d.importedFormEdits, [field.key]: edit };
@@ -104,9 +109,12 @@ export const resetImportedForm = (field: FormDescriptor) =>
         "元の最大文字数を超える入力値があります。先に入力値を修正してください。",
       );
     const nextValue =
-      (field.kind === "dropdown" || field.kind === "list") &&
-      !field.hasExportValues
-        ? normalizeChoiceValue(value, field.options, !!field.multiSelect)
+      field.kind === "dropdown" || field.kind === "list"
+        ? normalizeChoiceValue(
+            value,
+            field.choiceOptions?.map((o) => o.value) ?? field.options,
+            !!field.multiSelect,
+          )
         : value;
     return {
       ...d,

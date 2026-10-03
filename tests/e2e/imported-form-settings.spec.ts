@@ -211,3 +211,137 @@ test("validates options, applies choices to live input and saves an editable lis
   await live.selectOption("Five");
   await expect(live).toHaveValue("Five");
 });
+
+test("edits paired display labels and export values without losing dropdown or list selections", async ({
+  page,
+}, info) => {
+  const { PDFHexString, PDFName, PDFArray } = await import("pdf-lib");
+  const input = await PDFDocument.create(),
+    sheet = input.addPage();
+  for (const kind of ["dropdown", "list"] as const) {
+    const field =
+      kind === "dropdown"
+        ? input.getForm().createDropdown("ColorCode")
+        : input.getForm().createOptionList("TagCode");
+    field.setOptions(["Red", "Green", "Blue"]);
+    field.addToPage(sheet, {
+      x: 40,
+      y: kind === "dropdown" ? 650 : 450,
+      width: 220,
+      height: 80,
+    });
+    if (kind === "list") field.enableMultiselect();
+    field.acroField.setOptions(
+      ["Red", "Green", "Blue"].map((label) => ({
+        value: PDFHexString.fromText(label[0]),
+        display: PDFHexString.fromText(label),
+      })),
+    );
+    field.acroField.dict.set(PDFName.of("V"), PDFHexString.fromText("G"));
+  }
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "PDFを開く", exact: true }).click();
+  await (
+    await chooser
+  ).setFiles({
+    name: "paired.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from(await input.save({ updateFieldAppearances: false })),
+  });
+  const direct = page.locator(".viewer-scroll .form-page-overlay");
+  await expect(direct.getByLabel("ColorCode", { exact: true })).toHaveValue(
+    "G",
+  );
+  await expect(
+    direct.getByLabel("ColorCode", { exact: true }).locator("option:checked"),
+  ).toHaveText("Green");
+  await direct.getByLabel("ColorCode", { exact: true }).selectOption("R");
+  await page.getByRole("button", { name: "ツール", exact: true }).click();
+  await page.getByRole("button", { name: "フォーム入力", exact: true }).click();
+  const dialog = page.locator("dialog");
+  await expect(dialog.getByLabel("ColorCode", { exact: true })).toHaveValue(
+    "R",
+  );
+  await expect(dialog.getByLabel("TagCode", { exact: true })).toHaveValues([
+    "G",
+  ]);
+  await dialog.getByLabel("TagCode", { exact: true }).selectOption(["R", "B"]);
+  await page
+    .getByRole("button", { name: "フォームを作成・編集", exact: true })
+    .click();
+  await selectField(page, "ColorCode");
+  await page.getByLabel("選択肢1の表示名", { exact: true }).fill("赤色");
+  await page.getByLabel("選択肢2の保存値", { exact: true }).fill("R");
+  await page.getByRole("button", { name: "設定を適用", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("重複");
+  await page.getByLabel("選択肢2の保存値", { exact: true }).fill("G");
+  await page.getByRole("button", { name: "選択肢を追加", exact: true }).click();
+  await page.getByLabel("選択肢4の表示名", { exact: true }).fill("黄色");
+  await page.getByLabel("選択肢4の保存値", { exact: true }).fill("Y");
+  await page.getByRole("button", { name: "設定を適用", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.getByRole("button", { name: "値を入力", exact: true }).click();
+  await expect(
+    dialog.getByLabel("ColorCode", { exact: true }).locator("option:checked"),
+  ).toHaveText("赤色");
+  await dialog.getByLabel("ColorCode", { exact: true }).selectOption("Y");
+  await page.getByRole("button", { name: "完了", exact: true }).click();
+  let download = page.waitForEvent("download");
+  await page.locator("summary").filter({ hasText: "ファイル" }).click();
+  await page
+    .getByRole("button", { name: "編集プロジェクトを保存", exact: true })
+    .click();
+  const projectPath = info.outputPath("paired.kpdf");
+  await (await download).saveAs(projectPath);
+  const restored = await openProject(
+    new Uint8Array(await readFile(projectPath)),
+  );
+  expect(
+    Object.values(restored.importedFormEdits!)[0].choiceOptions?.[0],
+  ).toEqual({ value: "R", label: "赤色" });
+  await page.reload();
+  await open(page, projectPath);
+  await expect(direct.getByLabel("ColorCode", { exact: true })).toHaveValue(
+    "Y",
+  );
+  await expect(
+    direct.getByLabel("ColorCode", { exact: true }).locator("option:checked"),
+  ).toHaveText("黄色");
+  download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  const dest = info.outputPath("paired-edited.pdf");
+  await (await download).saveAs(dest);
+  const saved = await PDFDocument.load(await readFile(dest));
+  expect(saved.getForm().getDropdown("ColorCode").getSelected()).toEqual(["Y"]);
+  expect(saved.getForm().getDropdown("ColorCode").getOptions()).toEqual([
+    "赤色",
+    "Green",
+    "Blue",
+    "黄色",
+  ]);
+  expect(saved.getForm().getDropdown("ColorCode").isEditable()).toBe(false);
+  expect(saved.getForm().getOptionList("TagCode").getSelected()).toEqual([
+    "R",
+    "B",
+  ]);
+  expect(
+    saved
+      .getForm()
+      .getOptionList("TagCode")
+      .acroField.dict.lookup(PDFName.of("I"), PDFArray)
+      .toString(),
+  ).toBe("[ 0 2 ]");
+  await page.reload();
+  await open(page, dest);
+  await expect(direct.getByLabel("ColorCode", { exact: true })).toHaveValue(
+    "Y",
+  );
+  await expect(direct.getByLabel("TagCode", { exact: true })).toHaveValues([
+    "R",
+    "B",
+  ]);
+  expect(errors).toEqual([]);
+});

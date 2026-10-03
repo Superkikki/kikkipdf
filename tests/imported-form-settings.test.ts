@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { PDFDocument, PDFName, PDFHexString, PDFArray } from "pdf-lib";
+import { PDFDocument, PDFName, PDFHexString, PDFArray, type PDFRawStream } from "pdf-lib";
 import { zipSync, unzipSync, strToU8, strFromU8 } from "fflate";
 import { blankPage, emptyDocument } from "../src/state/model";
 import { exportPdf, inspectForms } from "../src/export/engine";
@@ -236,7 +236,7 @@ it("rejects empty names, invalid options, incompatible settings and broken proje
   await expect(openProject(zipSync(archive))).rejects.toThrow("ドロップダウン");
 });
 
-it("preserves paired export/display values when renaming or changing flags and rejects option editing", async () => {
+it("preserves paired export/display values when renaming or changing flags and accepts multiselect settings", async () => {
   const input = await PDFDocument.create(),
     page = input.addPage();
   const choice = input.getForm().createDropdown("Paired");
@@ -277,7 +277,150 @@ it("preserves paired export/display values when renaming or changing flags and r
   expect(() =>
     updateImportedForm(field, { options: ["Red"] }).apply(model),
   ).toThrow("表示名と保存値");
+  const multi = updateImportedForm(field, { multiSelect: true }).apply(model);
+  expect(resolveImportedForm(field, multi).value).toEqual(["G"]);
+  expect(
+    (await PDFDocument.load(await exportPdf(multi)))
+      .getForm()
+      .getDropdown(field.name)
+      .isMultiselect(),
+  ).toBe(true);
+});
+
+it("keeps choice export values, indices, defaults and appearances across editing, project restore and flattening", async () => {
+  const input = await PDFDocument.create(),
+    page = input.addPage();
+  for (const kind of ["dropdown", "list"] as const) {
+    const field =
+      kind === "dropdown"
+        ? input.getForm().createDropdown(kind)
+        : input.getForm().createOptionList(kind);
+    field.setOptions(["Red", "Green", "Blue"]);
+    field.addToPage(page, {
+      x: 30,
+      y: kind === "dropdown" ? 600 : 400,
+      width: 200,
+      height: 80,
+    });
+    field.acroField.setOptions([
+      {
+        value: PDFHexString.fromText("R"),
+        display: PDFHexString.fromText("Red"),
+      },
+      {
+        value: PDFHexString.fromText("G"),
+        display: PDFHexString.fromText("Green"),
+      },
+      {
+        value: PDFHexString.fromText("B"),
+        display: PDFHexString.fromText("Blue"),
+      },
+    ]);
+    field.acroField.dict.set(PDFName.of("V"), PDFHexString.fromText("G"));
+    field.acroField.dict.set(PDFName.of("DV"), PDFHexString.fromText("G"));
+  }
+  let model = emptyDocument();
+  model.sources.s = {
+    id: "s",
+    name: "paired.pdf",
+    bytes: await input.save({ updateFieldAppearances: false }),
+  };
+  model.pages = [{ ...blankPage(), sourceId: "s" }];
+  const fields = await inspectForms(model);
+  expect(fields[0].choiceOptions).toEqual([
+    { value: "R", label: "Red" },
+    { value: "G", label: "Green" },
+    { value: "B", label: "Blue" },
+  ]);
+  for (const field of fields) {
+    model = updateImportedForm(field, {
+      multiSelect: true,
+      choiceOptions: [
+        { value: "G", label: "Grass" },
+        { value: "R", label: "Rose" },
+        { value: "Y", label: "Yellow" },
+      ],
+    }).apply(model);
+    model.formValues[field.key] = ["Y", "G"];
+  }
+  model = await openProject(await saveProject(model));
+  const bytes = await exportPdf(model);
+  const pdf = await PDFDocument.load(bytes);
+  for (const descriptor of fields) {
+    const field =
+      descriptor.kind === "dropdown"
+        ? pdf.getForm().getDropdown(descriptor.name)
+        : pdf.getForm().getOptionList(descriptor.name);
+    expect(field.getSelected()).toEqual(["G", "Y"]);
+    expect(field.getOptions()).toEqual(["Grass", "Rose", "Yellow"]);
+    expect(
+      field.acroField.dict
+        .lookup(PDFName.of("I"), PDFArray)
+        .asArray()
+        .map((v) => Number(v.toString())),
+    ).toEqual([0, 2]);
+    expect(
+      field.acroField.dict
+        .lookup(PDFName.of("DV"), PDFArray)
+        .asArray()
+        .map((v) => (v as PDFHexString).decodeText()),
+    ).toEqual(["G"]);
+    expect(
+      field instanceof (await import("pdf-lib")).PDFDropdown &&
+        field.isEditable(),
+    ).toBe(false);
+  }
+  const { decodePDFRawStream, PDFDict } = await import("pdf-lib");
+  const dropdown = pdf.getForm().getDropdown("dropdown");
+  const appearance = dropdown.acroField
+    .getWidgets()[0]
+    .dict.lookup(PDFName.of("AP"), PDFDict)
+    .lookup(PDFName.of("N")) as PDFRawStream;
+  expect(
+    new TextDecoder().decode(decodePDFRawStream(appearance).decode()),
+  ).toContain("4772617373"); // Grass, not raw G
+  const flat = await PDFDocument.load(
+    await exportPdf({ ...model, flattenForms: true }),
+  );
+  expect(flat.getForm().getFields()).toHaveLength(0);
+  const descriptor = fields[0];
+  const history = new History(model);
+  history.execute(
+    updateImportedForm(descriptor, {
+      multiSelect: false,
+      choiceOptions: [{ value: "G", label: "Green" }],
+    }),
+  );
+  expect(history.current.document.formValues[descriptor.key]).toBe("G");
+  history.undo();
+  expect(history.current.document.formValues[descriptor.key]).toEqual([
+    "Y",
+    "G",
+  ]);
+  const reset = resetImportedForm(descriptor).apply(model);
+  expect(reset.formValues[descriptor.key]).toBe("G");
   expect(() =>
-    updateImportedForm(field, { multiSelect: true }).apply(model),
-  ).toThrow("表示名と保存値");
+    updateImportedForm(descriptor, {
+      choiceOptions: [
+        { value: "G", label: "A" },
+        { value: "G", label: "B" },
+      ],
+    }).apply(model),
+  ).toThrow("重複");
+  expect(() =>
+    updateImportedForm(descriptor, { choiceOptions: [] }).apply(model),
+  ).toThrow();
+  const removed = updateImportedForm(descriptor, {
+    choiceOptions: [{ value: "R", label: "Rose" }],
+  }).apply(model);
+  const removedPdf = await PDFDocument.load(await exportPdf(removed));
+  expect(removedPdf.getForm().getDropdown("dropdown").getSelected()).toEqual(
+    [],
+  );
+  expect(
+    removedPdf
+      .getForm()
+      .getDropdown("dropdown")
+      .acroField.dict.has(PDFName.of("DV")),
+  ).toBe(false);
 });

@@ -1,4 +1,4 @@
-param([string]$Mode = 'release', [string]$Target = 'x86_64-pc-windows-msvc', [switch]$ContextOnly, [switch]$NavigationOnly, [switch]$FormOnly, [switch]$ImageOnly, [switch]$VerticalOnly)
+param([string]$Mode = 'release', [string]$Target = 'x86_64-pc-windows-msvc', [switch]$ContextOnly, [switch]$NavigationOnly, [switch]$FormOnly, [switch]$ImageOnly, [switch]$VerticalOnly, [switch]$ChoiceOnly)
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
 $Exe = Join-Path $Root "src-tauri\target\$Target\$Mode\kikki-pdf.exe"
@@ -14,7 +14,7 @@ $Profile = Join-Path $TestDir ('profile-' + [guid]::NewGuid().ToString('N'))
 $env:WEBVIEW2_USER_DATA_FOLDER = $Profile
 $Fixture = Join-Path $TestDir 'native-fixture.pdf'
 Copy-Item (Join-Path $Root 'public\assets\pdfjs\standard_fonts\LiberationSans-Regular.ttf') (Join-Path $TestDir 'local-test-font.ttf') -Force
-& 'C:\Program Files\nodejs\node.exe' (Join-Path $PSScriptRoot 'native-fixture.cjs') $Fixture $(if ($FormOnly) {'form'} elseif ($ImageOnly) {'images'} elseif ($VerticalOnly) {'vertical'} else {'full'})
+& 'C:\Program Files\nodejs\node.exe' (Join-Path $PSScriptRoot 'native-fixture.cjs') $Fixture $(if ($FormOnly) {'form'} elseif ($ImageOnly) {'images'} elseif ($VerticalOnly) {'vertical'} elseif ($ChoiceOnly) {'choices'} else {'full'})
 if ($LASTEXITCODE -ne 0) { throw 'Could not create test PDF' }
 Copy-Item (Join-Path $Root 'src-tauri\icons\128x128.png') (Join-Path $TestDir 'replacement.png') -Force
 $env:KIKKI_SMOKE_DIR = $TestDir
@@ -22,6 +22,7 @@ $env:KIKKI_SMOKE_CONTEXT_ONLY = if ($ContextOnly) {'1'} else {''}
 $env:KIKKI_SMOKE_NAVIGATION_ONLY = if ($NavigationOnly) {'1'} else {''}
 $env:KIKKI_SMOKE_FORM_ONLY = if ($FormOnly) {'1'} else {''}
 $env:KIKKI_SMOKE_VERTICAL_ONLY = if ($VerticalOnly) {'1'} else {''}
+$env:KIKKI_SMOKE_CHOICE_ONLY = if ($ChoiceOnly) {'1'} else {''}
 $env:KIKKI_SMOKE_IMAGE_ONLY = if ($ImageOnly) {'1'} else {''}
 $Process = Start-Process -FilePath $Exe -WorkingDirectory $TestDir -ArgumentList $Fixture -PassThru -RedirectStandardError (Join-Path $TestDir "stderr.log") -RedirectStandardOutput (Join-Path $TestDir "stdout.log")
 $env:KIKKI_SMOKE_PROCESS = $Process.Id

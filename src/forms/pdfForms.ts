@@ -1,4 +1,6 @@
 import {
+  defaultDropdownAppearanceProvider,
+  defaultOptionListAppearanceProvider,
   PDFArray,
   PDFDict,
   PDFDocument,
@@ -44,7 +46,36 @@ export function setFieldValue(field: PDFField, value: FieldValue) {
     typeof value !== "boolean"
   ) {
     if (value === "" || (Array.isArray(value) && !value.length)) field.clear();
-    else field.select(value);
+    else {
+      const selected = [...new Set(Array.isArray(value) ? value : [value])];
+      const options = field.acroField.getOptions();
+      // /V arrays and /I must use the same option order.
+      selected.sort((a, b) => options.findIndex((o) => o.value.decodeText() === a) - options.findIndex((o) => o.value.decodeText() === b));
+      if (!field.isMultiselect() && selected.length > 1)
+        throw Error("単一選択欄では複数の値を保存できません。");
+      if (
+        selected.some(
+          (v) => !options.some((o) => o.value.decodeText() === v),
+        ) &&
+        !(field instanceof PDFDropdown && field.isEditable())
+      )
+        throw Error("選択肢にない保存値です。");
+      // pdf-lib validates display labels rather than export values, so write /V and /I explicitly.
+      const dict = field.acroField.dict;
+      dict.set(
+        PDFName.of("V"),
+        selected.length === 1
+          ? PDFHexString.fromText(selected[0])
+          : dict.context.obj(selected.map((v) => PDFHexString.fromText(v))),
+      );
+      const indices = selected
+        .map((v) => options.findIndex((o) => o.value.decodeText() === v))
+        .filter((i) => i >= 0)
+        .sort((a, b) => a - b);
+      if (indices.length) dict.set(PDFName.of("I"), dict.context.obj(indices));
+      else dict.delete(PDFName.of("I"));
+      field.doc.getForm().markFieldAsDirty(field.ref);
+    }
   } else if (field instanceof PDFRadioGroup && typeof value === "string") {
     if (value) field.select(value);
     else field.clear();
@@ -115,7 +146,11 @@ export class FormTransfer {
                 field instanceof PDFOptionList) &&
               field.acroField
                 .getOptions()
-                .some((o) => o.value.decodeText() !== o.display?.decodeText()),
+                .some(
+                  (o) =>
+                    o.value.decodeText() !==
+                    (o.display ?? o.value).decodeText(),
+                ),
           },
           edit,
         );
@@ -138,21 +173,35 @@ export class FormTransfer {
         if (field instanceof PDFDropdown || field instanceof PDFOptionList) {
           if (
             checked.options !== undefined ||
+            checked.choiceOptions !== undefined ||
             checked.multiSelect !== undefined
           ) {
             value = normalizeChoiceValue(
               value ?? field.getSelected(),
-              checked.options ?? field.getOptions(),
+              checked.choiceOptions?.map((o) => o.value) ??
+                checked.options ??
+                field.acroField.getOptions().map((o) => o.value.decodeText()),
               checked.multiSelect ?? field.isMultiselect(),
             );
           }
           if (checked.options !== undefined) field.setOptions(checked.options);
+          if (checked.choiceOptions !== undefined)
+            field.acroField.setOptions(
+              checked.choiceOptions.map((o) => ({
+                value: PDFHexString.fromText(o.value),
+                display: PDFHexString.fromText(o.label),
+              })),
+            );
           if (checked.multiSelect !== undefined) {
             if (checked.multiSelect) field.enableMultiselect();
             else field.disableMultiselect();
           }
         }
-        if (checked.options !== undefined || checked.multiSelect !== undefined)
+        if (
+          checked.options !== undefined ||
+          checked.choiceOptions !== undefined ||
+          checked.multiSelect !== undefined
+        )
           form.markFieldAsDirty(field.ref);
       }
       if (value !== undefined) setFieldValue(field, value);
@@ -164,6 +213,46 @@ export class FormTransfer {
       const font = fontBytes
         ? await this.input.embedFont(fontBytes, { subset: false })
         : await this.input.embedFont(StandardFonts.Helvetica);
+      for (const field of fields) {
+        if (
+          (field instanceof PDFDropdown || field instanceof PDFOptionList) &&
+          field.needsAppearancesUpdate()
+        ) {
+          const labels = new Map(
+            field.acroField
+              .getOptions()
+              .map((o) => [
+                o.value.decodeText(),
+                (o.display ?? o.value).decodeText(),
+              ]),
+          );
+          // Supply display text to the appearance provider without changing stored /V or selection indices.
+          const displayField = new Proxy(field, {
+            get(target, key, receiver) {
+              if (key === "getSelected")
+                return () =>
+                  target.getSelected().map((v) => labels.get(v) ?? v);
+              return Reflect.get(target, key, receiver);
+            },
+          });
+          if (field instanceof PDFDropdown)
+            field.updateAppearances(font, (_, widget, embeddedFont) =>
+              defaultDropdownAppearanceProvider(
+                displayField as PDFDropdown,
+                widget,
+                embeddedFont,
+              ),
+            );
+          else
+            field.updateAppearances(font, (_, widget, embeddedFont) =>
+              defaultOptionListAppearanceProvider(
+                displayField as PDFOptionList,
+                widget,
+                embeddedFont,
+              ),
+            );
+        }
+      }
       form.updateFieldAppearances(font);
       // Appearance fonts need to be materialized before copying their references.
       await this.input.flush();
@@ -230,7 +319,9 @@ export class FormTransfer {
             if (
               (field instanceof PDFDropdown ||
                 field instanceof PDFOptionList) &&
-              (edit.options !== undefined || edit.multiSelect !== undefined)
+              (edit.options !== undefined ||
+                edit.choiceOptions !== undefined ||
+                edit.multiSelect !== undefined)
             ) {
               const values = (
                 value instanceof PDFArray ? value.asArray() : [value]
@@ -243,7 +334,7 @@ export class FormTransfer {
                 .map((v) => v.decodeText());
               const normalized = normalizeChoiceValue(
                 values,
-                field.getOptions(),
+                field.acroField.getOptions().map((o) => o.value.decodeText()),
                 field.isMultiselect(),
               );
               if (Array.isArray(normalized) ? normalized.length : normalized) {

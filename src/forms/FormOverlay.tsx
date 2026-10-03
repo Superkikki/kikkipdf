@@ -102,8 +102,13 @@ export function FormOverlay({
               }
             >
               {!f.multiSelect && <option value="" />}
-              {f.options.map((option) => (
-                <option key={option}>{option}</option>
+              {(
+                f.choiceOptions ??
+                f.options.map((value) => ({ value, label: value }))
+              ).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
               ))}
             </select>
           )}
