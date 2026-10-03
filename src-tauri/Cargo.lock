@@ -2147,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "kikki-pdf"
-version = "0.9.8"
+version = "0.9.9"
 dependencies = [
  "lopdf",
  "rand 0.9.5",

@@ -1,6 +1,7 @@
 import type { PDFDocumentProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { uid, type BookmarkModel, type PageModel } from "../state/model";
 import { change } from "../commands/document";
+import { importedLinkUrl } from "../links/target";
 
 export async function readBookmarks(
   pdf: PDFDocumentProxy,
@@ -32,10 +33,12 @@ export async function readBookmarks(
           /* Broken destinations are retained as non-clickable headings. */
         }
       }
+      const url = !pageId ? importedLinkUrl(item.url ?? item.unsafeUrl) : undefined;
       result.push({
         id: uid(),
         title: item.title,
         pageId,
+        ...(url ? { url } : {}),
         ...(item.count !== undefined ? { expanded: item.count >= 0 } : {}),
         children: await walk(item.items ?? [], depth + 1),
       });
@@ -67,11 +70,16 @@ export const addBookmark = (bookmark: BookmarkModel, parentId?: string) =>
   }));
 export const updateBookmark = (
   id: string,
-  patch: Pick<Partial<BookmarkModel>, "title" | "pageId" | "expanded">,
+  patch: Pick<Partial<BookmarkModel>, "title" | "pageId" | "url" | "expanded">,
 ) =>
   change("しおり編集", (d) => ({
     ...d,
-    bookmarks: mapBookmarks(d.bookmarks ?? [], id, (b) => ({ ...b, ...patch })),
+    bookmarks: mapBookmarks(d.bookmarks ?? [], id, (b) => ({
+      ...b,
+      ...patch,
+      ...(Object.hasOwn(patch, "url") ? { pageId: undefined } : {}),
+      ...(Object.hasOwn(patch, "pageId") ? { url: undefined } : {}),
+    })),
   }));
 function without(nodes: BookmarkModel[], id: string): BookmarkModel[] {
   return nodes

@@ -6,6 +6,7 @@ const {
   PDFArray,
   PDFDict,
   PDFHexString,
+  PDFString,
   PDFRawStream,
   decodePDFRawStream,
 } = require("pdf-lib");
@@ -88,12 +89,23 @@ async function verifyObjectContext(page, root) {
     await panel.getByRole("button", { name: "すべて折りたたむ", exact: true }).click(); await expect(panel.getByRole("button", { name: "Closed chapter", exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: /^元に戻す/ }).click(); await expect(panel.getByRole("button", { name: "Needle", exact: true })).toBeVisible();
     await page.getByRole("button", { name: /^やり直す/ }).click(); await expect(panel.getByRole("button", { name: "Closed chapter", exact: true })).toHaveCount(0);
+    await search.fill("Other"); await panel.getByRole("button", { name: "Other", exact: true }).click();
+    const bookmarkUrl = panel.getByLabel("しおりURL", { exact: true });
+    await expect(bookmarkUrl).toHaveValue("https://example.com/native");
+    await bookmarkUrl.fill("mailto:support@example.com?subject=Native");
+    await panel.getByLabel("しおりの移動先", { exact: true }).selectOption({ label: "ページ 2" });
+    await expect(bookmarkUrl).toHaveCount(0);
+    await page.getByRole("button", { name: /^元に戻す/ }).click();
+    await expect(bookmarkUrl).toHaveValue("mailto:support@example.com?subject=Native");
+    await search.fill("");
     await page.getByRole("button", { name: "保存", exact: true }).click(); await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
     const pdf = await PDFDocument.load(await fs.readFile(path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf")));
     const outline = pdf.catalog.lookup(PDFName.of("Outlines"), PDFDict), root = outline.lookup(PDFName.of("First"), PDFDict);
     if (outline.get(PDFName.of("Count")).toString() !== "1" || root.get(PDFName.of("Count")).toString() !== "-2" || root.lookup(PDFName.of("First"), PDFDict).get(PDFName.of("Count")).toString() !== "-1") throw Error("Bookmark folding or visible counts changed");
+    const external = root.lookup(PDFName.of("Last"), PDFDict);
+    if (external.has(PDFName.of("Dest")) || external.lookup(PDFName.of("A"), PDFDict).lookup(PDFName.of("URI"), PDFString).decodeText() !== "mailto:support@example.com?subject=Native") throw Error("External bookmark destination changed");
     if (errors.length) throw Error(JSON.stringify(errors));
-    console.log(JSON.stringify({ native: true, bookmarkSearch: true, preservedFolding: true, bulkExpandCollapse: true, undoRedo: true, nativeSave: true, errors }));
+    console.log(JSON.stringify({ native: true, bookmarkSearch: true, externalBookmarkUrl: true, preservedFolding: true, bulkExpandCollapse: true, undoRedo: true, nativeSave: true, errors }));
     await browser.close(); return;
   }
   if (process.env.KIKKI_SMOKE_CHOICE_ONLY === "1") {

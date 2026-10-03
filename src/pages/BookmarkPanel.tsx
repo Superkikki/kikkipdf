@@ -9,7 +9,9 @@ import {
   ArrowDown,
   IndentIncrease,
   IndentDecrease,
+  ExternalLink,
 } from "lucide-react";
+import { validatedLinkUrl } from "../links/target";
 import { uid, type BookmarkModel, type DocumentModel } from "../state/model";
 import { documentStore } from "../state/store";
 import {
@@ -35,6 +37,11 @@ export function BookmarkPanel({
   const nodes = model.bookmarks ?? [],
     found = locateBookmark(nodes, selected);
   const filtered = filterBookmarks(nodes, query);
+  let urlError = "";
+  if (found?.node.url !== undefined) {
+    try { validatedLinkUrl(found.node.url); }
+    catch (e) { urlError = e instanceof Error ? e.message : "URLが不正です。"; }
+  }
   function add() {
     const b = {
       id: uid(),
@@ -79,7 +86,7 @@ export function BookmarkPanel({
                 jump(b.pageId);
             }}
           >
-            <Bookmark size={14} />
+            {b.url !== undefined ? <ExternalLink size={14} /> : <Bookmark size={14} />}
             <span>{b.title}</span>
           </button>
         </div>
@@ -140,16 +147,17 @@ export function BookmarkPanel({
             移動先
             <select
               aria-label="しおりの移動先"
-              value={found.node.pageId ?? ""}
+              value={found.node.url !== undefined ? "url" : found.node.pageId ?? ""}
               onChange={(e) =>
                 documentStore.execute(
-                  updateBookmark(selected, {
-                    pageId: e.target.value || undefined,
-                  }),
+                  updateBookmark(selected, e.target.value === "url"
+                    ? { url: "https://" }
+                    : { pageId: e.target.value || undefined }),
                 )
               }
             >
               <option value="">見出しのみ</option>
+              <option value="url">Web / メール</option>
               {model.pages.map((p, i) => (
                 <option key={p.id} value={p.id}>
                   ページ {i + 1}
@@ -157,6 +165,24 @@ export function BookmarkPanel({
               ))}
             </select>
           </label>
+          {found.node.url !== undefined && (
+            <>
+              <label>
+                しおりURL
+                <input
+                  aria-label="しおりURL"
+                  aria-invalid={!!urlError}
+                  value={found.node.url}
+                  placeholder="https://… / mailto:…"
+                  onChange={(e) => documentStore.execute(
+                    updateBookmark(selected, { url: e.target.value }),
+                  )}
+                />
+              </label>
+              {urlError && <p role="alert">{urlError}</p>}
+              <p className="notice">外部URLはPDFに保存します。この画面では移動先を編集できます。</p>
+            </>
+          )}
           <div className="form-kind-buttons">
             <button
               title="しおりを上へ"

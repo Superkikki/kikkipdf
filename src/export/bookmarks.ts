@@ -1,5 +1,6 @@
-import { PDFHexString, PDFName, type PDFDocument, type PDFPage } from "pdf-lib";
+import { PDFHexString, PDFString, PDFName, type PDFDocument, type PDFPage } from "pdf-lib";
 import type { BookmarkModel } from "../state/model";
+import { validatedLinkUrl } from "../links/target";
 /** Build a new outline linked to exported page references, including after reorder/extraction. */
 export function writeBookmarks(
   pdf: PDFDocument,
@@ -8,6 +9,11 @@ export function writeBookmarks(
 ) {
   function prune(items: BookmarkModel[]): BookmarkModel[] {
     return items.flatMap((b) => {
+      if (b.url !== undefined) {
+        if (b.pageId !== undefined)
+          throw Error("しおりの移動先はページかURLのいずれかにしてください。");
+        validatedLinkUrl(b.url);
+      }
       const children = prune(b.children);
       if (b.pageId && !pages.has(b.pageId)) return children;
       return [{ ...b, children }];
@@ -34,6 +40,10 @@ export function writeBookmarks(
       if (i + 1 < refs.length) dict.set(PDFName.of("Next"), refs[i + 1]);
       const page = b.pageId ? pages.get(b.pageId) : undefined;
       if (page) dict.set(PDFName.of("Dest"), context.obj([page.ref, "Fit"]));
+      else if (b.url !== undefined)
+        dict.set(PDFName.of("A"), context.obj({
+          S: "URI", URI: PDFString.of(validatedLinkUrl(b.url)),
+        }));
       if (b.children.length) {
         const children = build(b.children, refs[i]);
         dict.set(PDFName.of("First"), children[0]);

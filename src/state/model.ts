@@ -148,6 +148,7 @@ export interface BookmarkModel {
   id: string;
   title: string;
   pageId?: string;
+  url?: string;
   expanded?: boolean;
   children: BookmarkModel[];
 }
