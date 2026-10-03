@@ -134,6 +134,23 @@ async function verifyObjectContext(page, root) {
     await page.getByRole("button", { name: "保存", exact: true }).click();
     await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
     if (JSON.stringify(await imageStreams()) !== JSON.stringify(originalPixels)) throw Error("Original image pixel data changed");
+    const picker = promisify(execFile)("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+      path.join(__dirname, "windows-pick-test-file.ps1"), "-TargetProcessId", process.env.KIKKI_SMOKE_PROCESS,
+      "-FilePath", path.join(process.env.KIKKI_SMOKE_DIR, "replacement.png")], { timeout: 30000 });
+    const picked = picker.then(result => ({ result }), error => ({ error }));
+    await page.getByRole("button", { name: "画像を差し替える", exact: true }).click();
+    const choice = await picked; if (choice.error) throw choice.error;
+    await expect(page.getByRole("button", { name: "元の画像データに戻す", exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.locator(".viewer-scroll .page-view[data-rendered=true]")).toBeVisible();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const replacementPdf = await PDFDocument.load(await fs.readFile(fixture));
+    if (!replacementPdf.context.enumerateIndirectObjects().some(([, o]) => o instanceof PDFRawStream &&
+      o.dict.get(PDFName.of("Subtype")) === PDFName.of("Image") && o.dict.lookup(PDFName.of("Width")).toString() === "128")) throw Error("Replacement image missing in native save");
+    await page.getByRole("button", { name: "元の画像データに戻す", exact: true }).click();
+    await expect(page.getByRole("button", { name: "元の画像データに戻す", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: /^元に戻す/ }).click();
+    await expect(page.getByRole("button", { name: "元の画像データに戻す", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "削除", exact: true }).click();
     await expect(page.locator(".properties")).toContainText("元の画像を削除");
     await page.getByRole("button", { name: /^元に戻す/ }).click();
@@ -149,7 +166,7 @@ async function verifyObjectContext(page, root) {
     await expect(neighbours).toHaveCount(2);
     await page.screenshot({ path: path.join(__dirname, "..", ".tools", "windows-native-image.png") });
     if (errors.length) throw Error(errors.join("\n"));
-    console.log(JSON.stringify({ native: true, nestedSharedImage: true, moveResize: true,
+    console.log(JSON.stringify({ native: true, nestedSharedImage: true, moveResize: true, imageReplacement: true,
       unchangedPixelsAndNeighbour: true, undoRedo: true, nativeSave: true, removedImageData: true, errors }));
     await browser.close(); return;
   }

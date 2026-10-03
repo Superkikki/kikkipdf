@@ -11,7 +11,7 @@ import {
   PDFString,
   type PDFDocument,
 } from "pdf-lib";
-import type { PageModel, LinkTarget } from "../state/model";
+import type { PageModel, LinkTarget, ImageAsset } from "../state/model";
 import { setLinkTarget } from "../links/pdfLinks";
 import { importedLinkUrl } from "../links/target";
 import type { AttachmentWriter } from "../attachments/pdfAttachments";
@@ -86,6 +86,7 @@ export class PageCopier {
     private input: PDFDocument,
     private output: PDFDocument,
     private attachments?: AttachmentWriter,
+    private images: Record<string, ImageAsset> = {},
   ) {
     this.copier = PDFObjectCopier.for(input.context, output.context);
   }
@@ -98,7 +99,7 @@ export class PageCopier {
       throw Error("直接編集の参照元PDFが一致しません。");
     const imageEdits = directImageEdits(model);
     const content = edits.length || imageEdits.length
-      ? await rewrittenPage(source, model.sourceIndex, edits, imageEdits)
+      ? await rewrittenPage(source, model.sourceIndex, edits, imageEdits, this.images)
       : undefined;
     // Never copy the original content first: pdf-lib serializes orphan objects too.
     if (content) {

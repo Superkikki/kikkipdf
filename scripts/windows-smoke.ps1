@@ -16,6 +16,7 @@ $Fixture = Join-Path $TestDir 'native-fixture.pdf'
 Copy-Item (Join-Path $Root 'public\assets\pdfjs\standard_fonts\LiberationSans-Regular.ttf') (Join-Path $TestDir 'local-test-font.ttf') -Force
 & 'C:\Program Files\nodejs\node.exe' (Join-Path $PSScriptRoot 'native-fixture.cjs') $Fixture $(if ($FormOnly) {'form'} elseif ($ImageOnly) {'images'} elseif ($VerticalOnly) {'vertical'} else {'full'})
 if ($LASTEXITCODE -ne 0) { throw 'Could not create test PDF' }
+Copy-Item (Join-Path $Root 'src-tauri\icons\128x128.png') (Join-Path $TestDir 'replacement.png') -Force
 $env:KIKKI_SMOKE_DIR = $TestDir
 $env:KIKKI_SMOKE_CONTEXT_ONLY = if ($ContextOnly) {'1'} else {''}
 $env:KIKKI_SMOKE_NAVIGATION_ONLY = if ($NavigationOnly) {'1'} else {''}

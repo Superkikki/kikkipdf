@@ -19,6 +19,7 @@ import {
 } from "../commands/document";
 import { LinkTargetEditor } from "../links/LinkTargetEditor";
 import { useTextLayout } from "../text/useTextLayout";
+import { ImageReplacement } from "../images/ImageReplacement";
 import { FontPicker } from "../fonts/FontPicker";
 export function Properties({
   page,
@@ -107,6 +108,7 @@ export function Properties({
           )}
           {o.kind === "direct-image" && <>
             <p className="hint">{o.imageDeleted ? "元の画像を削除しています。" : "既存画像の位置とサイズを編集します。同じ画像を使う別の箇所は保持します。"}</p>
+            {page && <ImageReplacement key={o.id} object={o} pageId={page.id} />}
             <button onClick={() => page && documentStore.execute(revertDirectImage(page.id, o.id))}>元の画像に戻す</button>
           </>}
           {o.kind === "ocr" && (

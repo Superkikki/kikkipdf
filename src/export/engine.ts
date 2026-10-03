@@ -115,7 +115,7 @@ export async function exportPdf(
       transfers.set(source.id, transfer);
     }
     await input.flush();
-    copiers.set(source.id, new PageCopier(input, output, attachments));
+    copiers.set(source.id, new PageCopier(input, output, attachments, model.images));
   }
   if (
     Object.keys(model.importedFormEdits ?? {}).some(

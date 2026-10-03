@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { PDFDocument, PDFName, PDFRawStream, StandardFonts, degrees } from "pdf-lib";
+import { PDFDocument, PDFName, PDFNumber, PDFRawStream, StandardFonts, degrees } from "pdf-lib";
 import { readFile } from "node:fs/promises";
 import { inspectDirectText } from "../src/direct/content";
 import { directImageEdits, type DirectImageRun } from "../src/direct/model";
@@ -7,6 +7,7 @@ import { emptyDocument, blankPage, newObject, type DocumentModel } from "../src/
 import { addObject, updateObject, duplicatePage, deleteObject, revertDirectImage } from "../src/commands/document";
 import { exportPdf } from "../src/export/engine";
 import { openProject, saveProject } from "../src/state/project";
+import { replaceDirectImage } from "../src/images/commands";
 import { History } from "../src/commands/history";
 
 async function fixture(nested = false, rotated = false): Promise<DocumentModel> {
@@ -74,6 +75,37 @@ describe("existing PDF image editing", () => {
       stream instanceof PDFRawStream && stream.dict.get(PDFName.of("Subtype")) === PDFName.of("Image"))).toBe(false);
     h.execute(revertDirectImage(d.pages[0].id, first.id));
     expect((await inspectDirectText(await exportPdf(h.current.document), 0)).images).toHaveLength(1);
+  });
+  it("replaces only one nested shared occurrence, preserves another page and supports undo, delete and restore", async () => {
+    const input = await fixture(true), d = duplicatePage(input.pages[0].id).apply(input);
+    const before = (await inspect(d)).images!, o = object(before[0]);
+    const h = new History(addObject(d.pages[0].id, o).apply(d));
+    const asset = { id: "replacement", bytes: new Uint8Array(await readFile("src-tauri/icons/128x128.png")), mime: "image/png" as const };
+    h.execute(replaceDirectImage(d.pages[0].id, o.id, asset));
+    const loaded = await openProject(await saveProject(h.current.document));
+    expect(loaded.pages[0].objects[0].imageId).toBe(asset.id); expect(loaded.images[asset.id].bytes).toEqual(asset.bytes);
+    const sizes = async (data: Uint8Array) => (await PDFDocument.load(data)).context.enumerateIndirectObjects().flatMap(([, v]) =>
+      v instanceof PDFRawStream && v.dict.get(PDFName.of("Subtype")) === PDFName.of("Image") ? [v.dict.lookup(PDFName.of("Width"), PDFNumber).toString()] : []);
+    const saved = await exportPdf(loaded); expect(await sizes(saved)).toContain("128"); expect(await sizes(saved)).toContain("32");
+    const after = await inspectDirectText(saved, 0), other = await inspectDirectText(saved, 1);
+    expect(after.images!.map(r => [r.x, r.y, r.width, r.height])).toEqual(before.map(r => [r.x, r.y, r.width, r.height]));
+    expect(other.images!.map(r => [r.x, r.y, r.width, r.height])).toEqual(before.map(r => [r.x, r.y, r.width, r.height]));
+    h.undo(); expect(await sizes(await exportPdf(h.current.document))).not.toContain("128");
+    h.redo(); h.execute(deleteObject(d.pages[0].id, o.id)); expect(await sizes(await exportPdf(h.current.document))).not.toContain("128");
+    h.execute(revertDirectImage(d.pages[0].id, o.id)); expect((await inspectDirectText(await exportPdf(h.current.document), 0)).images).toHaveLength(2);
+    const missing = structuredClone(loaded); delete missing.images[asset.id]; await expect(exportPdf(missing)).rejects.toThrow(/差し替え/);
+    const invalid = structuredClone(loaded); invalid.images[asset.id].bytes = new Uint8Array([0, 1]); await expect(exportPdf(invalid)).rejects.toThrow();
+  });
+  it("removes unreferenced original image and mask after replacing every occurrence", async () => {
+    let d = await fixture(true); const runs = (await inspect(d)).images!;
+    const asset = { id: "replacement", bytes: new Uint8Array(await readFile("src-tauri/icons/128x128.png")), mime: "image/png" as const };
+    for (const [i, run] of runs.entries()) {
+      const o = object(run); d = addObject(d.pages[0].id, o).apply(d);
+      d = i === 0 ? replaceDirectImage(d.pages[0].id, o.id, asset).apply(d) : updateObject(d.pages[0].id, o.id, { imageId: asset.id }).apply(d);
+    }
+    const pdf = await PDFDocument.load(await exportPdf(d));
+    const imageWidths = pdf.context.enumerateIndirectObjects().flatMap(([, v]) => v instanceof PDFRawStream && v.dict.get(PDFName.of("Subtype")) === PDFName.of("Image") ? [v.dict.lookup(PDFName.of("Width"), PDFNumber).toString()] : []);
+    expect(imageWidths.length).toBeGreaterThan(0); expect(imageWidths.every(n => n === "128")).toBe(true);
   });
   it("uses the original CropBox coordinates on a rotated output page", async () => {
     const d = await fixture(), pdf = await PDFDocument.load(d.sources.s.bytes);

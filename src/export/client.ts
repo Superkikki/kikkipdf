@@ -1,5 +1,6 @@
 import type {
   DocumentModel,
+  ImageAsset,
   FontAsset,
   Source,
   PageModel,
@@ -28,8 +29,9 @@ export const previewDirectPage = (
   source: Source,
   page: PageModel,
   signal: AbortSignal,
+  images: Record<string, ImageAsset> = {},
 ) =>
-  run<Uint8Array>({ type: "directPreview", source, page }, undefined, signal);
+  run<Uint8Array>({ type: "directPreview", source, page, images }, undefined, signal);
 export const inspectLocalFont = (bytes: Uint8Array, name: string) =>
   run<FontAsset>({ type: "fontInspect", bytes, name });
 function run<T>(

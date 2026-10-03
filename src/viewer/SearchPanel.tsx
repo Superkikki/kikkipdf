@@ -47,7 +47,7 @@ export function SearchPanel({
               .map((o) => o.text ?? "")
               .join(" ");
             if (p.sourceId) {
-              const lease = acquirePagePdf(model.sources[p.sourceId], p);
+              const lease = acquirePagePdf(model.sources[p.sourceId], p, model.images);
               try {
                 const { pdf, index } = await lease.ready;
                 const page = await pdf.getPage(index + 1);

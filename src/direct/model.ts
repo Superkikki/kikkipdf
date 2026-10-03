@@ -67,6 +67,7 @@ export interface DirectImageRun extends Box {
 export interface DirectImageEdit extends Box {
   reference: SourceImageReference;
   deleted: boolean;
+  imageId?: string;
 }
 export function directImageEdits(page: PageModel): DirectImageEdit[] {
   const seen = new Set<string>();
@@ -76,6 +77,6 @@ export function directImageEdits(page: PageModel): DirectImageEdit[] {
         seen.has(textReferenceKey(ref)) || o.rotation !== 0 || o.opacity !== 1)
       throw Error("既存画像の参照先・変形が不正です。");
     seen.add(textReferenceKey(ref));
-    return { reference: ref, x: o.x, y: o.y, width: o.width, height: o.height, deleted: !!o.imageDeleted };
+    return { reference: ref, x: o.x, y: o.y, width: o.width, height: o.height, deleted: !!o.imageDeleted, ...(o.imageId ? { imageId: o.imageId } : {}) };
   });
 }

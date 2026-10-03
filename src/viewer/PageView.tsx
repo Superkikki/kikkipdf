@@ -57,6 +57,8 @@ export function PageView({
   const [draft, setDraft] = useState<{ a: Point; b: Point } | null>(null);
   const source = page.sourceId ? model.sources[page.sourceId] : undefined;
   const directKey = JSON.stringify({ text: directReferences(page), images: directImageEdits(page) });
+  const currentImages = useRef(model.images);
+  currentImages.current = model.images;
   const currentPage = useRef(page);
   currentPage.current = page;
   const inspection = useRef<AbortController | null>(null);
@@ -91,7 +93,7 @@ export function PageView({
         setReady(true);
         return;
       }
-      const lease = acquirePagePdf(source!, currentPage.current);
+      const lease = acquirePagePdf(source!, currentPage.current, currentImages.current);
       release = lease.release;
       const { pdf, index } = await lease.ready;
       if (cancelled) return;

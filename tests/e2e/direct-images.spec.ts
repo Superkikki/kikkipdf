@@ -3,11 +3,12 @@ import { PDFDocument, PDFName, PDFRawStream, StandardFonts, rgb } from "pdf-lib"
 import { readFile } from "node:fs/promises";
 import { inspectDirectText } from "../../src/direct/content";
 import { openProject } from "../../src/state/project";
-async function fixture() {
+async function fixture(covered = false) {
   const inner = await PDFDocument.create(), p = inner.addPage([420, 400]);
   p.drawRectangle({ x: 0, y: 0, width: 420, height: 400, color: rgb(0.9, 0.8, 0.7) });
   const image = await inner.embedPng(await readFile("src-tauri/icons/32x32.png"));
   p.drawImage(image, { x: 40, y: 220, width: 80, height: 40 });
+  if (covered) p.drawRectangle({ x: 40, y: 220, width: 40, height: 40, color: rgb(0, 0, 1) });
   p.drawText("Unchanged text", { x: 30, y: 330, size: 12, font: await inner.embedFont(StandardFonts.Helvetica) });
   const source = await PDFDocument.load(await inner.save()), middle = await PDFDocument.create();
   middle.addPage([420, 400]).drawPage(await middle.embedPage(source.getPage(0)));
@@ -97,4 +98,38 @@ test("moves, resizes and deletes an existing shared image independently, preserv
   expect((await inspectDirectText(new Uint8Array(await readFile(final)), 0)).images).toHaveLength(0);
   expect((await PDFDocument.load(await readFile(final))).context.enumerateIndirectObjects().some(([, value]) =>
     value instanceof PDFRawStream && value.dict.get(PDFName.of("Subtype")) === PDFName.of("Image"))).toBe(false);
+});
+
+test("replaces only a selected nested image, keeps draw order and shared occurrence, restores content and saves editable replacements", async ({ page }, info) => {
+  const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
+  await page.goto("/"); await open(page, await fixture(true));
+  const red = async () => { const p = await pixel(page, 100, 145); return p[0] > 250 && p[1] < 3 && p[2] < 3; };
+  const other = await pixel(page, 100, 310), first = await pixel(page, 100, 145);
+  await imageTool(page); await page.getByRole("button", { name: "既存画像 1", exact: true }).dblclick();
+  const jpeg = await page.evaluate(() => { const c = document.createElement("canvas"); c.width = c.height = 4; const ctx = c.getContext("2d")!; ctx.fillStyle = "#ff0000"; ctx.fillRect(0, 0, 4, 4); return c.toDataURL("image/jpeg").split(",")[1]; });
+  let chooser = page.waitForEvent("filechooser"); await page.getByRole("button", { name: "画像を差し替える", exact: true }).click();
+  await (await chooser).setFiles({ name: "replacement.jpg", mimeType: "image/jpeg", buffer: Buffer.from(jpeg, "base64") });
+  await expect(page.getByRole("button", { name: "元の画像データに戻す", exact: true })).toBeVisible();
+  await expect.poll(red).toBe(true);
+  expect(await pixel(page, 50, 145)).toEqual([0, 0, 255]); expect(await pixel(page, 100, 310)).toEqual(other);
+  await page.getByRole("button", { name: /^元に戻す/ }).click(); await expect.poll(() => pixel(page, 100, 145)).toEqual(first);
+  await page.getByRole("button", { name: /^やり直す/ }).click(); await expect.poll(red).toBe(true);
+  chooser = page.waitForEvent("filechooser"); await page.getByRole("button", { name: "画像を差し替える", exact: true }).click();
+  await (await chooser).setFiles({ name: "invalid.png", mimeType: "image/png", buffer: Buffer.from("invalid") });
+  await expect(page.getByRole("alert")).toContainText("PNGまたはJPEG"); expect(await red()).toBe(true);
+  let download = page.waitForEvent("download"); await page.locator("summary").filter({ hasText: "ファイル" }).click(); await page.getByRole("button", { name: "編集プロジェクトを保存", exact: true }).click();
+  const project = info.outputPath("replacement.kpdf"); await (await download).saveAs(project);
+  const loaded = await openProject(new Uint8Array(await readFile(project))); const object = loaded.pages[0].objects[0];
+  expect(loaded.images[object.imageId!].mime).toBe("image/jpeg");
+  download = page.waitForEvent("download"); await page.getByRole("button", { name: "保存", exact: true }).click();
+  const saved = info.outputPath("replacement.pdf"); await (await download).saveAs(saved);
+  await page.reload(); await open(page, await readFile(project), "replacement.kpdf");
+  await expect.poll(red).toBe(true);
+  await page.locator(".viewer-scroll .object-layer > g").first().click(); await page.getByRole("button", { name: "元の画像データに戻す", exact: true }).click();
+  await expect.poll(() => pixel(page, 100, 145)).toEqual(first);
+  await page.reload(); await open(page, await readFile(saved)); await expect.poll(red).toBe(true);
+  expect(await pixel(page, 50, 145)).toEqual([0, 0, 255]); expect(await pixel(page, 100, 310)).toEqual(other);
+  await imageTool(page); await page.getByRole("button", { name: "既存画像 1", exact: true }).dblclick();
+  chooser = page.waitForEvent("filechooser"); await page.getByRole("button", { name: "画像を差し替える", exact: true }).click(); await (await chooser).setFiles("src-tauri/icons/128x128.png");
+  await expect.poll(red).toBe(false); expect(errors).toEqual([]);
 });

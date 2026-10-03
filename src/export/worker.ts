@@ -7,14 +7,14 @@ import { inspectFont } from "../fonts/inspect";
 import { inspectDirectText, rewrittenPage } from "../direct/content";
 import { directReferences, directImageEdits } from "../direct/model";
 import { PDFDocument, PDFName } from "pdf-lib";
-import type { Source, PageModel } from "../state/model";
+import type { Source, PageModel, ImageAsset } from "../state/model";
 import {
   inspectAttachments,
   extractAttachment,
 } from "../attachments/pdfAttachments";
 export type WorkerRequest =
   | { id: number; type: "directInspect"; bytes: Uint8Array; index: number }
-  | { id: number; type: "directPreview"; source: Source; page: PageModel }
+  | { id: number; type: "directPreview"; source: Source; page: PageModel; images: Record<string, ImageAsset> }
   | { id: number; type: "fontInspect"; bytes: Uint8Array; name: string }
   | {
       id: number;
@@ -50,7 +50,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       const refs = directReferences(req.page);
       if (refs.some((r) => r.sourceId !== req.source.id))
         throw Error("文字の参照元が一致しません。");
-      const rewritten = await rewrittenPage(source, req.page.sourceIndex, refs, directImageEdits(req.page));
+      const rewritten = await rewrittenPage(source, req.page.sourceIndex, refs, directImageEdits(req.page), req.images);
       if (rewritten.resources) source.node.set(PDFName.of("Resources"), rewritten.resources);
       source.node.set(PDFName.of("Contents"), input.context.register(input.context.flateStream(rewritten.bytes)));
       const output = await PDFDocument.create();

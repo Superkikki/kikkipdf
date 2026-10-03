@@ -9,6 +9,7 @@ import {
   emptyDocument,
   uid,
   type DocumentModel,
+  type ImageAsset,
   type Source,
   type PageModel,
 } from "../state/model";
@@ -26,7 +27,7 @@ const previews = new Map<
   { users: number; ready: PageLease["ready"]; controller: AbortController }
 >();
 /** Share previews only while a visible viewer, thumbnail or search holds a lease. */
-export function acquirePagePdf(source: Source, page: PageModel): PageLease {
+export function acquirePagePdf(source: Source, page: PageModel, assets: Record<string, ImageAsset> = {}): PageLease {
   const refs = directReferences(page), images = directImageEdits(page);
   if (!refs.length && !images.length)
     return {
@@ -47,6 +48,7 @@ export function acquirePagePdf(source: Source, page: PageModel): PageLease {
         objects: page.objects.filter((o) => o.kind === "direct-text" || o.kind === "direct-image"),
       },
       controller.signal,
+      Object.fromEntries(images.filter(edit => !edit.deleted && edit.imageId).map(edit => [edit.imageId!, assets[edit.imageId!]])),
     ).then(async (bytes) => ({
       pdf: await getDocument({
         data: bytes,

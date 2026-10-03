@@ -1,6 +1,7 @@
 # UI automation for this application's native file picker, used only by smoke tests.
 param([int]$TargetProcessId, [string]$FilePath)
 $ErrorActionPreference = 'Stop'
+$FilePath = [IO.Path]::GetFullPath($FilePath)
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type @'
@@ -39,11 +40,12 @@ if ($NameInput.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pa
 $Open = $Dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
   (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '1')))
 if (!$Open) { throw 'Open button was not found' }
-$Invoke = $null
-if ($Open.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$Invoke)) {
-  $Invoke.Invoke()
-} else {
-  $Button = [KikkiTestDialog]::GetDlgItem([IntPtr]$Dialog.Current.NativeWindowHandle, 1)
-  if ($Button -eq [IntPtr]::Zero -or ![KikkiTestDialog]::PostMessageW($Button, 245, [IntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not click Open button' }
-}
+$Button = [KikkiTestDialog]::GetDlgItem([IntPtr]$Dialog.Current.NativeWindowHandle, 1)
+if ($Button -eq [IntPtr]::Zero -or ![KikkiTestDialog]::PostMessageW($Button, 245, [IntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not click Open button' }
+$CloseDeadline = (Get-Date).AddSeconds(3)
+do {
+  Start-Sleep -Milliseconds 100
+  $Remaining = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children, $Condition)
+} while ($Remaining -and (Get-Date) -lt $CloseDeadline)
+if ($Remaining) { throw 'Application file picker did not close after selecting the test file' }
 Write-Output 'Selected test file in application file picker'

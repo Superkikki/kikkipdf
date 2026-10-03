@@ -16,6 +16,7 @@ import type {
   DirectTextRun,
   SourceTextReference,
 } from "./model";
+import type { ImageAsset } from "../state/model";
 import { textReferenceKey } from "./model";
 type Matrix = [number, number, number, number, number, number];
 const identity = (): Matrix => [1, 0, 0, 1, 0, 0];
@@ -519,7 +520,7 @@ export async function inspectDirectText(
   }
 }
 export async function rewrittenPage(
-  page: PDFPage, index: number, references: SourceTextReference[], imageEdits: DirectImageEdit[] = [],
+  page: PDFPage, index: number, references: SourceTextReference[], imageEdits: DirectImageEdit[] = [], assets: Record<string, ImageAsset> = {},
 ): Promise<{ bytes: Uint8Array; resources: PDFDict | undefined }> {
   const analysis = await analyzePage(page, index), selected = new Set<string>();
   for (const reference of references) {
@@ -544,6 +545,15 @@ export async function rewrittenPage(
       throw Error("画像の配置が不正か、元の部品の表示範囲を超えています。");
     selected.add(id); images.set(id, { run, edit });
   }
+  const replacements = new Map<string, import("pdf-lib").PDFRef>();
+  for (const { edit } of images.values()) {
+    if (edit.deleted || !edit.imageId || replacements.has(edit.imageId)) continue;
+    const asset = assets[edit.imageId];
+    if (!asset || asset.id !== edit.imageId || !asset.bytes.length || asset.bytes.length > 32 * 1024 * 1024 || !["image/png", "image/jpeg"].includes(asset.mime))
+      throw Error("差し替える画像が見つからないか形式が不正です。");
+    const image = asset.mime === "image/png" ? await page.doc.embedPng(asset.bytes) : await page.doc.embedJpg(asset.bytes);
+    await image.embed(); replacements.set(edit.imageId, image.ref);
+  }
   function rewrite(node: Analyzed, path: number[]): { bytes: Uint8Array; resources: PDFDict | undefined } {
     const edits = [...node.replacements.entries()]
       .filter(([i]) => selected.has([...path, i].join("/"))).map(([, edit]) => edit);
@@ -556,13 +566,22 @@ export async function rewrittenPage(
       const { edit } = changed, op = operations[run.reference.operatorIndex];
       const correction = [edit.width / run.width, 0, 0, edit.height / run.height,
         (edit.x - run.x) / run.width, (run.y + run.height - edit.y - edit.height) / run.height];
-      edits.push({ start: op.start, end: op.end, text: edit.deleted ? "" :
-        `q ${correction.map(format).join(" ")} cm ${key(run.reference.resourceName).toString()} Do Q` });
+
       if (resources === node.resources && resources) {
         resources = resources.clone();
         const xobjects = resources.lookupMaybe(key("XObject"), PDFDict);
         if (xobjects) resources.set(key("XObject"), xobjects.clone());
       }
+      let name = run.reference.resourceName;
+      if (!edit.deleted && edit.imageId) {
+        const xobjects = resources?.lookupMaybe(key("XObject"), PDFDict);
+        if (!xobjects) throw Error("画像のリソースがありません。");
+        name = "KikkiReplacementImage" + run.reference.operatorIndex;
+        while (xobjects.has(key(name))) name += "_";
+        xobjects.set(key(name), replacements.get(edit.imageId)!);
+      }
+      edits.push({ start: op.start, end: op.end, text: edit.deleted ? "" :
+        `q ${correction.map(format).join(" ")} cm ${key(name).toString()} Do Q` });
     }
     for (const [i, child] of node.children) {
       const childPath = [...path, i], prefix = childPath.join("/") + "/";
