@@ -4,8 +4,16 @@ import { exportPdf, inspectForms, imagesToPdf } from "./engine";
 import type { DocumentModel } from "../state/model";
 import { splitPdfZip } from "./split";
 import { inspectFont } from "../fonts/inspect";
-import { inspectDirectText, rewrittenPage } from "../direct/content";
-import { directReferences, directImageEdits } from "../direct/model";
+import {
+  inspectDirectText,
+  rewrittenPage,
+  isolatedImagePdf,
+} from "../direct/content";
+import {
+  directReferences,
+  directImageEdits,
+  type SourceImageReference,
+} from "../direct/model";
 import { PDFDocument, PDFName } from "pdf-lib";
 import type { Source, PageModel, ImageAsset } from "../state/model";
 import {
@@ -13,8 +21,20 @@ import {
   extractAttachment,
 } from "../attachments/pdfAttachments";
 export type WorkerRequest =
+  | {
+      id: number;
+      type: "imageExtract";
+      bytes: Uint8Array;
+      reference: SourceImageReference;
+    }
   | { id: number; type: "directInspect"; bytes: Uint8Array; index: number }
-  | { id: number; type: "directPreview"; source: Source; page: PageModel; images: Record<string, ImageAsset> }
+  | {
+      id: number;
+      type: "directPreview";
+      source: Source;
+      page: PageModel;
+      images: Record<string, ImageAsset>;
+    }
   | { id: number; type: "fontInspect"; bytes: Uint8Array; name: string }
   | {
       id: number;
@@ -41,18 +61,31 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   const req = e.data;
   try {
     let result: unknown;
-    if (req.type === "directInspect")
+    if (req.type === "imageExtract")
+      result = await isolatedImagePdf(req.bytes, req.reference);
+    else if (req.type === "directInspect")
       result = await inspectDirectText(req.bytes, req.index);
     else if (req.type === "directPreview") {
       const input = await PDFDocument.load(req.source.bytes),
         source = input.getPage(req.page.sourceIndex);
-      if (req.page.sourceId !== req.source.id) throw Error("画像・文字の参照元が一致しません。");
+      if (req.page.sourceId !== req.source.id)
+        throw Error("画像・文字の参照元が一致しません。");
       const refs = directReferences(req.page);
       if (refs.some((r) => r.sourceId !== req.source.id))
         throw Error("文字の参照元が一致しません。");
-      const rewritten = await rewrittenPage(source, req.page.sourceIndex, refs, directImageEdits(req.page), req.images);
-      if (rewritten.resources) source.node.set(PDFName.of("Resources"), rewritten.resources);
-      source.node.set(PDFName.of("Contents"), input.context.register(input.context.flateStream(rewritten.bytes)));
+      const rewritten = await rewrittenPage(
+        source,
+        req.page.sourceIndex,
+        refs,
+        directImageEdits(req.page),
+        req.images,
+      );
+      if (rewritten.resources)
+        source.node.set(PDFName.of("Resources"), rewritten.resources);
+      source.node.set(
+        PDFName.of("Contents"),
+        input.context.register(input.context.flateStream(rewritten.bytes)),
+      );
       const output = await PDFDocument.create();
       const [page] = await output.copyPages(input, [req.page.sourceIndex]);
       output.addPage(page);

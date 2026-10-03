@@ -1,3 +1,4 @@
+import { extractImageAsset } from "../images/extract";
 import { printPages } from "../export/print";
 import { pasteObject, type ObjectClipboard } from "./objectActions";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -905,8 +906,9 @@ export function useWorkspace() {
     dispatch,
     selected,
     page,
+    work,
   });
-  latest.current = { openFiles, save, mayDiscard, dispatch, selected, page };
+  latest.current = { openFiles, save, mayDiscard, dispatch, selected, page, work };
   useEffect(() => {
     if (init.current) return;
     init.current = true;
@@ -984,7 +986,22 @@ export function useWorkspace() {
           ) {
             e.preventDefault();
             if (current.kind === "direct-image") {
-              setStatus("既存画像のコピー・複製は未対応です。移動・サイズ変更・削除ができます。");
+              const snapshot = documentStore.document!;
+              void latest.current.work("画像データを取り出し中…", async (signal) => {
+                const image = await extractImageAsset(snapshot, current, signal);
+                const live = documentStore.document;
+                if (signal.aborted || live?.id !== snapshot.id || live.pages.find(page => page.id === p.id)?.objects.find(o => o.id === current.id) !== current) return;
+                const data = { object: current, image };
+                if (k === "d") {
+                  const pasted = pasteObject(p.id, data);
+                  documentStore.execute(pasted.command); setSelected(pasted.id); setTool("select");
+                  setStatus("既存画像を複製しました");
+                } else {
+                  clipboard.current = data;
+                  if (k === "x") { documentStore.execute(deleteObject(p.id, current.id)); setSelected(null); }
+                  setStatus(k === "x" ? "既存画像を切り取りました" : "既存画像をコピーしました");
+                }
+              });
               return;
             }
             const data = {

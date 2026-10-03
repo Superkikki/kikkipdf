@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { PDFDocument, PDFName, PDFNumber, PDFRawStream, StandardFonts, degrees } from "pdf-lib";
+import { PDFDocument, PDFDict, PDFName, PDFNumber, PDFRawStream, StandardFonts, degrees } from "pdf-lib";
 import { readFile } from "node:fs/promises";
 import { inspectDirectText } from "../src/direct/content";
 import { directImageEdits, type DirectImageRun } from "../src/direct/model";
@@ -146,4 +146,63 @@ describe("existing PDF image editing", () => {
     const invalid = structuredClone(d); invalid.pages[0].objects[0].x = -1000;
     await expect(exportPdf(invalid)).rejects.toThrow("表示範囲");
   });
+});
+
+it("isolates only a selected nested image with its original pixels and mask, and validates references and size limits", async () => {
+  const { isolatedImagePdf } = await import("../src/direct/content");
+  const model = await fixture(true), run = (await inspect(model)).images![0];
+  const reference = object(run).sourceImage!;
+  const bytes = await isolatedImagePdf(model.sources.s.bytes, reference);
+  const isolated = await PDFDocument.load(bytes);
+  expect(isolated.getPageCount()).toBe(1);
+  expect(isolated.getPage(0).getSize()).toEqual({ width: 32, height: 32 });
+  const streams = isolated.context.enumerateIndirectObjects().flatMap(([, o]) => o instanceof PDFRawStream ? [o] : []);
+  const pixels = (doc: PDFDocument) => doc.context.enumerateIndirectObjects().flatMap(([, o]) => o instanceof PDFRawStream && o.dict.get(PDFName.of("Subtype")) === PDFName.of("Image") ? [Buffer.from(o.contents).toString("hex")] : []).sort();
+  expect(pixels(isolated)).toEqual(pixels(await PDFDocument.load(model.sources.s.bytes)));
+  expect((await inspectDirectText(bytes, 0)).runs).toEqual([]);
+  expect(streams.filter(s => s.dict.get(PDFName.of("Subtype")) === PDFName.of("Form"))).toHaveLength(0);
+  await expect(isolatedImagePdf(model.sources.s.bytes, { ...reference, contentHash: "changed" })).rejects.toThrow("変更");
+  await expect(isolatedImagePdf(model.sources.s.bytes, { ...reference, resourceName: "missing" })).rejects.toThrow("変更");
+  await expect(isolatedImagePdf(model.sources.s.bytes, { ...reference, formPath: [999] })).rejects.toThrow("参照先");
+  const huge = await PDFDocument.load(model.sources.s.bytes);
+  const image = huge.context.enumerateIndirectObjects().find(([, o]) => o instanceof PDFRawStream && o.dict.get(PDFName.of("Subtype")) === PDFName.of("Image"))![1] as PDFRawStream;
+  image.dict.set(PDFName.of("Width"), PDFNumber.of(20000));
+  await expect(isolatedImagePdf(await huge.save(), reference)).rejects.toThrow("画素");
+});
+
+it("pastes independent copies of extracted images across documents, keeps source dimensions and supports undo/project/PDF", async () => {
+  const { pasteObject } = await import("../src/editor/objectActions");
+  const source = await fixture(true), run = (await inspect(source)).images![0], original = object(run);
+  const image = { id: "pixels", bytes: new Uint8Array(await readFile("src-tauri/icons/32x32.png")), mime: "image/png" as const };
+  const target = emptyDocument(); target.pages = [blankPage()];
+  expect(() => pasteObject(target.pages[0].id, { object: original })).toThrow("データ");
+  expect(() => pasteObject(target.pages[0].id, { object: { ...original, imageDeleted: true }, image })).toThrow();
+  const history = new History(target), paste = pasteObject(target.pages[0].id, { object: original, image });
+  history.execute(paste.command);
+  const copy = history.current.document.pages[0].objects[0];
+  expect(copy).toMatchObject({ kind: "image", width: original.width, height: original.height, x: original.x + 12, y: original.y + 12 });
+  expect(copy.sourceImage).toBeUndefined(); expect(copy.imageId).not.toBe(image.id);
+  const restored = await openProject(await saveProject(history.current.document));
+  expect(restored.pages[0].objects[0]).toMatchObject({ kind: "image", imageId: copy.imageId });
+  expect((await inspectDirectText(await exportPdf(restored), 0)).images).toHaveLength(1);
+  history.undo(); expect(history.current.document.pages[0].objects).toHaveLength(0); expect(Object.keys(history.current.document.images)).toHaveLength(0);
+  history.redo(); expect(history.current.document.pages[0].objects).toHaveLength(1);
+});
+
+it("retains named image color spaces from nested resource dictionaries", async () => {
+  const { isolatedImagePdf, analyzePage } = await import("../src/direct/content");
+  const model = await fixture(true), input = await PDFDocument.load(model.sources.s.bytes);
+  const root = await analyzePage(input.getPage(0), 0), run = root.images[0];
+  let node = root;
+  for (const index of run.reference.formPath ?? []) node = node.children.get(index)!.analysis;
+  const resource = node.resources!.lookup(PDFName.of("XObject"), PDFDict).lookup(PDFName.of(run.reference.resourceName)) as PDFRawStream;
+  resource.dict.set(PDFName.of("ColorSpace"), PDFName.of("SharedRGB"));
+  node.resources!.set(PDFName.of("ColorSpace"), input.context.obj({ SharedRGB: "DeviceRGB" }));
+  const saved = await input.save(), reference = object((await inspectDirectText(saved, 0)).images![0]).sourceImage!;
+  const isolated = await PDFDocument.load(await isolatedImagePdf(saved, reference));
+  expect(isolated.getPage(0).node.Resources()!.lookup(PDFName.of("ColorSpace"), PDFDict).get(PDFName.of("SharedRGB"))).toBe(PDFName.of("DeviceRGB"));
+  const copied = isolated.getPage(0).node.Resources()!.lookup(PDFName.of("XObject"), PDFDict).lookup(PDFName.of("Image")) as PDFRawStream;
+  expect(copied.dict.get(PDFName.of("ColorSpace"))).toBe(PDFName.of("DeviceRGB"));
+  node.resources!.set(PDFName.of("ColorSpace"), input.context.obj({ SharedRGB: "SharedRGB" }));
+  await expect(isolatedImagePdf(await input.save(), reference)).rejects.toThrow("循環");
 });

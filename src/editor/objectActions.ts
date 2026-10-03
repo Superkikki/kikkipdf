@@ -12,7 +12,11 @@ export interface ObjectClipboard {
   font?: FontAsset;
 }
 export function pasteObject(pageId: string, clipboard: ObjectClipboard) {
-  if (clipboard.object.kind === "direct-image") throw Error("既存画像のコピー・複製は未対応です。");
+  if (
+    clipboard.object.kind === "direct-image" &&
+    (!clipboard.image || clipboard.object.imageDeleted)
+  )
+    throw Error("既存画像のデータを先に取り出してください。");
   const id = uid(),
     image = clipboard.image ? { ...clipboard.image, id: uid() } : undefined;
   return {
@@ -41,6 +45,13 @@ export function pasteObject(pageId: string, clipboard: ObjectClipboard) {
                     ...clipboard.object,
                     ...(clipboard.object.kind === "direct-text"
                       ? { kind: "text" as const, sourceText: undefined }
+                      : {}),
+                    ...(clipboard.object.kind === "direct-image"
+                      ? {
+                          kind: "image" as const,
+                          sourceImage: undefined,
+                          imageDeleted: undefined,
+                        }
                       : {}),
                     id,
                     imageId: image?.id ?? clipboard.object.imageId,

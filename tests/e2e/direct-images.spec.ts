@@ -3,11 +3,16 @@ import { PDFDocument, PDFName, PDFRawStream, StandardFonts, rgb } from "pdf-lib"
 import { readFile } from "node:fs/promises";
 import { inspectDirectText } from "../../src/direct/content";
 import { openProject } from "../../src/state/project";
-async function fixture(covered = false) {
+async function fixture(covered = false, namedColorSpace = false) {
   const inner = await PDFDocument.create(), p = inner.addPage([420, 400]);
   p.drawRectangle({ x: 0, y: 0, width: 420, height: 400, color: rgb(0.9, 0.8, 0.7) });
   const image = await inner.embedPng(await readFile("src-tauri/icons/32x32.png"));
   p.drawImage(image, { x: 40, y: 220, width: 80, height: 40 });
+  if (namedColorSpace) {
+    await inner.flush();
+    (inner.context.lookup(image.ref) as PDFRawStream).dict.set(PDFName.of("ColorSpace"), PDFName.of("SharedRGB"));
+    p.node.Resources()!.set(PDFName.of("ColorSpace"), inner.context.obj({ SharedRGB: "DeviceRGB" }));
+  }
   if (covered) p.drawRectangle({ x: 40, y: 220, width: 40, height: 40, color: rgb(0, 0, 1) });
   p.drawText("Unchanged text", { x: 30, y: 330, size: 12, font: await inner.embedFont(StandardFonts.Helvetica) });
   const source = await PDFDocument.load(await inner.save()), middle = await PDFDocument.create();
@@ -132,4 +137,56 @@ test("replaces only a selected nested image, keeps draw order and shared occurre
   await imageTool(page); await page.getByRole("button", { name: "既存画像 1", exact: true }).dblclick();
   chooser = page.waitForEvent("filechooser"); await page.getByRole("button", { name: "画像を差し替える", exact: true }).click(); await (await chooser).setFiles("src-tauri/icons/128x128.png");
   await expect.poll(red).toBe(false); expect(errors).toEqual([]);
+});
+
+test("extracts transparent image pixels without page content, duplicates and copies across documents with undo and saved round trips", async ({ page }, info) => {
+  const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
+  await page.goto("/"); await open(page, await fixture(true, true));
+  await imageTool(page); await page.getByRole("button", { name: "既存画像 1", exact: true }).dblclick();
+  let download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "画像を取り出す", exact: true }).click();
+  const extracted = info.outputPath("image.png"); await (await download).saveAs(extracted);
+  const actual = await readFile(extracted), original = await readFile("src-tauri/icons/32x32.png");
+  const pixels = await page.evaluate(async ({ actual, original }) => {
+    const read = async (data: string) => {
+      const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${data}`)).blob());
+      const canvas = document.createElement("canvas"); canvas.width = bitmap.width; canvas.height = bitmap.height;
+      canvas.getContext("2d")!.drawImage(bitmap, 0, 0); bitmap.close();
+      return { width: canvas.width, height: canvas.height, data: Array.from(canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data) };
+    };
+    return { actual: await read(actual), original: await read(original) };
+  }, { actual: actual.toString("base64"), original: original.toString("base64") });
+  expect(pixels.actual.width).toBe(32); expect(pixels.actual.height).toBe(32);
+  expect(pixels.actual.data.some((n, i) => i % 4 === 3 && n === 0)).toBe(true);
+  pixels.actual.data.forEach((n, i) => expect(Math.abs(n - pixels.original.data[i])).toBeLessThan(3));
+  const objects = page.locator(".viewer-scroll .object-layer > g");
+  await page.getByRole("button", { name: "画像を複製", exact: true }).click();
+  await expect(objects).toHaveCount(2);
+  await page.getByRole("button", { name: /^元に戻す/ }).click(); await expect(objects).toHaveCount(1);
+  await page.getByRole("button", { name: /^やり直す/ }).click(); await expect(objects).toHaveCount(2);
+  await objects.first().click({ position: { x: 3, y: 3 } });
+  await page.keyboard.press("Control+c");
+  await expect(page.locator(".statusbar")).toContainText("既存画像をコピーしました");
+  await page.keyboard.press("Control+x");
+  await expect(page.locator(".statusbar")).toContainText("既存画像を切り取りました");
+  await expect.poll(() => pixel(page, 100, 145)).toEqual([230, 204, 178]);
+  await page.keyboard.press("Control+z");
+  await expect(page.locator(".unsaved-dot")).toHaveCount(1);
+  await page.locator("summary").filter({ hasText: "ファイル" }).click();
+  await page.getByRole("button", { name: "新規PDF", exact: true }).click();
+  await page.getByRole("button", { name: "変更を破棄", exact: true }).click();
+  await page.keyboard.press("Control+v"); await expect(objects).toHaveCount(1);
+  await expect(objects.locator("image")).toHaveCount(1);
+  await page.keyboard.press("Control+d"); await expect(objects).toHaveCount(2);
+  await page.keyboard.press("Control+z"); await expect(objects).toHaveCount(1);
+  download = page.waitForEvent("download");
+  await page.locator("summary").filter({ hasText: "ファイル" }).click(); await page.getByRole("button", { name: "編集プロジェクトを保存", exact: true }).click();
+  const project = info.outputPath("copied.kpdf"); await (await download).saveAs(project);
+  const model = await openProject(new Uint8Array(await readFile(project)));
+  expect(Object.keys(model.sources)).toHaveLength(0); expect(model.pages[0].objects[0].kind).toBe("image"); expect(model.pages[0].objects[0].sourceImage).toBeUndefined();
+  download = page.waitForEvent("download"); await page.getByRole("button", { name: "保存", exact: true }).click();
+  const saved = info.outputPath("copied.pdf"); await (await download).saveAs(saved);
+  expect((await inspectDirectText(new Uint8Array(await readFile(saved)), 0)).images).toHaveLength(1);
+  await page.reload(); await open(page, await readFile(project), "copied.kpdf"); await expect(objects.locator("image")).toHaveCount(1);
+  expect(errors).toEqual([]);
 });

@@ -1,9 +1,11 @@
 import {
+  PDFBool,
   PDFArray,
   PDFDict,
   PDFDocument,
   PDFName,
   PDFNumber,
+  PDFObjectCopier,
   PDFRawStream,
   type PDFPage,
 } from "pdf-lib";
@@ -15,6 +17,7 @@ import type {
   DirectImageEdit,
   DirectTextRun,
   SourceTextReference,
+  SourceImageReference,
 } from "./model";
 import type { ImageAsset } from "../state/model";
 import { textReferenceKey } from "./model";
@@ -629,4 +632,44 @@ export async function rewrittenContent(page: PDFPage, index: number, references:
   const result = await rewrittenPage(page, index, references);
   if (result.resources) page.node.set(key("Resources"), result.resources);
   return result.bytes;
+}
+
+/** Isolate only the verified image resource, including its masks/color space, at native pixel size. */
+export async function isolatedImagePdf(bytes: Uint8Array, reference: SourceImageReference): Promise<Uint8Array> {
+  const input = await PDFDocument.load(bytes);
+  const analysis = await analyzePage(input.getPage(reference.sourceIndex), reference.sourceIndex);
+  let node = analysis;
+  for (const index of reference.formPath ?? []) {
+    const child = node.children.get(index);
+    if (!child) throw Error("画像の参照先が見つかりません。");
+    node = child.analysis;
+  }
+  const run = node.images.find((image) => textReferenceKey(image.reference) === textReferenceKey(reference));
+  if (!run || run.reference.contentHash !== reference.contentHash || run.reference.resourceName !== reference.resourceName)
+    throw Error("画像の参照先が変更されています。");
+  const image = node.resources?.lookupMaybe(key("XObject"), PDFDict)?.lookup(key(reference.resourceName));
+  if (!(image instanceof PDFRawStream) || image.dict.get(key("Subtype")) !== key("Image") || image.dict.lookupMaybe(key("ImageMask"), PDFBool)?.asBoolean())
+    throw Error("この画像形式の取り出しには対応していません。");
+  const width = image.dict.lookupMaybe(key("Width"), PDFNumber)?.asNumber() ?? 0;
+  const height = image.dict.lookupMaybe(key("Height"), PDFNumber)?.asNumber() ?? 0;
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 16384 || height > 16384 || width * height > 20_000_000)
+    throw Error("取り出す画像は2000万画素・各辺16384画素までです。");
+  const output = await PDFDocument.create(), page = output.addPage([width, height]);
+  const copier = PDFObjectCopier.for(input.context, output.context);
+  const copied = copier.copy(image);
+  const ref = output.context.register(copied);
+  const resources = output.context.obj({ XObject: { Image: ref } });
+  const colorSpaces = node.resources?.lookupMaybe(key("ColorSpace"), PDFDict);
+  // Image XObjects need a self-contained color space; resolve resource aliases before rendering.
+  let colorSpace = image.dict.lookup(key("ColorSpace"));
+  const seen = new Set<PDFName>();
+  while (colorSpace instanceof PDFName && colorSpaces?.has(colorSpace)) {
+    if (seen.has(colorSpace) || seen.size >= 16) throw Error("画像の色空間の参照が循環しています。");
+    seen.add(colorSpace); colorSpace = colorSpaces.lookup(colorSpace);
+  }
+  if (colorSpace) copied.dict.set(key("ColorSpace"), copier.copy(colorSpace));
+  if (colorSpaces) resources.set(key("ColorSpace"), copier.copy(colorSpaces));
+  page.node.set(key("Resources"), resources);
+  page.node.set(key("Contents"), output.context.register(output.context.flateStream(`q ${width} 0 0 ${height} 0 0 cm /Image Do Q`)));
+  return output.save();
 }

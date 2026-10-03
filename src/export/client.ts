@@ -5,7 +5,7 @@ import type {
   Source,
   PageModel,
 } from "../state/model";
-import type { DirectInspection } from "../direct/model";
+import type { DirectInspection, SourceImageReference } from "../direct/model";
 import type { FormDescriptor, imagesToPdf } from "./engine";
 import type { WorkerRequest } from "./worker";
 import type { AttachmentInfo } from "../attachments/model";
@@ -31,7 +31,11 @@ export const previewDirectPage = (
   signal: AbortSignal,
   images: Record<string, ImageAsset> = {},
 ) =>
-  run<Uint8Array>({ type: "directPreview", source, page, images }, undefined, signal);
+  run<Uint8Array>(
+    { type: "directPreview", source, page, images },
+    undefined,
+    signal,
+  );
 export const inspectLocalFont = (bytes: Uint8Array, name: string) =>
   run<FontAsset>({ type: "fontInspect", bytes, name });
 function run<T>(
@@ -142,6 +146,17 @@ export const readAttachment = (
       model: { sources: model.sources, attachments: model.attachments },
       attachmentId,
     },
+    undefined,
+    signal,
+  );
+
+export const extractImagePdf = (
+  bytes: Uint8Array,
+  reference: SourceImageReference,
+  signal?: AbortSignal,
+) =>
+  run<Uint8Array>(
+    { type: "imageExtract", bytes, reference },
     undefined,
     signal,
   );

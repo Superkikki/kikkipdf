@@ -48,6 +48,9 @@ const { writeFile, readFile } = require("node:fs/promises");
     if (process.argv[3] === "images") {
       const image = await inner.embedPng(await readFile(require("node:path").join(__dirname, "..", "src-tauri", "icons", "32x32.png")));
       p.drawImage(image, { x: 40, y: 420, width: 80, height: 40 });
+      await inner.flush();
+      inner.context.lookup(image.ref).dict.set(PDFName.of("ColorSpace"), PDFName.of("SharedRGB"));
+      p.node.Resources().set(PDFName.of("ColorSpace"), inner.context.obj({ SharedRGB: "DeviceRGB" }));
       p.drawText("Native image neighbour", { x: 40, y: 520, size: 18, font });
     } else {
       p.drawText("Native Form original", { x: 40, y: 520, size: 18, font });

@@ -236,13 +236,16 @@ export function Overlay({
     const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m);
     return { x: p.x, y: p.y };
   }
-  function start(e: React.PointerEvent, o: EditObject, resize = false) {
+  function start(e: React.PointerEvent<SVGElement>, o: EditObject, resize = false) {
     if (e.button === 2 && contextEnabled) {
       e.stopPropagation();
       return;
     }
     if (!interactive || e.button !== 0) return;
+    e.preventDefault();
     e.stopPropagation();
+    window.getSelection()?.removeAllRanges();
+    e.currentTarget.focus({ preventScroll: true });
     onSelect(o.id);
     drag.current = { o, point: point(e), resize };
     e.currentTarget.setPointerCapture(e.pointerId);

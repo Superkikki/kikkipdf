@@ -208,6 +208,33 @@ async function verifyObjectContext(page, root) {
     await imageTool(); await expect(page.locator(".existing-image-layer rect")).toHaveCount(2);
     await page.getByRole("button", { name: "既存画像 1", exact: true }).dblclick();
     await expect(page.locator(".properties")).toContainText("既存画像の位置とサイズ");
+    const extractedPath = path.join(process.env.KIKKI_SMOKE_DIR, "extracted-image.png");
+    await fs.rm(extractedPath, { force: true });
+    const savePicker = promisify(execFile)("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+      path.join(__dirname, "windows-pick-test-file.ps1"), "-TargetProcessId", process.env.KIKKI_SMOKE_PROCESS,
+      "-FilePath", extractedPath], { timeout: 30000 });
+    const savePicked = savePicker.then(result => ({ result }), error => ({ error }));
+    await page.getByRole("button", { name: "画像を取り出す", exact: true }).click();
+    const savedChoice = await savePicked; if (savedChoice.error) throw savedChoice.error;
+    await expect(page.getByRole("button", { name: "画像を取り出す", exact: true })).toBeEnabled();
+    const extractedPixels = await fs.readFile(extractedPath);
+    if (extractedPixels.readUInt32BE(16) !== 32 || extractedPixels.readUInt32BE(20) !== 32) throw Error("Extracted image resolution changed");
+    const transparent = await page.evaluate(async (base64) => {
+      const bitmap = await createImageBitmap(new Blob([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], { type: "image/png" }));
+      const canvas = document.createElement("canvas"); canvas.width = bitmap.width; canvas.height = bitmap.height;
+      const ctx = canvas.getContext("2d"); ctx.drawImage(bitmap, 0, 0); bitmap.close();
+      return [...ctx.getImageData(0, 0, canvas.width, canvas.height).data].some((v, i) => i % 4 === 3 && v === 0);
+    }, extractedPixels.toString("base64"));
+    if (!transparent) throw Error("Extracted image lost transparency");
+    const objects = page.locator(".viewer-scroll .object-layer > g");
+    await page.keyboard.press("Control+d"); await expect(objects).toHaveCount(2);
+    await expect(objects.locator("image")).toHaveCount(1);
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const copiedPdf = await PDFDocument.load(await fs.readFile(fixture));
+    if (copiedPdf.context.enumerateIndirectObjects().filter(([, o]) => o instanceof PDFRawStream && o.dict.get(PDFName.of("Subtype")) === PDFName.of("Image") && o.dict.lookup(PDFName.of("Width")).toString() === "32" && o.dict.get(PDFName.of("ColorSpace")) !== PDFName.of("DeviceGray")).length < 2) throw Error("Copied image missing in native save");
+    await page.keyboard.press("Control+z"); await expect(objects).toHaveCount(1);
+    await objects.first().click();
     for (const [field, value] of [["x", "150"], ["y", "200"], ["width", "100"], ["height", "60"]])
       await page.getByLabel(field, { exact: true }).fill(value);
     await expect(page.locator(".viewer-scroll .page-view[data-rendered=true]")).toBeVisible();
@@ -248,7 +275,7 @@ async function verifyObjectContext(page, root) {
     await expect(neighbours).toHaveCount(2);
     await page.screenshot({ path: path.join(__dirname, "..", ".tools", "windows-native-image.png") });
     if (errors.length) throw Error(errors.join("\n"));
-    console.log(JSON.stringify({ native: true, nestedSharedImage: true, moveResize: true, imageReplacement: true,
+    console.log(JSON.stringify({ native: true, nestedSharedImage: true, extractedTransparentImage: true, independentDuplicate: true, moveResize: true, imageReplacement: true,
       unchangedPixelsAndNeighbour: true, undoRedo: true, nativeSave: true, removedImageData: true, errors }));
     await browser.close(); return;
   }

@@ -37,6 +37,7 @@ export function ExistingImageOverlay({ model, page, onSelect, onError }: {
     const current = documentStore.document?.pages.find(p => p.id === page.id);
     if (!current || documentStore.document?.id !== model.id || !current.sourceId ||
         current.objects.some(o => o.sourceImage && textReferenceKey(o.sourceImage) === textReferenceKey(image.reference))) return;
+    window.getSelection()?.removeAllRanges();
     const { x, y, width, height } = image;
     const object = { ...newObject("direct-image", x, y), width, height, sourceImage: {
       ...image.reference, sourceId: current.sourceId, originalBox: { x, y, width, height }, bounds: image.bounds,
