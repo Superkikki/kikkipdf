@@ -47,4 +47,30 @@ mod tests {
     fn malformed_pdf_returns_error() {
         assert!(security::decrypt(b"not a pdf", "password".into()).is_err());
     }
+    fn envelope(pdf: &[u8], password: &str) -> Vec<u8> {
+        let mut payload = (password.len() as u32).to_le_bytes().to_vec();
+        payload.extend_from_slice(password.as_bytes());
+        payload.extend_from_slice(pdf);
+        payload
+    }
+    #[test]
+    fn raw_ipc_round_trip_with_unicode_password() {
+        let password = "日本語password";
+        let encrypted = security::transform_request(envelope(&fixture(), password), true).unwrap();
+        assert!(security::transform_request(envelope(&encrypted, "incorrect"), false).is_err());
+        let decrypted = security::transform_request(envelope(&encrypted, password), false).unwrap();
+        assert_eq!(Document::load_mem(&decrypted).unwrap().get_pages().len(), 1);
+    }
+    #[test]
+    fn rejects_truncated_and_invalid_raw_ipc() {
+        for payload in [
+            vec![],
+            vec![1, 2, 3],
+            vec![255, 255, 255, 255],
+            vec![1, 0, 0, 0, 255, 1],
+            vec![1, 0, 0, 0, 97],
+        ] {
+            assert!(security::transform_request(payload, true).is_err());
+        }
+    }
 }

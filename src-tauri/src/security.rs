@@ -1,7 +1,31 @@
 use lopdf::encryption::crypt_filters::{Aes256CryptFilter, CryptFilter};
 use lopdf::{Document, EncryptionState, EncryptionVersion, Permissions};
 use std::{collections::BTreeMap, sync::Arc};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
+
+/// Raw IPC envelope: u32 little-endian password length, UTF-8 password, PDF.
+pub fn transform_request(mut payload: Vec<u8>, encrypting: bool) -> Result<Vec<u8>, String> {
+    let header: [u8; 4] = payload
+        .get(..4)
+        .ok_or("PDFデータの形式が不正です。")?
+        .try_into()
+        .map_err(|_| "PDFデータの形式が不正です。")?;
+    let offset = 4usize
+        .checked_add(u32::from_le_bytes(header) as usize)
+        .ok_or("PDFデータの形式が不正です。")?;
+    if offset >= payload.len() {
+        payload[4..].zeroize();
+        return Err("PDFデータの形式が不正です。".into());
+    }
+    let password = std::str::from_utf8(&payload[4..offset]).map(str::to_owned);
+    payload[4..offset].zeroize();
+    let password = password.map_err(|_| "パスワードの形式が不正です。")?;
+    if encrypting {
+        encrypt(&payload[offset..], password)
+    } else {
+        decrypt(&payload[offset..], password)
+    }
+}
 
 pub fn decrypt(bytes: &[u8], password: String) -> Result<Vec<u8>, String> {
     let password = Zeroizing::new(password);

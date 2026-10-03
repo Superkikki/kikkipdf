@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 export function Dialog({
   title,
@@ -12,12 +12,14 @@ export function Dialog({
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   useEffect(() => {
     ref.current?.showModal();
   }, []);
   return (
     <dialog
       ref={ref}
+      aria-labelledby={titleId}
       className={wide ? "dialog wide" : "dialog"}
       onCancel={(e) => {
         e.preventDefault();
@@ -25,7 +27,7 @@ export function Dialog({
       }}
     >
       <header>
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         <button title="閉じる" onClick={onClose}>
           <X size={19} />
         </button>

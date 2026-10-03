@@ -1,164 +1,66 @@
 import { useEffect, useRef, useState } from "react";
-import { Search, ChevronUp, ChevronDown } from "lucide-react";
-import type { DocumentModel } from "../state/model";
-import { acquirePagePdf } from "./pdf";
-export function SearchPanel({
-  model,
-  jump,
-  focusRequest = 0,
-}: {
+import { Search, ChevronUp, ChevronDown, X } from "lucide-react";
+import type { DocumentSearch } from "./useDocumentSearch";
+import { SEARCH_PAGE_SIZE, SEARCH_RESULT_LIMIT } from "./search";
+
+export function SearchPanel({ search, count, focusRequest = 0 }: {
+  search: DocumentSearch;
+  count: number;
   focusRequest?: number;
-  model: DocumentModel;
-  jump: (id: string) => void;
 }) {
-  const [query, setQuery] = useState(""),
-    [results, setResults] = useState<{ id: string; snippet: string }[]>([]),
-    [current, setCurrent] = useState(0),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
   const input = useRef<HTMLInputElement>(null);
-  const visited = useRef<number | null>(null);
-  useEffect(() => {
-    input.current?.focus();
-    input.current?.select();
-  }, [focusRequest]);
-  useEffect(() => {
-    let cancelled = false;
-    setResults([]);
-    setCurrent(0);
-    setError("");
-    setBusy(!!query.trim());
-    visited.current = null;
-    const timer = setTimeout(() => {
-      void (async () => {
-        if (!query.trim()) {
-          setBusy(false);
-          return;
-        }
-        setBusy(true);
-        const found: { id: string; snippet: string }[] = [];
-        try {
-          for (const p of model.pages) {
-            if (cancelled) return;
-            let text = p.objects
-              .filter((o) =>
-                ["text", "replacement", "ocr", "direct-text"].includes(o.kind),
-              )
-              .map((o) => o.text ?? "")
-              .join(" ");
-            if (p.sourceId) {
-              const lease = acquirePagePdf(model.sources[p.sourceId], p, model.images);
-              try {
-                const { pdf, index } = await lease.ready;
-                const page = await pdf.getPage(index + 1);
-                const content = await page.getTextContent();
-                text +=
-                  " " +
-                  content.items.map((i) => ("str" in i ? i.str : "")).join(" ");
-              } finally {
-                lease.release();
-              }
-            }
-            const lower = text.toLocaleLowerCase(),
-              q = query.toLocaleLowerCase();
-            let index = lower.indexOf(q);
-            while (index !== -1) {
-              found.push({
-                id: p.id,
-                snippet: text.slice(
-                  Math.max(0, index - 22),
-                  index + q.length + 40,
-                ),
-              });
-              index = lower.indexOf(q, index + q.length);
-            }
-            await new Promise((r) => setTimeout(r, 0));
+  const [listPage, setListPage] = useState(0);
+  const { query, options, hits, current, busy } = search;
+  useEffect(() => { input.current?.focus(); input.current?.select(); }, [focusRequest]);
+  useEffect(() => setListPage(Math.floor(current / SEARCH_PAGE_SIZE)), [current, hits]);
+  const pages = Math.ceil(hits.length / SEARCH_PAGE_SIZE);
+  return <div className="search-panel">
+    <label className="search-input">
+      <Search size={16} />
+      <input ref={input} aria-label="PDF内を検索" placeholder="文書内を検索"
+        value={query} onChange={(e) => search.setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+            e.preventDefault(); search.navigate(e.shiftKey ? -1 : 1);
+          } else if (e.key === "Escape") {
+            e.preventDefault(); e.stopPropagation(); search.setQuery("");
           }
-          if (!cancelled) setResults(found);
-        } catch {
-          if (!cancelled) setError("このPDFのテキストを検索できませんでした。");
-        } finally {
-          if (!cancelled) setBusy(false);
-        }
-      })();
-    }, 250);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [query, model]);
-  function navigate(step: number) {
-    if (busy || !results.length) return;
-    const n =
-      visited.current === null
-        ? step > 0 ? current : results.length - 1
-        : (current + step + results.length) % results.length;
-    visited.current = n;
-    setCurrent(n);
-    jump(results[n].id);
-  }
-  return (
-    <div className="search-panel">
-      <label className="search-input">
-        <Search size={16} />
-        <input
-          ref={input}
-          aria-label="PDF内を検索"
-          placeholder="文書内を検索"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              navigate(e.shiftKey ? -1 : 1);
-            }
-          }}
-        />
-      </label>
-      <div className="search-count">
-        <span role="status" aria-live="polite">
-          {busy
-            ? "検索中…"
-            : `${results.length ? current + 1 : 0} / ${results.length} 件`}
-        </span>
-        <button
-          title="前の検索結果"
-          disabled={busy || !results.length}
-          onClick={() => navigate(-1)}
-        >
-          <ChevronUp size={16} />
-        </button>
-        <button
-          title="次の検索結果"
-          disabled={busy || !results.length}
-          onClick={() => navigate(1)}
-        >
-          <ChevronDown size={16} />
-        </button>
-      </div>
-      <p className="hint">Enterで次の結果 · Shift+Enterで前の結果</p>
-      {!busy && !error && query.trim() && !results.length && (
-        <p className="empty-panel">一致するテキストがありません。</p>
-      )}
-      {error && <p className="warning">{error}</p>}
-      <div className="search-results">
-        {results.map((r, i) => (
-          <button
-            className={current === i ? "current" : ""}
-            key={`${r.id}-${i}`}
-            onClick={() => {
-              visited.current = i;
-              setCurrent(i);
-              jump(r.id);
-            }}
-          >
-            <small>
-              ページ {model.pages.findIndex((p) => p.id === r.id) + 1}
-            </small>
-            {r.snippet}
-          </button>
-        ))}
-      </div>
+        }} />
+      {query && <button type="button" aria-label="検索をクリア" title="検索をクリア"
+        onClick={() => { search.setQuery(""); input.current?.focus(); }}><X size={14} /></button>}
+    </label>
+    <div className="search-options">
+      <label><input type="checkbox" checked={options.caseSensitive}
+        onChange={(e) => search.setOptions({ ...options, caseSensitive: e.target.checked })} />大文字と小文字を区別</label>
+      <label><input type="checkbox" checked={options.wholeWord}
+        onChange={(e) => search.setOptions({ ...options, wholeWord: e.target.checked })} />単語全体に一致</label>
+      <label><input type="checkbox" checked={options.normalizeWidth}
+        onChange={(e) => search.setOptions({ ...options, normalizeWidth: e.target.checked })} />全角と半角を同一視</label>
     </div>
-  );
+    <div className="search-count">
+      <span role="status" aria-live="polite">{busy ? `検索中… ${search.progress} / ${count} ページ`
+        : `${hits.length ? current + 1 : 0} / ${hits.length} 件`}</span>
+      <button title="前の検索結果" disabled={busy || !hits.length} onClick={() => search.navigate(-1)}><ChevronUp size={16} /></button>
+      <button title="次の検索結果" disabled={busy || !hits.length} onClick={() => search.navigate(1)}><ChevronDown size={16} /></button>
+    </div>
+    <p className="hint">Enterで次の結果 · Shift+Enterで前の結果</p>
+    {!busy && !search.error && query.trim() && !hits.length && <p className="empty-panel">一致するテキストがありません。</p>}
+    {search.error && <p className="warning">{search.error}</p>}
+    {search.limited && <p className="hint">先頭{SEARCH_RESULT_LIMIT}件を表示しています。検索語を絞り込んでください。</p>}
+    {pages > 1 && <div className="search-pagination" aria-label="検索結果の一覧ページ">
+      <button disabled={listPage === 0} onClick={() => setListPage(listPage - 1)}>前の100件</button>
+      <span>{listPage + 1} / {pages}</span>
+      <button disabled={listPage >= pages - 1} onClick={() => setListPage(listPage + 1)}>次の100件</button>
+    </div>}
+    <div className="search-results">
+      {hits.slice(listPage * SEARCH_PAGE_SIZE, (listPage + 1) * SEARCH_PAGE_SIZE).map((hit, i) => {
+        const index = listPage * SEARCH_PAGE_SIZE + i;
+        return <button className={current === index ? "current" : ""} key={hit.id}
+          aria-current={current === index ? "true" : undefined} onClick={() => search.select(index)}>
+          <small>ページ {hit.pageNumber}</small>
+          {hit.before}<mark>{hit.match}</mark>{hit.after}
+        </button>;
+      })}
+    </div>
+  </div>;
 }

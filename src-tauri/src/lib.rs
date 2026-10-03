@@ -174,20 +174,28 @@ fn recent_documents(access: State<Access>) -> Result<Vec<String>, String> {
         .clone())
 }
 #[tauri::command]
-async fn decrypt_pdf(bytes: Vec<u8>, password: String) -> Result<tauri::ipc::Response, String> {
+async fn decrypt_pdf(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let bytes = security_payload(&request)?;
     tauri::async_runtime::spawn_blocking(move || {
-        security::decrypt(&bytes, password).map(tauri::ipc::Response::new)
+        security::transform_request(bytes, false).map(tauri::ipc::Response::new)
     })
     .await
     .map_err(|_| "復号処理を完了できません。")?
 }
 #[tauri::command]
-async fn encrypt_pdf(bytes: Vec<u8>, password: String) -> Result<tauri::ipc::Response, String> {
+async fn encrypt_pdf(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let bytes = security_payload(&request)?;
     tauri::async_runtime::spawn_blocking(move || {
-        security::encrypt(&bytes, password).map(tauri::ipc::Response::new)
+        security::transform_request(bytes, true).map(tauri::ipc::Response::new)
     })
     .await
     .map_err(|_| "暗号化処理を完了できません。")?
+}
+fn security_payload(request: &tauri::ipc::Request<'_>) -> Result<Vec<u8>, String> {
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => Ok(bytes.clone()),
+        _ => Err("PDFデータの形式が不正です。".into()),
+    }
 }
 pub fn run() {
     let result = tauri::Builder::default()

@@ -19,6 +19,9 @@ import { Toolbar } from "./components/Toolbar";
 import { Sidebar } from "./components/Sidebar";
 import { Properties } from "./components/Properties";
 import { Viewer } from "./viewer/Viewer";
+import { useDocumentSearch } from "./viewer/useDocumentSearch";
+import { PageLabelEditor } from "./pages/PageLabelEditor";
+import { PageLabelNavigation } from "./pages/PageLabelNavigation";
 import { Dialog } from "./components/Dialog";
 import { FormPanel } from "./forms/FormPanel";
 import { LinkPanel } from "./links/LinkPanel";
@@ -28,6 +31,7 @@ import { isTauri } from "./platform/files";
 export function App() {
   const w = useWorkspace();
   const doc = w.document;
+  const search = useDocumentSearch(doc, w.jump);
   const index = Math.max(0, doc?.pages.findIndex((p) => p.id === w.active) ?? 0);
   const [showSidebar, setShowSidebar] = useState(true);
   const [showProperties, setShowProperties] = useState(() => window.innerWidth > 1150);
@@ -130,6 +134,7 @@ export function App() {
           </div>
           <main className="workspace" inert={!!w.busy}>
             <Sidebar
+              search={search}
               key={`sidebar:${doc.id}`}
               searchRequest={searchRequest}
               hidden={!showSidebar}
@@ -146,6 +151,7 @@ export function App() {
               }}
             />
             <Viewer
+              search={search}
               key={`viewer:${doc.id}`}
               onScale={setRenderedScale}
               onZoom={w.setZoom}
@@ -263,6 +269,7 @@ export function App() {
         </span>
         {doc && (
           <>
+            <PageLabelNavigation pages={doc.pages} index={index} jump={(n) => w.jump(doc.pages[n].id)} />
             <PageNavigation
               key={doc.id}
               index={index}
@@ -297,6 +304,11 @@ export function App() {
         </div>
       )}
       {w.dialog}
+      {w.modal === "pageLabels" && doc && (
+        <Dialog title="ページラベル" onClose={() => w.setModal(null)}>
+          <PageLabelEditor model={doc} active={w.active} close={() => w.setModal(null)} />
+        </Dialog>
+      )}
       {w.modal === "links" && doc && (
         <Dialog title="リンク管理" onClose={() => w.setModal(null)}>
           <LinkPanel model={doc} jump={w.jump} />

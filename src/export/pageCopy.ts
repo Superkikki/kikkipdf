@@ -17,6 +17,8 @@ import { importedLinkUrl } from "../links/target";
 import type { AttachmentWriter } from "../attachments/pdfAttachments";
 import { rewrittenPage } from "../direct/content";
 import { directReferences, directImageEdits } from "../direct/model";
+import { OptionalContentSource } from "./optionalContent";
+import { writeCommentMetadata } from "../annotations/commentMetadata";
 
 const key = (name: string) => PDFName.of(name);
 const text = (value: PDFObject | undefined) =>
@@ -79,6 +81,7 @@ function resolveDestination(
  */
 export class PageCopier {
   private copier: PDFObjectCopier;
+  private optionalContent: OptionalContentSource;
   private exported = new Map<number, PDFPage>();
   private links: { dict: PDFDict; destination: PDFArray }[] = [];
   private editedLinks: { dict: PDFDict; target: LinkTarget }[] = [];
@@ -87,8 +90,14 @@ export class PageCopier {
     private output: PDFDocument,
     private attachments?: AttachmentWriter,
     private images: Record<string, ImageAsset> = {},
+    copier?: PDFObjectCopier,
+    visibility?: Record<string, boolean>,
   ) {
-    this.copier = PDFObjectCopier.for(input.context, output.context);
+    this.copier = copier ?? PDFObjectCopier.for(input.context, output.context);
+    this.optionalContent = new OptionalContentSource(input, output, this.copier, visibility);
+  }
+  getOptionalContent() {
+    return this.exported.size ? this.optionalContent.finish() : undefined;
   }
   async copy(model: PageModel): Promise<PDFPage> {
     const source = this.input.getPage(model.sourceIndex),
@@ -159,6 +168,7 @@ export class PageCopier {
           safe.delete(key(name));
         if (edit?.text !== undefined)
           safe.set(key("Contents"), PDFHexString.fromText(edit.text));
+        if (edit) writeCommentMetadata(safe, edit);
         const annotation = this.copier.copy(safe);
         if (edit?.box && text(original.get(key("Subtype"))) === "Link") {
           const box = edit.box;

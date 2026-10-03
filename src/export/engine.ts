@@ -1,8 +1,12 @@
 import { writeMarkup } from "../annotations/pdfMarkup";
+import { writeCommentMetadata } from "../annotations/commentMetadata";
 import { AttachmentWriter } from "../attachments/pdfAttachments";
 import { writeLinks } from "../links/pdfLinks";
 import { PageCopier } from "./pageCopy";
+import { writeOptionalContent } from "./optionalContent";
+import { optionalContentMembership, type OptionalContentMembership } from "../layers/optionalContent";
 import { writeBookmarks } from "./bookmarks";
+import { writePageLabels } from "../pages/pdfPageLabels";
 import {
   PDFDocument,
   StandardFonts,
@@ -15,6 +19,7 @@ import {
   rotateRadians,
   PDFName,
   PDFDict,
+  PDFObjectCopier,
   PDFHexString,
   PDFArray,
   type PDFFont,
@@ -96,6 +101,8 @@ export async function exportPdf(
     }));
   for (const source of Object.values(model.sources)) {
     const input = await PDFDocument.load(source.bytes);
+    const sharedCopier = PDFObjectCopier.for(input.context, output.context);
+    copiers.set(source.id, new PageCopier(input, output, attachments, model.images, sharedCopier, source.layerVisibility));
     attachments.prepare(input, source.id);
     if (input.catalog.getAcroForm()?.dict.has(PDFName.of("XFA")))
       throw Error(
@@ -110,15 +117,12 @@ export async function exportPdf(
         output,
         names,
         await getFormFont(),
+        sharedCopier,
       );
       await transfer.prepare(model, source.id, fontBytes);
       transfers.set(source.id, transfer);
     }
     await input.flush();
-    copiers.set(
-      source.id,
-      new PageCopier(input, output, attachments, model.images),
-    );
   }
   if (
     Object.keys(model.importedFormEdits ?? {}).some(
@@ -274,6 +278,7 @@ export async function exportPdf(
           C: [1, 0.8, 0.2],
           F: 4,
         });
+        writeCommentMetadata(annotation, o);
         const ref = output.context.register(annotation);
         let annots = page.node.lookupMaybe(PDFName.of("Annots"), PDFArray);
         if (!annots) {
@@ -342,8 +347,10 @@ export async function exportPdf(
     progress((n + 1) / indices.length);
   }
   for (const copier of copiers.values()) copier.finish(pageMap);
+  writeOptionalContent(output, [...copiers.values()].map((copier) => copier.getOptionalContent()));
   writeLinks(output, model, pageMap);
   writeBookmarks(output, model.bookmarks ?? [], pageMap);
+  writePageLabels(output, indices.map((index) => model.pages[index]));
   attachments.finish();
   output.setTitle(model.metadata.title);
   output.setAuthor(model.metadata.author);
@@ -420,6 +427,7 @@ export interface FormWidgetDescriptor {
   width: number;
   height: number;
   option?: string;
+  optionalContent?: OptionalContentMembership;
 }
 export async function inspectForms(
   model: Pick<DocumentModel, "sources">,
@@ -447,6 +455,7 @@ export async function inspectForms(
         widgets.push({
           id: widgetKey(f.getName(), index),
           pageIndex,
+          optionalContent: optionalContentMembership(doc, widget.dict.get(PDFName.of("OC"))),
           x: rectangle.x - crop.x,
           y: crop.y + crop.height - rectangle.y - rectangle.height,
           width: rectangle.width,

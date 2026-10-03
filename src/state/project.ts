@@ -11,6 +11,7 @@ import { inspectFont } from "../fonts/inspect";
 import { checkFontBudget, MAX_FONT_BYTES } from "../fonts/budget";
 import { directReferences, directImageEdits } from "../direct/model";
 import { bookmarkDestinationSchema } from "../pages/bookmarkDestination";
+import { validPageLabel, MAX_PAGE_LABEL_LENGTH } from "../pages/labels";
 
 const id = z
   .string()
@@ -27,6 +28,7 @@ const box = {
 };
 const color = z.string().regex(/^#[\da-f]{6}$/i);
 const value = z.union([text, z.boolean(), z.array(text).max(10000)]);
+const reviewStatus = z.enum(["None", "Accepted", "Rejected", "Cancelled", "Completed"]);
 const linkTarget = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("page"), pageId: id }),
   z.object({ kind: z.literal("url"), url: z.string().max(8192) }),
@@ -76,6 +78,8 @@ const object = z.object({
   opacity: number.min(0).max(1),
   strokeWidth: number.min(0).max(1000),
   text: text.optional(),
+  author: z.string().max(10000).optional(),
+  reviewStatus: reviewStatus.optional(),
   fontSize: number.positive().max(10000),
   font: z.enum(["sans", "serif", "mono", "japanese", "custom"]),
   fontId: z
@@ -141,7 +145,10 @@ const schema = z.object({
     id,
     name: z.string().min(1).max(1000),
     created: number,
-    sources: z.record(id, z.object(asset)),
+    sources: z.record(id, z.object({ ...asset,
+      layerVisibility: z.record(z.string().regex(/^[1-9]\d*R(?:[1-9]\d*)?$/), z.boolean())
+        .refine((items) => Object.keys(items).length <= 10000).optional(),
+    })),
     images: z.record(
       id,
       z.object({ ...asset, mime: z.enum(["image/png", "image/jpeg"]) }),
@@ -179,6 +186,7 @@ const schema = z.object({
           id,
           sourceId: id.optional(),
           sourceIndex: z.number().int().min(0).max(100000),
+          label: z.string().max(MAX_PAGE_LABEL_LENGTH).refine(validPageLabel).optional(),
           width: box.width,
           height: box.height,
           rotation: z.union([
@@ -193,6 +201,8 @@ const schema = z.object({
               z.string(),
               z.object({
                 text: text.optional(),
+                author: z.string().max(10000).optional(),
+                reviewStatus: reviewStatus.optional(),
                 deleted: z.boolean().optional(),
                 link: linkTarget.optional(),
                 box: z.object(box).optional(),
@@ -298,6 +308,7 @@ export async function saveProject(model: DocumentModel): Promise<Uint8Array> {
       name: s.name,
       file,
       sha256: await hash(s.bytes),
+      layerVisibility: s.layerVisibility,
     };
   }
   for (const [i, s] of Object.values(model.images).entries()) {
@@ -409,7 +420,7 @@ export async function openProject(bytes: Uint8Array): Promise<DocumentModel> {
       const data = files[s.file];
       if (key !== s.id || !data || (await hash(data)) !== s.sha256)
         throw Error("元PDFの整合性エラー");
-      model.sources[key] = { id: s.id, name: s.name, bytes: data };
+      model.sources[key] = { id: s.id, name: s.name, bytes: data, layerVisibility: s.layerVisibility };
     }
     for (const [key, s] of Object.entries(d.images)) {
       const data = files[s.file];

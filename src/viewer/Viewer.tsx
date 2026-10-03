@@ -6,6 +6,8 @@ import { TextSelectionTools } from "../annotations/TextSelectionTools";
 import { pageScale, wheelZoom, type ZoomMode } from "./zoom";
 import { useViewerPosition } from "./useViewerPosition";
 import { bookmarkViewport, resolveBookmarkView, type BookmarkNavigation } from "./bookmarkNavigation";
+import type { DocumentSearch } from "./useDocumentSearch";
+import { pageLabel } from "../pages/labels";
 export type { ZoomMode } from "./zoom";
 export function Viewer({
   model,
@@ -20,7 +22,9 @@ export function Viewer({
   onZoom,
   bookmarkNavigation,
   onBookmarkNavigated,
+  search,
 }: {
+  search: DocumentSearch;
   model: DocumentModel;
   active: string;
   onActive: (id: string) => void;
@@ -47,6 +51,48 @@ export function Viewer({
   currentZoom.current = zoom;
   const activatePage = useRef(onActive);
   activatePage.current = onActive;
+  const { navigation, completeNavigation } = search;
+  useEffect(() => {
+    if (!navigation) return;
+    const el = root.current;
+    const hit = search.hits.find((h) => h.id === navigation.hitId);
+    if (!el || !hit) { completeNavigation(navigation.request); return; }
+    const { hitId, request } = navigation, { pageId } = hit;
+    let frame = 0;
+    const observer = new MutationObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(locate);
+    });
+    const timeout = window.setTimeout(() => completeNavigation(request), 10000);
+    function locate() {
+      if (!el) return;
+      const paper = document.getElementById(`page-${pageId}`)?.querySelector(".page-view");
+      if (paper?.getAttribute("data-rendered") !== "true") return;
+      const targets = paper.querySelectorAll<HTMLElement | SVGElement>(`[data-search-hit="${CSS.escape(hitId)}"]`);
+      if (!targets.length) return;
+      const pageBounds = paper.getBoundingClientRect(), viewport = el.getBoundingClientRect();
+      const bounds = Array.from(targets, (target) => target.getBoundingClientRect())
+        .find((rect) => rect.width && rect.height && rect.bottom > pageBounds.top && rect.top < pageBounds.bottom &&
+          rect.right > pageBounds.left && rect.left < pageBounds.right);
+      // Clipped or invisible matches keep the page navigation, without moving
+      // into a neighbouring page or outside the current crop.
+      if (bounds) {
+        // Keep the reading line within the requested page, including matches
+        // right at its top edge.
+        const sectionTop = paper.closest(".page-section")!.getBoundingClientRect().top;
+        el.scrollTop += Math.max(sectionTop - viewport.top,
+          Math.max(pageBounds.top, bounds.top) - viewport.top - el.clientHeight * 0.35);
+        if (bounds.left < viewport.left || bounds.right > viewport.right)
+          el.scrollLeft += bounds.left - viewport.left - el.clientWidth * 0.25;
+        activatePage.current(pageId);
+        settleNavigation(pageId);
+      }
+      completeNavigation(request);
+    }
+    observer.observe(el, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-rendered"] });
+    frame = requestAnimationFrame(locate);
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); clearTimeout(timeout); };
+  }, [navigation, completeNavigation, search.hits, settleNavigation]);
   useEffect(() => {
     const navigation = bookmarkNavigation;
     if (!navigation) return;
@@ -140,12 +186,16 @@ export function Viewer({
             onMouseDown={() => onActive(p.id)}
           >
             <div className="page-caption">
-              <span>ページ {i + 1}</span>
+              <span><span className="page-label-text" title={pageLabel(p, i)}>ページ {pageLabel(p, i) || "（空）"}</span>
+                {p.label !== undefined && p.label !== String(i + 1) && <small>（{i + 1} / {model.pages.length}）</small>}
+              </span>
               <span>
                 {Math.round(size.width)} × {Math.round(size.height)} pt
               </span>
             </div>
             <PageView
+              searchHits={search.byPage.get(p.id)}
+              currentSearchId={search.currentId}
               model={model}
               page={p}
               scale={scale}

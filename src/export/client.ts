@@ -9,12 +9,10 @@ import type { DirectInspection, SourceImageReference } from "../direct/model";
 import type { FormDescriptor, imagesToPdf } from "./engine";
 import type { WorkerRequest } from "./worker";
 import type { AttachmentInfo } from "../attachments/model";
-type Request = WorkerRequest extends infer R
-  ? R extends { id: number }
-    ? Omit<R, "id">
-    : never
-  : never;
-let serial = 0;
+import { PdfWorkerClient } from "./workerClient";
+const client = new PdfWorkerClient(() => new Worker(new URL("./worker.ts", import.meta.url), { type: "module" }));
+const run = <T>(...args: Parameters<PdfWorkerClient["run"]>) => client.run<T>(...args);
+export const resetExportWorker = () => client.reset();
 export const inspectExistingText = (
   bytes: Uint8Array,
   index: number,
@@ -38,51 +36,6 @@ export const previewDirectPage = (
   );
 export const inspectLocalFont = (bytes: Uint8Array, name: string) =>
   run<FontAsset>({ type: "fontInspect", bytes, name });
-function run<T>(
-  request: Request,
-  progress?: (v: number) => void,
-  signal?: AbortSignal,
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./worker.ts", import.meta.url), {
-      type: "module",
-    });
-    const id = ++serial;
-    const cleanup = () => {
-      worker.terminate();
-      signal?.removeEventListener("abort", cancel);
-    };
-    const cancel = () => {
-      cleanup();
-      reject(new DOMException("キャンセルしました", "AbortError"));
-    };
-    if (signal?.aborted) {
-      cancel();
-      return;
-    }
-    signal?.addEventListener("abort", cancel, { once: true });
-    worker.onerror = () => {
-      cleanup();
-      reject(Error("PDF処理Workerでエラーが発生しました。"));
-    };
-    worker.onmessage = (e) => {
-      const m = e.data as {
-        id: number;
-        progress?: number;
-        result: T;
-        error?: string;
-      };
-      if (m.progress !== undefined) {
-        progress?.(m.progress);
-        return;
-      }
-      cleanup();
-      if (m.error) reject(Error(m.error));
-      else resolve(m.result);
-    };
-    worker.postMessage({ ...request, id });
-  });
-}
 export const exportDocument = (
   model: DocumentModel,
   progress?: (v: number) => void,
@@ -98,7 +51,7 @@ export const exportDocument = (
     signal,
   );
 export const loadForms = (model: Pick<DocumentModel, "sources">) =>
-  run<FormDescriptor[]>({ type: "forms", model });
+  run<FormDescriptor[]>({ type: "forms", model: { sources: model.sources } });
 export const createImagePdf = (images: Parameters<typeof imagesToPdf>[0]) =>
   run<Uint8Array>({ type: "images", images } as Omit<
     Extract<WorkerRequest, { type: "images" }>,

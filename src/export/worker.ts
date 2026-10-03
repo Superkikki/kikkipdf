@@ -14,12 +14,19 @@ import {
   directImageEdits,
   type SourceImageReference,
 } from "../direct/model";
-import { PDFDocument, PDFName } from "pdf-lib";
+import { PDFDocument, PDFName, PDFObjectCopier, PDFPage } from "pdf-lib";
+import { OptionalContentSource, writeOptionalContent } from "./optionalContent";
 import type { Source, PageModel, ImageAsset } from "../state/model";
 import {
   inspectAttachments,
   extractAttachment,
 } from "../attachments/pdfAttachments";
+import { BinaryStore, restoreBinaries, type BinaryValue } from "../state/binaryStore";
+export interface WorkerMessage {
+  request: BinaryValue<WorkerRequest>;
+  binaries: Record<string, Uint8Array>;
+  retain: string[];
+}
 export type WorkerRequest =
   | {
       id: number;
@@ -57,9 +64,13 @@ export type WorkerRequest =
   | { id: number; type: "forms"; model: Pick<DocumentModel, "sources"> }
   | { id: number; type: "images"; images: Parameters<typeof imagesToPdf>[0] };
 let font: Promise<Uint8Array> | undefined;
-self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
-  const req = e.data;
+const binaries = new BinaryStore();
+self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
+  const id = e.data.request.id;
   try {
+    binaries.register(e.data.binaries);
+    binaries.retain(new Set(e.data.retain));
+    const req = restoreBinaries<WorkerRequest>(e.data.request, binaries.get);
     let result: unknown;
     if (req.type === "imageExtract")
       result = await isolatedImagePdf(req.bytes, req.reference);
@@ -87,8 +98,12 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         input.context.register(input.context.flateStream(rewritten.bytes)),
       );
       const output = await PDFDocument.create();
-      const [page] = await output.copyPages(input, [req.page.sourceIndex]);
+      const copier = PDFObjectCopier.for(input.context, output.context);
+      const layers = new OptionalContentSource(input, output, copier, req.source.layerVisibility);
+      const node = copier.copy(source.node);
+      const page = PDFPage.of(node, output.context.register(node), output);
       output.addPage(page);
+      writeOptionalContent(output, [layers.finish()]);
       result = await output.save();
     } else if (req.type === "export" || req.type === "split") {
       font ??= fetch("/assets/NotoSansJP-Regular.otf")
@@ -96,7 +111,8 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
           if (!r.ok) throw Error("ローカル日本語フォントを読み込めません。");
           return r.arrayBuffer();
         })
-        .then((b) => new Uint8Array(b));
+        .then((b) => new Uint8Array(b))
+        .catch(error => { font = undefined; throw error; });
       result =
         req.type === "split"
           ? await splitPdfZip(
@@ -123,12 +139,15 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     else if (req.type === "fontInspect")
       result = await inspectFont(req.bytes, req.name);
     else result = await imagesToPdf(req.images);
-    if (result instanceof Uint8Array)
-      postMessage({ id: req.id, result }, [result.buffer]);
+    if (result instanceof Uint8Array) {
+      // Added attachments can return a view into cached input. Keep that cache intact.
+      const output = binaries.owns(result.buffer) ? result.slice() : result;
+      postMessage({ id: req.id, result: output }, [output.buffer]);
+    }
     else postMessage({ id: req.id, result });
   } catch (error) {
     postMessage({
-      id: req.id,
+      id,
       error: error instanceof Error ? error.message : "PDF処理に失敗しました。",
     });
   }

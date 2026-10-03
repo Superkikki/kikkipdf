@@ -16,6 +16,7 @@ import {
 import type { LocalFile } from "../platform/files";
 import { previewDirectPage } from "../export/client";
 import { directReferences, directImageEdits } from "../direct/model";
+import { validPageLabel } from "../pages/labels";
 GlobalWorkerOptions.workerSrc = workerUrl;
 const cache = new Map<string, Promise<PDFDocumentProxy>>();
 interface PageLease {
@@ -37,7 +38,7 @@ export function acquirePagePdf(source: Source, page: PageModel, assets: Record<s
       })),
       release() {},
     };
-  const key = `${source.id}:${page.sourceIndex}:${JSON.stringify({ refs, images })}`;
+  const key = `${source.id}:${page.sourceIndex}:${JSON.stringify({ refs, images, visibility: source.layerVisibility })}`;
   let entry = previews.get(key);
   if (!entry) {
     const controller = new AbortController();
@@ -117,11 +118,14 @@ export async function importPdf(
   const model = emptyDocument(file.name);
   model.path = file.path;
   model.sources[id] = source;
+  const labels = await pdf.getPageLabels().catch(() => null);
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const v = page.getViewport({ scale: 1, rotation: 0 });
     model.pages.push({
       id: uid(),
+      ...(labels && typeof labels[i - 1] === "string" && validPageLabel(labels[i - 1])
+        ? { label: labels[i - 1] } : {}),
       sourceId: id,
       sourceIndex: i - 1,
       width: v.width,

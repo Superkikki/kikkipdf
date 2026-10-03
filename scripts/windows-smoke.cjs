@@ -52,7 +52,7 @@ async function verifyObjectContext(page, root) {
 (async () => {
   const started = Date.now();
   let browser;
-  for (let attempt = 0; attempt < 30; attempt++) {
+  for (let attempt = 0; attempt < 120; attempt++) {
     try {
       browser = await chromium.connectOverCDP("http://127.0.0.1:9223");
       break;
@@ -666,11 +666,21 @@ async function verifyObjectContext(page, root) {
       const invoke = window.__TAURI_INTERNALS__.invoke;
       // Synthetic test credential, never used with a user document.
       const password = "Kikki-Smoke-Only-123";
-      const encrypted = await invoke("encrypt_pdf", { bytes: input, password });
-      const output = await invoke("decrypt_pdf", {
-        bytes: Array.from(new Uint8Array(encrypted)),
-        password,
-      });
+      // Same raw IPC framing as platform/pdfSecurity.ts: LE password length,
+      // UTF-8 password and PDF bytes. Test both directions with binary bodies.
+      async function transform(command, bytes) {
+        const encoded = new TextEncoder().encode(password);
+        const offset = 4 + encoded.length;
+        const payload = new Uint8Array(offset + bytes.length);
+        new DataView(payload.buffer).setUint32(0, encoded.length, true);
+        payload.set(encoded, 4);
+        payload.set(bytes, offset);
+        encoded.fill(0);
+        try { return new Uint8Array(await invoke(command, payload)); }
+        finally { payload.fill(0, 4, offset); }
+      }
+      const encrypted = await transform("encrypt_pdf", new Uint8Array(input));
+      const output = await transform("decrypt_pdf", encrypted);
       return Array.from(new Uint8Array(output));
     },
     Array.from(await fs.readFile(fixture)),

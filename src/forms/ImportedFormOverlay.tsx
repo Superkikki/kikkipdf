@@ -1,4 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { layerConfig } from "../layers/model";
+import { sourcePdf } from "../viewer/pdf";
 import type {
   Box,
   DocumentModel,
@@ -32,6 +34,19 @@ export function ImportedFormOverlay({
   edit?: FormEditSelection;
 }) {
   const { fields } = useImportedForms(model.sources, enabled);
+  const source = page.sourceId ? model.sources[page.sourceId] : undefined;
+  const [visibility, setVisibility] = useState<{
+    source: typeof source;
+    config: Awaited<ReturnType<typeof layerConfig>>;
+  }>();
+  useEffect(() => {
+    if (!source || !enabled) return;
+    let live = true;
+    void sourcePdf(source).then((pdf) => layerConfig(pdf, source.layerVisibility)).then((config) => {
+      if (live) setVisibility({ source, config });
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [source, enabled]);
   const [draft, setDraft] = useState<{ id: string; box: Box }>();
   const gesture = useRef<
     | {
@@ -47,7 +62,8 @@ export function ImportedFormOverlay({
     .filter((f) => f.sourceId === page.sourceId)
     .flatMap((field) =>
       field.widgets
-        .filter((w) => w.pageIndex === page.sourceIndex)
+        .filter((w) => w.pageIndex === page.sourceIndex && (!w.optionalContent ||
+          (visibility && visibility.source === source && visibility.config.isVisible(w.optionalContent))))
         .map((widget) => ({
           field,
           widget,

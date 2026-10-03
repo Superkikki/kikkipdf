@@ -98,8 +98,9 @@ export class FormTransfer {
     private output: PDFDocument,
     private names: Set<string>,
     private font: PDFFont,
+    copier?: PDFObjectCopier,
   ) {
-    this.copier = PDFObjectCopier.for(input.context, output.context);
+    this.copier = copier ?? PDFObjectCopier.for(input.context, output.context);
   }
   async prepare(
     model: DocumentModel,
@@ -380,6 +381,7 @@ export class FormTransfer {
         "F",
         "H",
         "Q",
+        "OC",
       ]) {
         const value = widget.get(PDFName.of(key));
         if (value) copy.set(PDFName.of(key), this.copier.copy(value));

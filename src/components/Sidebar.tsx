@@ -8,6 +8,7 @@ import {
   X,
   Paperclip,
   ScanText,
+  Layers,
 } from "lucide-react";
 import type { BookmarkDestination, DocumentModel } from "../state/model";
 import { pageSize } from "../state/model";
@@ -16,10 +17,13 @@ import { usePageReorder } from "../pages/usePageReorder";
 import { reorderPage } from "../commands/document";
 import { PageView } from "../viewer/PageView";
 import { SearchPanel } from "../viewer/SearchPanel";
+import type { DocumentSearch } from "../viewer/useDocumentSearch";
+import { pageLabel } from "../pages/labels";
 import { CommentsPanel } from "../annotations/CommentsPanel";
 import { BookmarkPanel } from "../pages/BookmarkPanel";
 import { AttachmentPanel } from "../attachments/AttachmentPanel";
 import { ReviewPanel } from "../ocr/ReviewPanel";
+import { LayerPanel } from "../layers/LayerPanel";
 export function Sidebar({
   model,
   active,
@@ -30,7 +34,9 @@ export function Sidebar({
   hidden = false,
   onClose,
   searchRequest = 0,
+  search,
 }: {
+  search: DocumentSearch;
   searchRequest?: number;
   hidden?: boolean;
   onClose?: () => void;
@@ -76,6 +82,7 @@ export function Sidebar({
           { id: "search", label: "検索", icon: Search },
           { id: "attachments", label: "添付ファイル", icon: Paperclip },
           { id: "ocr", label: "OCR校正", icon: ScanText },
+          { id: "layers", label: "レイヤー", icon: Layers },
         ].map((t) => (
           <button
             title={t.label}
@@ -99,6 +106,8 @@ export function Sidebar({
                 ? "コメント"
                 : tab === "attachments"
                   ? "添付ファイル"
+                  : tab === "layers"
+                    ? "レイヤー"
                   : tab === "ocr"
                     ? "OCR校正"
                     : "文書内を検索"}
@@ -121,7 +130,8 @@ export function Sidebar({
               data-page-id={p.id}
               role="button"
               tabIndex={0}
-              aria-label={`ページ ${i + 1}`}
+              aria-label={p.label !== undefined && p.label !== String(i + 1)
+                ? `ページ ${pageLabel(p, i) || "（空）"}（${i + 1} / ${model.pages.length}）` : `ページ ${i + 1}`}
               aria-current={active === p.id ? "page" : undefined}
               onKeyDown={(e) => {
                 if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
@@ -156,7 +166,8 @@ export function Sidebar({
               </div>
               <span>
                 <GripVertical className="page-drag-handle" size={16} aria-label="ページをドラッグして並べ替え" />
-                {i + 1}
+                <span className="thumbnail-page-label" title={pageLabel(p, i)}>{pageLabel(p, i) || "（空）"}</span>
+                {p.label !== undefined && p.label !== String(i + 1) && <small>（{i + 1} / {model.pages.length}）</small>}
               </span>
             </div>
           ))}
@@ -164,8 +175,9 @@ export function Sidebar({
           <BookmarkPanel key={model.id} model={model} active={active} jump={jumpBookmark} />
         )}
         {tab === "comments" && <CommentsPanel model={model} jump={jump} />}
+        {tab === "layers" && <LayerPanel model={model} />}
         {tab === "search" && (
-          <SearchPanel model={model} jump={jump} focusRequest={searchRequest} />
+          <SearchPanel search={search} count={model.pages.length} focusRequest={searchRequest} />
         )}
         {tab === "attachments" && <AttachmentPanel model={model} />}
         {tab === "ocr" && (

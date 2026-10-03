@@ -23,8 +23,11 @@ export type ObjectKind =
 export type LinkTarget =
   | { kind: "page"; pageId: string }
   | { kind: "url"; url: string };
+export type ReviewStatus = "None" | "Accepted" | "Rejected" | "Cancelled" | "Completed";
 export interface AnnotationEdit {
   text?: string;
+  author?: string;
+  reviewStatus?: ReviewStatus;
   deleted?: boolean;
   link?: LinkTarget;
   /** Link rectangle relative to the original CropBox, before page rotation. */
@@ -46,6 +49,8 @@ export interface EditObject extends Box {
   opacity: number;
   strokeWidth: number;
   text?: string;
+  author?: string;
+  reviewStatus?: ReviewStatus;
   fontSize: number;
   font: "sans" | "serif" | "mono" | "japanese" | "custom";
   fontId?: string;
@@ -67,6 +72,8 @@ export interface EditObject extends Box {
 }
 export interface PageModel {
   id: string;
+  /** Logical PDF page label, kept with this page during page operations. */
+  label?: string;
   sourceId?: string;
   sourceIndex: number;
   width: number;
@@ -82,6 +89,8 @@ export interface Source {
   id: string;
   name: string;
   bytes: Uint8Array;
+  /** User visibility overrides, scoped to original PDF optional-content refs. */
+  layerVisibility?: Record<string, boolean>;
 }
 export interface ImageAsset {
   id: string;

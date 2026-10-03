@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import { History, type Command } from "../commands/history";
 import type { DocumentModel } from "./model";
 import { resetTextLayout } from "../text/client";
+import { resetExportWorker } from "../export/client";
 let history: History | null = null;
 let version = 0;
 const listeners = new Set<() => void>();
@@ -10,6 +11,10 @@ const emit = () => {
   listeners.forEach((l) => l());
 };
 export const documentStore = {
+  subscribe(listener: () => void) {
+    listeners.add(listener);
+    return () => { listeners.delete(listener); };
+  },
   get history() {
     return history;
   },
@@ -18,6 +23,7 @@ export const documentStore = {
   },
   load(document: DocumentModel, recovered = false) {
     resetTextLayout();
+    resetExportWorker();
     history = new History(document);
     if (recovered) history.markRecovered();
     emit();
@@ -41,16 +47,14 @@ export const documentStore = {
   },
   clear() {
     resetTextLayout();
+    resetExportWorker();
     history = null;
     emit();
   },
 };
 export function useDocument() {
   useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    },
+    documentStore.subscribe,
     () => version,
   );
   return {

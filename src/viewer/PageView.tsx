@@ -22,6 +22,10 @@ import { inspectExistingText } from "../export/client";
 import { directTextObject } from "../direct/editor";
 import { directReferences, directImageEdits } from "../direct/model";
 import { ExistingImageOverlay } from "../direct/ExistingImageOverlay";
+import { SearchHighlights } from "./SearchHighlights";
+import type { SearchHit } from "./search";
+import { layerConfig } from "../layers/model";
+const noSearchHits: SearchHit[] = [];
 export type Tool = "select" | "editText" | "editImage" | "appearanceText" | ObjectKind;
 export function PageView({
   model,
@@ -34,7 +38,11 @@ export function PageView({
   onActive = () => {},
   onError,
   formEdit,
+  searchHits = noSearchHits,
+  currentSearchId,
 }: {
+  searchHits?: SearchHit[];
+  currentSearchId?: string;
   model: DocumentModel;
   page: PageModel;
   scale: number;
@@ -50,6 +58,7 @@ export function PageView({
     canvas = useRef<HTMLCanvasElement>(null),
     text = useRef<HTMLDivElement>(null),
     content = useRef<HTMLDivElement>(null);
+  const textDivs = useRef<HTMLElement[]>([]);
   const [visible, setVisible] = useState(false),
     [ready, setReady] = useState(false),
     [inspecting, setInspecting] = useState(false);
@@ -107,7 +116,10 @@ export function PageView({
       const viewport = p.getViewport({ scale: rasterScale, rotation: 0 });
       canvasEl.width = Math.ceil(viewport.width);
       canvasEl.height = Math.ceil(viewport.height);
-      render = p.render({ canvas: canvasEl, viewport, annotationMode: 2 });
+      const config = await layerConfig(pdf, directReferences(currentPage.current).length || directImageEdits(currentPage.current).length
+        ? undefined : source!.layerVisibility);
+      if (cancelled) return;
+      render = p.render({ canvas: canvasEl, viewport, annotationMode: 2, optionalContentConfigPromise: Promise.resolve(config) });
       await render.promise;
       if (cancelled) return;
       if (textEl && !thumbnail) {
@@ -121,6 +133,8 @@ export function PageView({
           viewport,
         });
         await layer.render();
+        if (cancelled) return;
+        textDivs.current = layer.textDivs;
       }
       if (!cancelled) setReady(true);
     }
@@ -134,6 +148,7 @@ export function PageView({
       layer?.cancel();
       release?.();
       textEl?.replaceChildren();
+      textDivs.current = [];
       if (canvasEl) {
         canvasEl.width = 0;
         canvasEl.height = 0;
@@ -404,6 +419,8 @@ export function PageView({
                 interactive={!thumbnail && tool === "select"}
                 contextEnabled={!thumbnail}
               />
+              {!thumbnail && <SearchHighlights page={page} hits={searchHits}
+                currentId={currentSearchId} ready={ready} textDivs={textDivs} />}
               {draft && (
                 <svg
                   className="draft-layer"
