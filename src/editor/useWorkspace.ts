@@ -12,7 +12,9 @@ import {
   uid,
   type DocumentModel,
   type ImageAsset,
+  type BookmarkDestination,
 } from "../state/model";
+import type { BookmarkNavigation } from "../viewer/bookmarkNavigation";
 import { documentStore, useDocument } from "../state/store";
 import {
   change,
@@ -70,6 +72,7 @@ export function useWorkspace() {
     [tool, setTool] = useState<Tool>("select"),
     [zoom, setZoom] = useState<ZoomMode>("width"),
     [category, setCategory] = useState("編集");
+  const [bookmarkNavigation, setBookmarkNavigation] = useState<BookmarkNavigation | null>(null);
   const [theme, setTheme] = useState(
     () => localStorage.getItem("theme") ?? "light",
   );
@@ -94,11 +97,22 @@ export function useWorkspace() {
     if (page && page.id !== active) setActive(page.id);
   }, [page, active]);
   const jump = useCallback((id: string) => {
+    setBookmarkNavigation(null);
     setActive(id);
     setSelected(null);
     window.document
       .getElementById(`page-${id}`)
       ?.scrollIntoView({ behavior: "instant", block: "start" });
+  }, []);
+  const jumpBookmark = useCallback((id: string, destination?: BookmarkDestination) => {
+    if (!doc || !doc.pages.some((p) => p.id === id)) return;
+    if (!destination) { jump(id); return; }
+    setActive(id);
+    setSelected(null);
+    setBookmarkNavigation({ id: uid(), documentId: doc.id, pageId: id, destination });
+  }, [doc, jump]);
+  const completeBookmarkNavigation = useCallback((id: string) => {
+    setBookmarkNavigation((current) => current?.id === id ? null : current);
   }, []);
   function progress(value: number, label?: string) {
     setBusy((prev) =>
@@ -1155,6 +1169,9 @@ export function useWorkspace() {
     dialog,
     report,
     jump,
+    jumpBookmark,
+    bookmarkNavigation,
+    completeBookmarkNavigation,
     action,
     cancel: () => controller.current?.abort(),
     openFiles,

@@ -1,6 +1,7 @@
 import { PDFHexString, PDFString, PDFName, type PDFDocument, type PDFPage } from "pdf-lib";
 import type { BookmarkModel } from "../state/model";
 import { validatedLinkUrl } from "../links/target";
+import { bookmarkDestinationParameters } from "../pages/bookmarkDestination";
 /** Build a new outline linked to exported page references, including after reorder/extraction. */
 export function writeBookmarks(
   pdf: PDFDocument,
@@ -9,6 +10,11 @@ export function writeBookmarks(
 ) {
   function prune(items: BookmarkModel[]): BookmarkModel[] {
     return items.flatMap((b) => {
+      if (b.destination !== undefined) {
+        if (b.pageId === undefined || b.url !== undefined)
+          throw Error("しおりのページ内移動先にはページが必要です。");
+        bookmarkDestinationParameters(b.destination);
+      }
       if (b.color !== undefined && !/^#[\da-f]{6}$/i.test(b.color))
         throw Error("しおりの文字色が不正です。");
       if (b.url !== undefined) {
@@ -47,7 +53,9 @@ export function writeBookmarks(
       if (i) dict.set(PDFName.of("Prev"), refs[i - 1]);
       if (i + 1 < refs.length) dict.set(PDFName.of("Next"), refs[i + 1]);
       const page = b.pageId ? pages.get(b.pageId) : undefined;
-      if (page) dict.set(PDFName.of("Dest"), context.obj([page.ref, "Fit"]));
+      if (page) dict.set(PDFName.of("Dest"), context.obj([
+        page.ref, ...(b.destination ? bookmarkDestinationParameters(b.destination) : ["Fit"]),
+      ]));
       else if (b.url !== undefined)
         dict.set(PDFName.of("A"), context.obj({
           S: "URI", URI: PDFString.of(validatedLinkUrl(b.url)),

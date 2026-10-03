@@ -84,6 +84,34 @@ async function verifyObjectContext(page, root) {
     await search.fill("Needle"); await expect(panel.getByRole("button", { name: "Needle", exact: true })).toBeVisible();
     await panel.getByRole("button", { name: "Needle", exact: true }).click();
     await expect(page.getByLabel("ページ番号", { exact: true })).toHaveValue("2"); await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+    await expect(page.getByLabel("ズーム", { exact: true })).toHaveValue("1.5");
+    await expect.poll(() => page.evaluate(() => {
+      const pageView = document.querySelectorAll(".viewer-scroll .page-view")[1].getBoundingClientRect();
+      const root = document.querySelector(".viewer-scroll").getBoundingClientRect();
+      return Math.abs(pageView.top + 95 * 1.5 - root.top);
+    })).toBeLessThan(3);
+    await panel.getByRole("button", { name: "現在の表示位置を移動先に設定", exact: true }).click();
+    await expect(panel.getByLabel("しおりの表示方法", { exact: true })).toHaveValue("XYZ");
+    await expect.poll(async () => Math.abs(Number(await panel.getByLabel("しおりの上位置", { exact: true }).inputValue()) - 500)).toBeLessThan(3);
+    await page.getByRole("button", { name: /^元に戻す/ }).click();
+    await expect(panel.getByLabel("しおりの上位置", { exact: true })).toHaveValue("500");
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+    await panel.getByLabel("しおりの上位置", { exact: true }).fill("1000");
+    await panel.getByRole("button", { name: "Needle", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => Math.abs(
+      document.querySelectorAll(".viewer-scroll .page-view")[1].getBoundingClientRect().top -
+      document.querySelector(".viewer-scroll").getBoundingClientRect().top,
+    ))).toBeLessThan(3);
+    await expect(page.getByLabel("ページ番号", { exact: true })).toHaveValue("2");
+    await page.getByRole("button", { name: /^元に戻す/ }).click();
+    await panel.getByLabel("しおりの上位置", { exact: true }).fill("-1000");
+    await panel.getByRole("button", { name: "Needle", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => Math.abs(
+      document.querySelectorAll(".viewer-scroll .page-view")[1].getBoundingClientRect().top + 594 * 1.5 -
+      document.querySelector(".viewer-scroll").getBoundingClientRect().top,
+    ))).toBeLessThan(3);
+    await expect(page.getByLabel("ページ番号", { exact: true })).toHaveValue("2");
+    await page.getByRole("button", { name: /^元に戻す/ }).click();
     await search.fill(""); await expect(panel.getByRole("button", { name: "Closed chapter", exact: true })).toHaveCount(0);
     await panel.getByRole("button", { name: "すべて展開", exact: true }).click(); await expect(panel.getByRole("button", { name: "Needle", exact: true })).toBeVisible();
     await panel.getByRole("button", { name: "すべて折りたたむ", exact: true }).click(); await expect(panel.getByRole("button", { name: "Closed chapter", exact: true })).toHaveCount(0);
@@ -111,11 +139,13 @@ async function verifyObjectContext(page, root) {
     const pdf = await PDFDocument.load(await fs.readFile(path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf")));
     const outline = pdf.catalog.lookup(PDFName.of("Outlines"), PDFDict), root = outline.lookup(PDFName.of("First"), PDFDict);
     if (outline.get(PDFName.of("Count")).toString() !== "1" || root.get(PDFName.of("Count")).toString() !== "-2" || root.lookup(PDFName.of("First"), PDFDict).get(PDFName.of("Count")).toString() !== "-1") throw Error("Bookmark folding or visible counts changed");
+    const destination = root.lookup(PDFName.of("First"), PDFDict).lookup(PDFName.of("First"), PDFDict).lookup(PDFName.of("Dest"), PDFArray);
+    if (destination.get(0).toString() !== pdf.getPage(1).ref.toString() || Array.from({ length: 4 }, (_, i) => destination.get(i + 1).toString()).join(" ") !== "/XYZ 0 500 1.5") throw Error("Precise bookmark destination changed");
     const external = root.lookup(PDFName.of("Last"), PDFDict);
     if (external.has(PDFName.of("Dest")) || external.lookup(PDFName.of("A"), PDFDict).lookup(PDFName.of("URI"), PDFString).decodeText() !== "mailto:support@example.com?subject=Native") throw Error("External bookmark destination changed");
     if (external.get(PDFName.of("C")).toString() !== "[ 0.6 0.2 0.4 ]" || external.get(PDFName.of("F")).toString() !== "2") throw Error("Bookmark text formatting changed");
     if (errors.length) throw Error(JSON.stringify(errors));
-    console.log(JSON.stringify({ native: true, bookmarkSearch: true, externalBookmarkUrl: true, bookmarkTextStyle: true, preservedFolding: true, bulkExpandCollapse: true, undoRedo: true, nativeSave: true, errors }));
+    console.log(JSON.stringify({ native: true, bookmarkSearch: true, externalBookmarkUrl: true, bookmarkTextStyle: true, preciseBookmarkDestination: true, captureBookmarkLocation: true, clippedBookmarkDestination: true, preservedFolding: true, bulkExpandCollapse: true, undoRedo: true, nativeSave: true, errors }));
     await browser.close(); return;
   }
   if (process.env.KIKKI_SMOKE_CHOICE_ONLY === "1") {

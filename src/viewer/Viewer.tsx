@@ -5,6 +5,7 @@ import { PageView, type Tool } from "./PageView";
 import { TextSelectionTools } from "../annotations/TextSelectionTools";
 import { pageScale, wheelZoom, type ZoomMode } from "./zoom";
 import { useViewerPosition } from "./useViewerPosition";
+import { bookmarkViewport, resolveBookmarkView, type BookmarkNavigation } from "./bookmarkNavigation";
 export type { ZoomMode } from "./zoom";
 export function Viewer({
   model,
@@ -17,6 +18,8 @@ export function Viewer({
   onError,
   onScale,
   onZoom,
+  bookmarkNavigation,
+  onBookmarkNavigated,
 }: {
   model: DocumentModel;
   active: string;
@@ -28,14 +31,61 @@ export function Viewer({
   onError: (s: string) => void;
   onScale: (scale: number) => void;
   onZoom: (zoom: ZoomMode) => void;
+  bookmarkNavigation: BookmarkNavigation | null;
+  onBookmarkNavigated: (id: string) => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [space, setSpace] = useState({ width: 800, height: 700 });
-  const anchorZoom = useViewerPosition(root, model, active, onActive, zoom, space);
+  const { anchorZoom, settleNavigation } = useViewerPosition(root, model, active, onActive, zoom, space);
   const activePage = model.pages.find((p) => p.id === active) ?? model.pages[0];
   const activeScale = pageScale(pageSize(activePage), space, zoom);
   const zoomState = useRef({ scale: activeScale, onZoom, anchorZoom });
   zoomState.current = { scale: activeScale, onZoom, anchorZoom };
+  const currentModel = useRef(model);
+  currentModel.current = model;
+  const currentZoom = useRef(zoom);
+  currentZoom.current = zoom;
+  const activatePage = useRef(onActive);
+  activatePage.current = onActive;
+  useEffect(() => {
+    const navigation = bookmarkNavigation;
+    if (!navigation) return;
+    if (navigation.documentId !== model.id) { onBookmarkNavigated(navigation.id); return; }
+    const target = model.pages.find((p) => p.id === navigation.pageId);
+    if (!target) { onBookmarkNavigated(navigation.id); return; }
+    let cancelled = false, frame = 0;
+    const live = () => !cancelled && currentModel.current.id === navigation.documentId &&
+      currentModel.current.pages.find((p) => p.id === target.id) === target;
+    void bookmarkViewport(model, target).then((viewport) => {
+      const el = root.current;
+      if (!el || !live()) { onBookmarkNavigated(navigation.id); return; }
+      const view = resolveBookmarkView(target, viewport, navigation.destination,
+        { width: el.clientWidth, height: el.clientHeight }, currentZoom.current);
+      onZoom(view.zoom);
+      // Wait for zoom geometry and reading-position restoration before moving to the destination.
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => {
+          const pageView = document.getElementById(`page-${target.id}`)?.querySelector<HTMLElement>(".page-view");
+          if (!pageView || !live()) { onBookmarkNavigated(navigation.id); return; }
+          const bounds = pageView.getBoundingClientRect(), visible = el.getBoundingClientRect();
+          const size = pageSize(target), scale = bounds.width / size.width;
+          const x = Math.max(0, Math.min(size.width - 1, view.point.x));
+          const y = Math.max(0, Math.min(size.height - 1, view.point.y));
+          el.scrollTop += bounds.top - visible.top - el.clientTop + y * scale;
+          el.scrollLeft += bounds.left - visible.left - el.clientLeft + x * scale;
+          activatePage.current(target.id);
+          settleNavigation(target.id);
+          onBookmarkNavigated(navigation.id);
+        });
+      });
+    }).catch((e) => {
+      if (live()) onError(e instanceof Error ? e.message : "しおりの移動先を表示できません。");
+      onBookmarkNavigated(navigation.id);
+    });
+    return () => { cancelled = true; cancelAnimationFrame(frame); };
+    // Only a new request navigates; unrelated document edits must not replay it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookmarkNavigation, model.id]);
   useEffect(() => {
     const el = root.current!;
     let frame = 0;

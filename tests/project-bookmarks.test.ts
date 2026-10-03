@@ -1,7 +1,7 @@
 import { it, expect, describe } from "vitest";
 import { PDFDocument, PDFName, PDFDict, PDFArray, PDFString, PDFHexString, PDFNumber } from "pdf-lib";
 import { zipSync, unzipSync, strToU8, strFromU8 } from "fflate";
-import { emptyDocument, blankPage, newObject } from "../src/state/model";
+import { emptyDocument, blankPage, newObject, type BookmarkDestination } from "../src/state/model";
 import { saveProject, openProject } from "../src/state/project";
 import { exportPdf } from "../src/export/engine";
 import {
@@ -465,4 +465,123 @@ it("rejects invalid bookmark colors in PDF and project saves", async () => {
   ];
   await expect(exportPdf(model)).rejects.toThrow();
   await expect(saveProject(model)).rejects.toThrow();
+});
+
+it("imports every supported page-view destination with its raw parameters", async () => {
+  const cases = [
+    ["XYZ", 12, null, 0], ["XYZ", null, 24, null],
+    ["Fit"], ["FitB"], ["FitH", null], ["FitH", 17],
+    ["FitBH", -9], ["FitV", null], ["FitV", 31], ["FitBV", 0],
+    ["FitR", 1, 2, 30, 40],
+  ] as const;
+  const outline = cases.map(([kind, ...parameters], i) => ({
+    title: `destination-${i}`,
+    dest: [0, { name: kind }, ...parameters],
+    items: [],
+  }));
+  const pdf = {
+    getOutline: async () => outline,
+    getDestination: async () => null,
+    getPageIndex: async () => 0,
+  } as unknown as PDFDocumentProxy;
+  const nodes = await readBookmarks(pdf, [{ ...blankPage(), id: "page-1" }]);
+  expect(nodes.map((b) => b.destination)).toEqual(cases.map(([kind, ...p]) => {
+    switch (kind) {
+      case "XYZ": return { kind, left: p[0], top: p[1], zoom: p[2] };
+      case "FitH": case "FitBH": return { kind, top: p[0] };
+      case "FitV": case "FitBV": return { kind, left: p[0] };
+      case "FitR": return { kind, left: p[0], bottom: p[1], right: p[2], top: p[3] };
+      default: return { kind };
+    }
+  }));
+  expect(nodes.every((b) => b.pageId === "page-1")).toBe(true);
+});
+
+it("resolves named destinations and leaves malformed views as page bookmarks", async () => {
+  const outline = [
+    { title: "名前付き", dest: "named", items: [] },
+    { title: "不正XYZ", dest: [0, { name: "XYZ" }, Infinity, 2, 0], items: [] },
+    { title: "不正FitR", dest: [0, { name: "FitR" }, 9, 0, 1, 2], items: [] },
+    { title: "未知", dest: [0, { name: "FitZ" }], items: [] },
+  ];
+  const pdf = {
+    getOutline: async () => outline,
+    getDestination: async (name: string) => name === "named"
+      ? [0, { name: "XYZ" }, 3, null, 0]
+      : null,
+    getPageIndex: async () => 0,
+  } as unknown as PDFDocumentProxy;
+  const nodes = await readBookmarks(pdf, [{ ...blankPage(), id: "page-1" }]);
+  expect(nodes[0]).toMatchObject({ pageId: "page-1", destination: { kind: "XYZ", left: 3, top: null, zoom: 0 } });
+  expect(nodes.slice(1).map((b) => b.pageId)).toEqual(["page-1", "page-1", "page-1"]);
+  expect(nodes.slice(1).map((b) => b.destination)).toEqual([undefined, undefined, undefined]);
+});
+
+it("exports raw page-view parameters after page reorder, crop and rotation", async () => {
+  const model = emptyDocument();
+  const a = { ...blankPage(), rotation: 90 as const, crop: { x: 10, y: 20, width: 200, height: 300 } };
+  const b = { ...blankPage(), rotation: 270 as const, crop: { x: 5, y: 6, width: 70, height: 80 } };
+  model.pages = [a, b];
+  model.bookmarks = [
+    { id: "a", title: "範囲", pageId: a.id, destination: { kind: "FitR", left: 11, bottom: 22, right: 33, top: 44 }, children: [] },
+    { id: "b", title: "XYZ", pageId: b.id, destination: { kind: "XYZ", left: null, top: 47, zoom: 0 }, children: [] },
+  ];
+  const pdf = await PDFDocument.load(await exportPdf(model, undefined, { indices: [1, 0] }));
+  const nodes = pdf.catalog.lookup(PDFName.of("Outlines"), PDFDict).lookup(PDFName.of("First"), PDFDict);
+  const asNumbers = (arr: PDFArray) => Array.from({ length: arr.size() }, (_, i) => {
+    const value = arr.get(i);
+    return value instanceof PDFNumber ? value.asNumber() : value.toString();
+  });
+  const firstDest = nodes.lookup(PDFName.of("Dest"), PDFArray);
+  const nextDest = nodes.lookup(PDFName.of("Next"), PDFDict).lookup(PDFName.of("Dest"), PDFArray);
+  expect(firstDest.get(0)).toEqual(pdf.getPage(1).ref);
+  expect(asNumbers(firstDest).slice(1)).toEqual(["/FitR", 11, 22, 33, 44]);
+  expect(nextDest.get(0)).toEqual(pdf.getPage(0).ref);
+  expect(asNumbers(nextDest).slice(1)).toEqual(["/XYZ", "null", 47, 0]);
+  const extracted = await PDFDocument.load(await exportPdf(model, undefined, { indices: [0] }));
+  const extractedNode = extracted.catalog.lookup(PDFName.of("Outlines"), PDFDict).lookup(PDFName.of("First"), PDFDict);
+  expect(asNumbers(extractedNode.lookup(PDFName.of("Dest"), PDFArray)).slice(1)).toEqual(["/FitR", 11, 22, 33, 44]);
+  expect(extractedNode.get(PDFName.of("Next"))).toBeUndefined();
+});
+
+it("round-trips page-view destinations through project history and clears them on destination changes", async () => {
+  const model = emptyDocument();
+  model.pages = [blankPage(), blankPage()];
+  const [first, second] = model.pages;
+  model.bookmarks = [{ id: "view", title: "表示位置", pageId: first.id, destination: { kind: "FitH", top: null }, children: [] }];
+  const restored = await openProject(await saveProject(model));
+  expect(restored.bookmarks).toEqual(model.bookmarks);
+  const history = new History(restored);
+  history.execute(updateBookmark("view", { pageId: second.id }));
+  expect(history.current.document.bookmarks?.[0]).toMatchObject({ pageId: second.id });
+  expect(history.current.document.bookmarks?.[0].destination).toBeUndefined();
+  history.undo();
+  expect(history.current.document.bookmarks).toEqual(model.bookmarks);
+  history.redo();
+  history.execute(updateBookmark("view", { pageId: first.id, destination: { kind: "XYZ", left: 0, top: null, zoom: null } }));
+  expect(history.current.document.bookmarks?.[0].destination).toEqual({ kind: "XYZ", left: 0, top: null, zoom: null });
+  history.execute(updateBookmark("view", { url: "https://example.com/" }));
+  expect(history.current.document.bookmarks?.[0].destination).toBeUndefined();
+  history.undo();
+  expect(history.current.document.bookmarks?.[0].destination).toEqual({ kind: "XYZ", left: 0, top: null, zoom: null });
+});
+
+it("rejects invalid or page-less page-view destinations on export and project save", async () => {
+  const invalid = [
+    { kind: "XYZ", left: 0, top: 0, zoom: 101 },
+    { kind: "FitR", left: 5, bottom: 0, right: 5, top: 1 },
+    { kind: "FitH", top: Infinity },
+  ] as const;
+  for (const destination of invalid) {
+    const model = emptyDocument();
+    model.pages = [blankPage()];
+    model.bookmarks = [{ id: "invalid", title: "不正", pageId: model.pages[0].id, destination: destination as unknown as BookmarkDestination, children: [] }];
+    await expect(exportPdf(model)).rejects.toThrow();
+    await expect(saveProject(model)).rejects.toThrow();
+  }
+  const orphan = emptyDocument();
+  orphan.pages = [blankPage()];
+  orphan.bookmarks = [{ id: "orphan", title: "ページなし", destination: { kind: "Fit" }, children: [] }];
+  await expect(exportPdf(orphan)).rejects.toThrow();
+  await expect(saveProject(orphan)).rejects.toThrow();
 });

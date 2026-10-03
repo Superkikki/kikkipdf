@@ -137,6 +137,7 @@ export function App() {
               model={doc}
               active={w.active}
               jump={w.jump}
+              jumpBookmark={w.jumpBookmark}
               selected={w.selected}
               selectObject={(pageId, id) => {
                 w.jump(pageId);
@@ -152,6 +153,8 @@ export function App() {
               active={w.active}
               onActive={onActive}
               zoom={w.zoom}
+              bookmarkNavigation={w.bookmarkNavigation}
+              onBookmarkNavigated={w.completeBookmarkNavigation}
               tool={w.tool}
               selected={w.selected}
               onSelect={(id) => {

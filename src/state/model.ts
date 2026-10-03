@@ -144,10 +144,18 @@ export interface FormFieldModel extends Box {
   multiSelect?: boolean;
   maxLength?: number;
 }
+export type BookmarkDestination =
+  | { kind: "XYZ"; left: number | null; top: number | null; zoom: number | null }
+  | { kind: "Fit" | "FitB" }
+  | { kind: "FitH" | "FitBH"; top: number | null }
+  | { kind: "FitV" | "FitBV"; left: number | null }
+  | { kind: "FitR"; left: number; bottom: number; right: number; top: number };
 export interface BookmarkModel {
   id: string;
   title: string;
   pageId?: string;
+  /** Coordinates and zoom in the PDF destination's original user space. */
+  destination?: BookmarkDestination;
   url?: string;
   expanded?: boolean;
   color?: string;

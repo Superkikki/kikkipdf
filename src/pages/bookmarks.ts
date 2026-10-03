@@ -1,5 +1,6 @@
 import type { PDFDocumentProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { uid, type BookmarkModel, type PageModel } from "../state/model";
+import { uid, type BookmarkModel, type PageModel, type BookmarkDestination } from "../state/model";
+import { readBookmarkDestination } from "./bookmarkDestination";
 import { change } from "../commands/document";
 import { importedLinkUrl } from "../links/target";
 
@@ -16,6 +17,7 @@ export async function readBookmarks(
     const result: BookmarkModel[] = [];
     for (const item of items) {
       let pageId: string | undefined;
+      let destination: BookmarkDestination | undefined;
       if (item.dest) {
         try {
           const dest =
@@ -28,6 +30,7 @@ export async function readBookmarks(
                 ? dest[0]
                 : await pdf.getPageIndex(dest[0]);
             pageId = pages[index]?.id;
+            if (pageId) destination = readBookmarkDestination(dest);
           }
         } catch {
           /* Broken destinations are retained as non-clickable headings. */
@@ -41,6 +44,7 @@ export async function readBookmarks(
         id: uid(),
         title: item.title,
         pageId,
+        ...(destination ? { destination } : {}),
         ...(url ? { url } : {}),
         ...(item.count !== undefined ? { expanded: item.count >= 0 } : {}),
         ...(color && color !== "#000000" ? { color } : {}),
@@ -76,15 +80,15 @@ export const addBookmark = (bookmark: BookmarkModel, parentId?: string) =>
   }));
 export const updateBookmark = (
   id: string,
-  patch: Pick<Partial<BookmarkModel>, "title" | "pageId" | "url" | "expanded" | "color" | "bold" | "italic">,
+  patch: Pick<Partial<BookmarkModel>, "title" | "pageId" | "url" | "destination" | "expanded" | "color" | "bold" | "italic">,
 ) =>
   change("しおり編集", (d) => ({
     ...d,
     bookmarks: mapBookmarks(d.bookmarks ?? [], id, (b) => ({
       ...b,
       ...patch,
-      ...(Object.hasOwn(patch, "url") ? { pageId: undefined } : {}),
-      ...(Object.hasOwn(patch, "pageId") ? { url: undefined } : {}),
+      ...(Object.hasOwn(patch, "url") ? { pageId: undefined, destination: undefined } : {}),
+      ...(Object.hasOwn(patch, "pageId") ? { url: undefined, destination: patch.destination } : {}),
     })),
   }));
 function without(nodes: BookmarkModel[], id: string): BookmarkModel[] {

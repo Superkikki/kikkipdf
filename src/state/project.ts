@@ -10,6 +10,7 @@ import type { BookmarkModel, DocumentModel } from "./model";
 import { inspectFont } from "../fonts/inspect";
 import { checkFontBudget, MAX_FONT_BYTES } from "../fonts/budget";
 import { directReferences, directImageEdits } from "../direct/model";
+import { bookmarkDestinationSchema } from "../pages/bookmarkDestination";
 
 const id = z
   .string()
@@ -35,6 +36,7 @@ const bookmark: z.ZodType<BookmarkModel> = z.lazy(() =>
     id,
     title: text,
     pageId: id.optional(),
+    destination: bookmarkDestinationSchema.optional(),
     url: z.string().max(8192).optional(),
     expanded: z.boolean().optional(),
     color: color.optional(),
@@ -43,6 +45,8 @@ const bookmark: z.ZodType<BookmarkModel> = z.lazy(() =>
     children: z.array(bookmark).max(10000),
   }).refine((b) => b.pageId === undefined || b.url === undefined, {
     message: "しおりの移動先はページかURLのいずれかにしてください。",
+  }).refine((b) => b.destination === undefined || b.pageId !== undefined, {
+    message: "しおりのページ内移動先にはページが必要です。",
   }),
 );
 const object = z.object({

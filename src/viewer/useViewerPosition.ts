@@ -98,7 +98,7 @@ export function useViewerPosition(
     };
     // Scroll uses the current callbacks and page elements through refs.
   }, [remember, root]);
-  return useCallback((clientX: number, clientY: number) => {
+  const anchorZoom = useCallback((clientX: number, clientY: number) => {
     const el = root.current;
     if (!el) return;
     const section = sections.current.find((s) => {
@@ -117,4 +117,11 @@ export function useViewerPosition(
       offsetY: clientY - viewport.top,
     };
   }, [root]);
+  const settleNavigation = useCallback((pageId: string) => {
+    const el = root.current;
+    if (!el) return;
+    restoredTop.current = el.scrollTop;
+    remember(pageId);
+  }, [root, remember]);
+  return { anchorZoom, settleNavigation };
 }

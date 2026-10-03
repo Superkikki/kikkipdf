@@ -9,7 +9,7 @@ import {
   Paperclip,
   ScanText,
 } from "lucide-react";
-import type { DocumentModel } from "../state/model";
+import type { BookmarkDestination, DocumentModel } from "../state/model";
 import { pageSize } from "../state/model";
 import { documentStore } from "../state/store";
 import { usePageReorder } from "../pages/usePageReorder";
@@ -24,6 +24,7 @@ export function Sidebar({
   model,
   active,
   jump,
+  jumpBookmark,
   selected,
   selectObject,
   hidden = false,
@@ -36,6 +37,7 @@ export function Sidebar({
   model: DocumentModel;
   active: string;
   jump: (id: string) => void;
+  jumpBookmark: (id: string, destination?: BookmarkDestination) => void;
   selected: string | null;
   selectObject: (pageId: string, id: string) => void;
 }) {
@@ -159,7 +161,7 @@ export function Sidebar({
             </div>
           ))}
         {tab === "bookmarks" && (
-          <BookmarkPanel key={model.id} model={model} active={active} jump={jump} />
+          <BookmarkPanel key={model.id} model={model} active={active} jump={jumpBookmark} />
         )}
         {tab === "comments" && <CommentsPanel model={model} jump={jump} />}
         {tab === "search" && (

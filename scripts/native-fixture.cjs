@@ -4,7 +4,8 @@ const { writeFile, readFile } = require("node:fs/promises");
   if (process.argv[3] === "bookmarks") {
     const pdf = await PDFDocument.create(); pdf.addPage([420, 595]);
     const b = pdf.addPage([420, 595]), context = pdf.context;
-    const outline = context.obj({ Type: "Outlines", Count: 1 }), root = context.obj({ Title: PDFHexString.fromText("Root"), Count: -2 }), branch = context.obj({ Title: PDFHexString.fromText("Closed chapter"), Count: -1 }), leaf = context.obj({ Title: PDFHexString.fromText("Needle"), Dest: [b.ref, "Fit"] }), other = context.obj({ Title: PDFHexString.fromText("Other"), A: { S: "URI", URI: PDFString.of("https://example.com/native") } });
+    pdf.addPage([420, 595]);
+    const outline = context.obj({ Type: "Outlines", Count: 1 }), root = context.obj({ Title: PDFHexString.fromText("Root"), Count: -2 }), branch = context.obj({ Title: PDFHexString.fromText("Closed chapter"), Count: -1 }), leaf = context.obj({ Title: PDFHexString.fromText("Needle"), Dest: [b.ref, "XYZ", 0, 500, 1.5] }), other = context.obj({ Title: PDFHexString.fromText("Other"), A: { S: "URI", URI: PDFString.of("https://example.com/native") } });
     const outlineRef = context.register(outline), rootRef = context.register(root), branchRef = context.register(branch), leafRef = context.register(leaf), otherRef = context.register(other);
     other.set(PDFName.of("C"), context.obj([0.2, 0.4, 0.6]));
     other.set(PDFName.of("F"), context.obj(3));

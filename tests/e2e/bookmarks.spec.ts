@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { PDFDocument, PDFDict, PDFName, PDFHexString, PDFString } from "pdf-lib";
+import { PDFDocument, PDFDict, PDFName, PDFHexString, PDFString, PDFArray, PDFNumber, degrees } from "pdf-lib";
 import { readFile } from "node:fs/promises";
 import { emptyDocument, blankPage } from "../../src/state/model";
 import { exportPdf } from "../../src/export/engine";
@@ -43,6 +43,48 @@ async function open(page: Page, buffer: Buffer, name = "bookmarks.pdf") {
   await page.getByRole("button", { name: "PDFを開く", exact: true }).click();
   await (await chooser).setFiles({ name, mimeType: "application/pdf", buffer });
   await page.getByRole("button", { name: "しおり", exact: true }).click();
+}
+
+async function locationFixture(rotated = false, cropped = false) {
+  const pdf = await PDFDocument.create();
+  for (let i = 0; i < 4; i++) pdf.addPage([600, 1000]);
+  const target = pdf.getPage(1);
+  if (rotated || cropped) {
+    target.setMediaBox(0, 0, 700, 1200);
+    target.setCropBox(50, 100, 600, 1000);
+    if (rotated) target.setRotation(degrees(90));
+  }
+  const context = pdf.context;
+  const root = context.obj({ Type: "Outlines", Count: 2 });
+  const rootRef = context.register(root);
+  const first = context.obj({
+    Title: PDFHexString.fromText("位置と倍率"), Parent: rootRef,
+    Dest: [target.ref, "XYZ", rotated ? 250 : 0, rotated ? 400 : 600, rotated ? 2.5 : 1.5],
+  });
+  const second = context.obj({
+    Title: PDFHexString.fromText("幅と位置"), Parent: rootRef,
+    Dest: [target.ref, "FitH", 750],
+  });
+  const firstRef = context.register(first), secondRef = context.register(second);
+  first.set(PDFName.of("Next"), secondRef);
+  second.set(PDFName.of("Prev"), firstRef);
+  root.set(PDFName.of("First"), firstRef);
+  root.set(PDFName.of("Last"), secondRef);
+  pdf.catalog.set(PDFName.of("Outlines"), rootRef);
+  return Buffer.from(await pdf.save());
+}
+
+async function visiblePagePoint(page: Page, index = 1, width = 600) {
+  return page.locator(".viewer-scroll .page-view").nth(index).evaluate((el, pageWidth) => {
+    const viewer = el.closest<HTMLElement>(".viewer-scroll")!;
+    const bounds = el.getBoundingClientRect(), root = viewer.getBoundingClientRect();
+    const scale = bounds.width / pageWidth;
+    return {
+      x: (root.left + viewer.clientLeft - bounds.left) / scale,
+      y: (root.top + viewer.clientTop - bounds.top) / scale,
+      scale,
+    };
+  }, width);
 }
 
 test("searches collapsed bookmarks without changing saved folding and preserves expand/collapse with undo, project and PDF", async ({
@@ -232,4 +274,169 @@ test("preserves bookmark text color, bold and italic across editing, undo, proje
   expect(node.get(PDFName.of("F"))?.toString()).toBe("2");
   await page.reload(); await open(page, await readFile(saved)); await item.click();
   await expect(color).toHaveValue("#993366"); await expect(bold).toBeChecked(); await expect(italic).not.toBeChecked();
+});
+
+test("bookmark clicks restore XYZ and FitH positions, including repeated navigation on the same page", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/"); await open(page, await locationFixture());
+  const panel = page.locator(".bookmark-panel"), zoom = page.getByLabel("ズーム", { exact: true });
+  const point = panel.getByRole("button", { name: "位置と倍率", exact: true });
+  await point.click();
+  await expect(page.getByLabel("ページ番号", { exact: true })).toHaveValue("2");
+  await expect(zoom).toHaveValue("1.5");
+  await expect.poll(async () => (await visiblePagePoint(page)).y).toBeCloseTo(400, 0);
+  await expect(panel.getByLabel("しおりの上位置", { exact: true })).toHaveValue("600");
+  await expect(panel.getByLabel("しおりの倍率（%）", { exact: true })).toHaveValue("150");
+  await panel.getByRole("button", { name: "幅と位置", exact: true }).click();
+  await expect(zoom).toHaveValue("width");
+  await expect.poll(async () => (await visiblePagePoint(page)).y).toBeCloseTo(250, 0);
+  await point.click();
+  await expect(zoom).toHaveValue("1.5");
+  await expect.poll(async () => (await visiblePagePoint(page)).y).toBeCloseTo(400, 0);
+  await page.locator(".viewer-scroll").evaluate((el) => { el.scrollTop += 140; });
+  await expect.poll(async () => (await visiblePagePoint(page)).y).toBeGreaterThan(480);
+  await point.click();
+  await expect.poll(async () => (await visiblePagePoint(page)).y).toBeCloseTo(400, 0);
+  await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("captures and edits bookmark view positions with undo and project/PDF round trips", async ({ page }, info) => {
+  await page.goto("/"); await open(page, await locationFixture());
+  const panel = page.locator(".bookmark-panel"), zoom = page.getByLabel("ズーム", { exact: true });
+  const mode = panel.getByLabel("しおりの表示方法", { exact: true });
+  const top = panel.getByLabel("しおりの上位置", { exact: true });
+  const scale = panel.getByLabel("しおりの倍率（%）", { exact: true });
+  await panel.getByRole("button", { name: "位置と倍率", exact: true }).click();
+  await expect.poll(async () => (await visiblePagePoint(page)).y).toBeCloseTo(400, 0);
+  await top.fill("500"); await scale.fill("200");
+  await panel.getByRole("button", { name: "位置と倍率", exact: true }).click();
+  await expect(zoom).toHaveValue("2");
+  await expect.poll(async () => (await visiblePagePoint(page)).y).toBeCloseTo(500, 0);
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await expect(scale).toHaveValue("150");
+  await page.getByRole("button", { name: /^やり直す/ }).click();
+  await expect(scale).toHaveValue("200");
+  await zoom.selectOption("1.5");
+  const paper = page.locator(".viewer-scroll .page-view").nth(1);
+  await paper.evaluate((el) => {
+    const viewer = el.closest<HTMLElement>(".viewer-scroll")!;
+    viewer.scrollTop += el.getBoundingClientRect().top - viewer.getBoundingClientRect().top + 480;
+  });
+  await expect.poll(async () => (await visiblePagePoint(page)).y).toBeCloseTo(320, 0);
+  await panel.getByRole("button", { name: "表示位置にしおり", exact: true }).click();
+  await expect(mode).toHaveValue("XYZ");
+  await expect.poll(async () => Number(await top.inputValue())).toBeCloseTo(680, 0);
+  await expect(scale).toHaveValue("150");
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await expect(panel.getByRole("button", { name: "ページ 2", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: /^やり直す/ }).click();
+  await expect(panel.getByRole("button", { name: "ページ 2", exact: true })).toBeVisible();
+  await expect.poll(async () => Number(await top.inputValue())).toBeCloseTo(680, 0);
+  await panel.getByLabel("しおりの名前", { exact: true }).fill("保存した表示位置");
+  await page.locator(".viewer-scroll").evaluate((el) => { el.scrollTop += 120; });
+  await expect.poll(async () => (await visiblePagePoint(page)).y).toBeCloseTo(400, 0);
+  await panel.getByRole("button", { name: "現在の表示位置を移動先に設定", exact: true }).click();
+  await expect.poll(async () => Number(await top.inputValue())).toBeCloseTo(600, 0);
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await expect.poll(async () => Number(await top.inputValue())).toBeCloseTo(680, 0);
+  await page.getByRole("button", { name: /^やり直す/ }).click();
+  await expect.poll(async () => Number(await top.inputValue())).toBeCloseTo(600, 0);
+  await panel.getByRole("button", { name: "幅と位置", exact: true }).click();
+  await mode.selectOption("XYZ");
+  await top.fill(""); await scale.fill("");
+  await expect(top).toHaveValue(""); await expect(scale).toHaveValue("");
+  let download = page.waitForEvent("download");
+  await page.locator("summary").filter({ hasText: "ファイル" }).click();
+  await page.getByRole("button", { name: "編集プロジェクトを保存", exact: true }).click();
+  const projectPath = info.outputPath("bookmark-locations.kpdf");
+  await (await download).saveAs(projectPath);
+  const restored = await openProject(new Uint8Array(await readFile(projectPath)));
+  const captured = restored.bookmarks!.find((b) => b.title === "保存した表示位置")!;
+  expect(captured.pageId).toBe(restored.pages[1].id);
+  expect(captured.destination).toMatchObject({ kind: "XYZ", left: 0, zoom: 1.5 });
+  expect(captured.destination!.kind === "XYZ" && captured.destination!.top).toBeCloseTo(600, 0);
+  expect(restored.bookmarks![1].destination).toEqual({ kind: "XYZ", left: null, top: null, zoom: null });
+  download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  const saved = info.outputPath("bookmark-locations.pdf"); await (await download).saveAs(saved);
+  const pdf = await PDFDocument.load(await readFile(saved));
+  const first = pdf.catalog.lookup(PDFName.of("Outlines"), PDFDict).lookup(PDFName.of("First"), PDFDict);
+  const nullable = first.lookup(PDFName.of("Next"), PDFDict);
+  expect(nullable.lookup(PDFName.of("Dest"), PDFArray).toString()).toContain("/XYZ null null null");
+  const dest = nullable.lookup(PDFName.of("Next"), PDFDict).lookup(PDFName.of("Dest"), PDFArray);
+  expect(dest.get(0).toString()).toBe(pdf.getPage(1).ref.toString());
+  expect(dest.get(1).toString()).toBe("/XYZ");
+  expect(dest.lookup(3, PDFNumber).asNumber()).toBeCloseTo(600, 0);
+  expect(dest.lookup(4, PDFNumber).asNumber()).toBeCloseTo(1.5, 4);
+  await page.reload(); await open(page, await readFile(saved));
+  await page.getByLabel("ページ番号", { exact: true }).fill("4");
+  await zoom.selectOption("1");
+  await panel.getByRole("button", { name: "保存した表示位置", exact: true }).click();
+  await expect(zoom).toHaveValue("1.5");
+  await expect.poll(async () => (await visiblePagePoint(page)).y).toBeCloseTo(400, 0);
+  await expect(page.getByLabel("ページ番号", { exact: true })).toHaveValue("2");
+  await expect(zoom).toHaveValue("1.5");
+  await expect.poll(async () => (await visiblePagePoint(page)).y).toBeCloseTo(400, 0);
+  await page.reload(); await open(page, await readFile(projectPath), "bookmark-locations.kpdf");
+  await page.getByLabel("ページ番号", { exact: true }).fill("4");
+  await zoom.selectOption("1");
+  await panel.getByRole("button", { name: "保存した表示位置", exact: true }).click();
+  await expect(page.getByLabel("ページ番号", { exact: true })).toHaveValue("2");
+  await expect(zoom).toHaveValue("1.5");
+  await expect.poll(async () => (await visiblePagePoint(page)).y).toBeCloseTo(400, 0);
+});
+
+test("bookmark navigation accounts for source CropBox and page rotation", async ({ page }) => {
+  await page.goto("/"); await open(page, await locationFixture(true));
+  await page.locator(".bookmark-panel").getByRole("button", { name: "位置と倍率", exact: true }).click();
+  await expect(page.getByLabel("ページ番号", { exact: true })).toHaveValue("2");
+  await expect(page.getByLabel("ズーム", { exact: true })).toHaveValue("2.5");
+  await expect.poll(async () => (await visiblePagePoint(page, 1, 1000)).y).toBeCloseTo(200, 0);
+  await expect.poll(async () => (await visiblePagePoint(page, 1, 1000)).x).toBeCloseTo(300, 0);
+  await page.locator(".bookmark-panel").getByRole("button", { name: "表示位置にしおり", exact: true }).click();
+  await expect.poll(async () => Number(await page.getByLabel("しおりの左位置", { exact: true }).inputValue())).toBeCloseTo(250, 0);
+  await expect.poll(async () => Number(await page.getByLabel("しおりの上位置", { exact: true }).inputValue())).toBeCloseTo(400, 0);
+  await expect(page.getByLabel("しおりの倍率（%）", { exact: true })).toHaveValue("250");
+});
+
+test("clamps bookmark navigation to the cropped target page while preserving out-of-bounds PDF coordinates", async ({ page }, info) => {
+  await page.goto("/"); await open(page, await locationFixture(false, true));
+  const panel = page.locator(".bookmark-panel");
+  const bookmark = panel.getByRole("button", { name: "位置と倍率", exact: true });
+  const number = page.getByLabel("ページ番号", { exact: true });
+  const zoom = page.getByLabel("ズーム", { exact: true });
+  await bookmark.click();
+  await expect(number).toHaveValue("2");
+  await expect.poll(async () => (await visiblePagePoint(page)).y).toBeCloseTo(500, 0);
+  await panel.getByLabel("しおりの倍率（%）", { exact: true }).fill("250");
+  for (const [left, top, expectedY, filename] of [
+    [-100, 1300, 0, "before-crop.pdf"],
+    [800, -200, 999, "after-crop.pdf"],
+  ] as const) {
+    await panel.getByLabel("しおりの左位置", { exact: true }).fill(String(left));
+    await panel.getByLabel("しおりの上位置", { exact: true }).fill(String(top));
+    await number.fill("4"); await zoom.selectOption("1");
+    await bookmark.click();
+    await expect(zoom).toHaveValue("2.5");
+    await expect.poll(async () => (await visiblePagePoint(page)).y).toBeCloseTo(expectedY, 0);
+    await expect(number).toHaveValue("2");
+    const scroll = await page.locator(".viewer-scroll").evaluate((el) => ({
+      left: el.scrollLeft, max: el.scrollWidth - el.clientWidth,
+    }));
+    if (left < 50) expect((await visiblePagePoint(page)).x).toBeCloseTo(0, 0);
+    else expect(scroll.left).toBeGreaterThan(scroll.max - 20);
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    const saved = info.outputPath(filename); await (await download).saveAs(saved);
+    const pdf = await PDFDocument.load(await readFile(saved));
+    const dest = pdf.catalog.lookup(PDFName.of("Outlines"), PDFDict)
+      .lookup(PDFName.of("First"), PDFDict).lookup(PDFName.of("Dest"), PDFArray);
+    expect(dest.get(0).toString()).toBe(pdf.getPage(1).ref.toString());
+    expect(dest.get(1).toString()).toBe("/XYZ");
+    expect(dest.lookup(2, PDFNumber).asNumber()).toBe(left);
+    expect(dest.lookup(3, PDFNumber).asNumber()).toBe(top);
+    await expect(number).toHaveValue("2");
+  }
 });

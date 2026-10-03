@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Bookmark,
   ChevronDown,
@@ -12,7 +12,9 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { validatedLinkUrl } from "../links/target";
-import { uid, type BookmarkModel, type DocumentModel } from "../state/model";
+import { uid, type BookmarkModel, type DocumentModel, type BookmarkDestination } from "../state/model";
+import { captureBookmarkLocation } from "../viewer/bookmarkNavigation";
+import { BookmarkLocationEditor } from "./BookmarkLocationEditor";
 import { documentStore } from "../state/store";
 import {
   addBookmark,
@@ -30,10 +32,13 @@ export function BookmarkPanel({
 }: {
   model: DocumentModel;
   active: string;
-  jump: (id: string) => void;
+  jump: (id: string, destination?: BookmarkDestination) => void;
 }) {
   const [selected, setSelected] = useState("");
   const [query, setQuery] = useState("");
+  const [capturing, setCapturing] = useState(false), [captureError, setCaptureError] = useState("");
+  const currentSelected = useRef(selected);
+  currentSelected.current = selected;
   const nodes = model.bookmarks ?? [],
     found = locateBookmark(nodes, selected);
   const filtered = filterBookmarks(nodes, query);
@@ -54,6 +59,29 @@ export function BookmarkPanel({
     };
     documentStore.execute(addBookmark(b));
     setSelected(b.id);
+  }
+  async function capture(create: boolean) {
+    if (capturing) return;
+    const selectedId = selected, targetPage = model.pages.find((p) => p.id === active);
+    setCapturing(true);
+    setCaptureError("");
+    try {
+      const location = await captureBookmarkLocation(model, active);
+      const current = documentStore.document;
+      if (!current || current.id !== model.id || !current.pages.includes(targetPage!)) return;
+      if (create) {
+        const id = uid();
+        documentStore.execute(addBookmark({ id, title: `ページ ${model.pages.findIndex((p) => p.id === active) + 1}`, ...location, children: [] }));
+        setSelected(id);
+      } else if (currentSelected.current === selectedId && locateBookmark(current.bookmarks ?? [], selectedId)) {
+        documentStore.execute(updateBookmark(selectedId, location));
+      }
+    } catch (e) {
+      if (documentStore.document?.id === model.id)
+        setCaptureError(e instanceof Error ? e.message : "表示位置を取得できません。");
+    } finally {
+      setCapturing(false);
+    }
   }
   function render(items: BookmarkModel[], depth = 0): React.ReactNode {
     return items.map((b) => (
@@ -86,7 +114,7 @@ export function BookmarkPanel({
             onClick={() => {
               setSelected(b.id);
               if (b.pageId && model.pages.some((p) => p.id === b.pageId))
-                jump(b.pageId);
+                jump(b.pageId, b.destination);
             }}
           >
             {b.url !== undefined ? <ExternalLink size={14} /> : <Bookmark size={14} />}
@@ -108,6 +136,10 @@ export function BookmarkPanel({
         <Plus size={15} />
         現在のページにしおり
       </button>
+      <button className="full" disabled={capturing} onClick={() => void capture(true)}>
+        表示位置にしおり
+      </button>
+      {captureError && <p role="alert">{captureError}</p>}
       <label className="bookmark-search">
         しおりを検索
         <input
@@ -204,6 +236,12 @@ export function BookmarkPanel({
               ))}
             </select>
           </label>
+          {found.node.pageId && <>
+            <BookmarkLocationEditor bookmark={found.node} />
+            <button className="full" disabled={capturing} onClick={() => void capture(false)}>
+              現在の表示位置を移動先に設定
+            </button>
+          </>}
           {found.node.url !== undefined && (
             <>
               <label>
