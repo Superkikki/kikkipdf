@@ -20,8 +20,9 @@ import { addObject } from "../commands/document";
 import { appearanceTextEngine } from "../editor/textEngine";
 import { inspectExistingText } from "../export/client";
 import { directTextObject } from "../direct/editor";
-import { directReferences } from "../direct/model";
-export type Tool = "select" | "editText" | "appearanceText" | ObjectKind;
+import { directReferences, directImageEdits } from "../direct/model";
+import { ExistingImageOverlay } from "../direct/ExistingImageOverlay";
+export type Tool = "select" | "editText" | "editImage" | "appearanceText" | ObjectKind;
 export function PageView({
   model,
   page,
@@ -55,7 +56,7 @@ export function PageView({
   const drawing = useRef<{ start: Point; points: Point[] } | null>(null);
   const [draft, setDraft] = useState<{ a: Point; b: Point } | null>(null);
   const source = page.sourceId ? model.sources[page.sourceId] : undefined;
-  const directKey = JSON.stringify(directReferences(page));
+  const directKey = JSON.stringify({ text: directReferences(page), images: directImageEdits(page) });
   const currentPage = useRef(page);
   currentPage.current = page;
   const inspection = useRef<AbortController | null>(null);
@@ -185,6 +186,7 @@ export function PageView({
       thumbnail ||
       tool === "select" ||
       tool === "editText" ||
+      tool === "editImage" ||
       tool === "appearanceText" ||
       tool === "image"
     )
@@ -208,7 +210,7 @@ export function PageView({
     const end = point(e);
     drawing.current = null;
     setDraft(null);
-    if (tool === "select" || tool === "editText" || tool === "appearanceText")
+    if (tool === "select" || tool === "editText" || tool === "editImage" || tool === "appearanceText")
       return;
     const o = newObject(
       tool,
@@ -387,6 +389,8 @@ export function PageView({
                   }}
                 />
               )}
+              {!thumbnail && visible && tool === "editImage" &&
+                <ExistingImageOverlay model={model} page={page} onSelect={onSelect} onError={onError} />}
               <Overlay
                 model={model}
                 page={page}

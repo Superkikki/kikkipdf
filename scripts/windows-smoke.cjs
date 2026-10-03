@@ -76,6 +76,180 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_VERTICAL_ONLY === "1") {
+    const original = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^日本語の縦書き$/ });
+    const neighbour = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^隣の列$/ });
+    const position = async () => {
+      const box = await neighbour.boundingBox(), sheet = await page.locator(".viewer-scroll .page-view").first().boundingBox();
+      return { x: (box.x - sheet.x) * 420 / sheet.width, y: (box.y - sheet.y) * 595 / sheet.height };
+    };
+    await expect(original).toBeVisible(); const before = await position();
+    await page.getByRole("button", { name: "ツール", exact: true }).click();
+    await page.getByRole("button", { name: "既存文字", exact: true }).click(); await original.dblclick();
+    await expect(page.getByLabel("文字の方向")).toHaveValue("vertical");
+    await page.getByLabel("テキスト内容").fill("変更、。「」ー");
+    const overlay = page.locator(".viewer-scroll .editable-text[data-layout-ready=true]");
+    await expect(overlay).toHaveText("変更、。「」ー"); await expect(overlay.locator("use")).toHaveCount(7);
+    await expect(original).toHaveCount(0);
+    await expect(page.locator(".viewer-scroll .page-view[data-rendered=true]")).toBeVisible();
+    const after = await position();
+    if (Math.abs(after.x - before.x) > 0.2 || Math.abs(after.y - before.y) > 0.2) throw Error(`Vertical neighbour moved: ${JSON.stringify({ before, after })}`);
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf");
+    const saved = await PDFDocument.load(await fs.readFile(fixture));
+    const fontResources = saved.getPage(0).node.Resources().lookup(PDFName.of("Font"), PDFDict);
+    if (!fontResources.entries().some(([, ref]) => {
+      const dict = saved.context.lookup(ref, PDFDict);
+      const cmap = dict.lookup(PDFName.of("ToUnicode"));
+      return dict.get(PDFName.of("Encoding")) === PDFName.of("Identity-V") && cmap instanceof PDFRawStream &&
+        Buffer.from(decodePDFRawStream(cmap).decode()).toString("utf8").includes("KikkiVerticalUnicode");
+    })) throw Error("Saved replacement vertical font/CMap missing");
+    await page.screenshot({ path: path.join(process.env.KIKKI_SMOKE_DIR, "vertical-saved.png") });
+    if (errors.length) throw Error(JSON.stringify(errors));
+    console.log(JSON.stringify({ ok: true, vertical: true, errors, elapsedMs: Date.now() - started }));
+    await browser.close(); return;
+  }
+  if (process.env.KIKKI_SMOKE_IMAGE_ONLY === "1") {
+    const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf");
+    const imageStreams = async () => (await PDFDocument.load(await fs.readFile(fixture))).context.enumerateIndirectObjects()
+      .flatMap(([, o]) => o instanceof PDFRawStream && o.dict.get(PDFName.of("Subtype")) === PDFName.of("Image")
+        ? [Buffer.from(o.contents).toString("hex")] : []).sort();
+    const originalPixels = await imageStreams();
+    const neighbours = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Native image neighbour$/ });
+    await expect(neighbours).toHaveCount(2);
+    const before = await neighbours.first().boundingBox();
+    const imageTool = async () => {
+      await page.getByRole("button", { name: "ツール", exact: true }).click();
+      await page.getByRole("button", { name: "既存画像", exact: true }).click();
+    };
+    await imageTool(); await expect(page.locator(".existing-image-layer rect")).toHaveCount(2);
+    await page.getByRole("button", { name: "既存画像 1", exact: true }).dblclick();
+    await expect(page.locator(".properties")).toContainText("既存画像の位置とサイズ");
+    for (const [field, value] of [["x", "150"], ["y", "200"], ["width", "100"], ["height", "60"]])
+      await page.getByLabel(field, { exact: true }).fill(value);
+    await expect(page.locator(".viewer-scroll .page-view[data-rendered=true]")).toBeVisible();
+    const after = await neighbours.first().boundingBox();
+    if (Math.abs(after.x - before.x) > 0.2 || Math.abs(after.y - before.y) > 0.2) throw Error("Image neighbour moved");
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    if (JSON.stringify(await imageStreams()) !== JSON.stringify(originalPixels)) throw Error("Original image pixel data changed");
+    await page.getByRole("button", { name: "削除", exact: true }).click();
+    await expect(page.locator(".properties")).toContainText("元の画像を削除");
+    await page.getByRole("button", { name: /^元に戻す/ }).click();
+    await expect(page.locator(".properties")).toContainText("既存画像の位置とサイズ");
+    await page.getByRole("button", { name: /^やり直す/ }).click();
+    await expect(page.locator(".properties")).toContainText("元の画像を削除");
+    await imageTool(); await expect(page.locator(".existing-image-layer rect")).toHaveCount(1);
+    await page.getByRole("button", { name: "既存画像 1", exact: true }).dblclick();
+    await page.getByRole("button", { name: "削除", exact: true }).click();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    if ((await imageStreams()).length) throw Error("Deleted image data survived native save");
+    await expect(neighbours).toHaveCount(2);
+    await page.screenshot({ path: path.join(__dirname, "..", ".tools", "windows-native-image.png") });
+    if (errors.length) throw Error(errors.join("\n"));
+    console.log(JSON.stringify({ native: true, nestedSharedImage: true, moveResize: true,
+      unchangedPixelsAndNeighbour: true, undoRedo: true, nativeSave: true, removedImageData: true, errors }));
+    await browser.close(); return;
+  }
+  if (process.env.KIKKI_SMOKE_FORM_ONLY === "1") {
+    const original = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Native Form original$/ });
+    const neighbours = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Neighbour$/ });
+    await expect(original).toHaveCount(2);
+    const before = await neighbours.first().boundingBox();
+    await page.getByRole("button", { name: "ツール", exact: true }).click();
+    await page.getByRole("button", { name: "既存文字", exact: true }).click();
+    await original.first().dblclick();
+    await expect(page.locator(".properties")).toContainText("既存テキストを直接編集");
+    await page.getByLabel("テキスト内容").fill("Native Form changed");
+    await expect(original).toHaveCount(1);
+    const after = await neighbours.first().boundingBox();
+    if (Math.abs(after.x - before.x) > 0.2 || Math.abs(after.y - before.y) > 0.2)
+      throw Error("Form neighbour moved");
+    await page.getByRole("button", { name: /^元に戻す/ }).click();
+    await page.getByRole("button", { name: /^元に戻す/ }).click();
+    await expect(original).toHaveCount(2);
+    await page.getByRole("button", { name: /^やり直す/ }).click();
+    await page.getByRole("button", { name: /^やり直す/ }).click();
+    await expect(original).toHaveCount(1);
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf");
+    const allStreams = async () => (await PDFDocument.load(await fs.readFile(fixture))).context
+      .enumerateIndirectObjects().flatMap(([, o]) => o instanceof PDFRawStream
+        ? [Buffer.from(decodePDFRawStream(o).decode()).toString()] : []);
+    const containsOriginal = s => s.includes("Native Form original") ||
+      s.toUpperCase().includes(Buffer.from("Native Form original").toString("hex").toUpperCase());
+    if ((await allStreams()).filter(containsOriginal).length !== 1)
+      throw Error("Unedited shared Form was lost or edited Form was not isolated");
+    await page.getByRole("button", { name: "ツール", exact: true }).click();
+    await page.getByRole("button", { name: "既存文字", exact: true }).click();
+    await original.dblclick();
+    await expect(page.getByLabel("テキスト内容")).toHaveValue("Native Form original");
+    await page.getByLabel("テキスト内容").fill("Second Form changed");
+    await expect(original).toHaveCount(0);
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const streams = await allStreams();
+    if (streams.some(containsOriginal)) throw Error("Original Form glyph strings survived editing both invocations");
+    for (const text of ["Native Form changed", "Second Form changed"])
+      if (!streams.some(s => s.toUpperCase().includes(Buffer.from(text).toString("hex").toUpperCase())))
+        throw Error("Changed Form text was not saved");
+    await page.screenshot({ path: path.join(__dirname, "..", ".tools", "windows-native-form.png") });
+    if (errors.length) throw Error(errors.join("\n"));
+    console.log(JSON.stringify({ native: true, nestedFormText: true, sharedInvocationIsolation: true,
+      unchangedNeighbour: true, undoRedo: true, nativeSave: true, sourceGlyphRemoval: true, errors }));
+    await browser.close(); return;
+  }
+  if (process.env.KIKKI_SMOKE_NAVIGATION_ONLY === "1") {
+    const zoom = page.getByLabel("ズーム", { exact: true });
+    await zoom.selectOption("1");
+    const bounds = await page.locator(".viewer-scroll .page-view").first().boundingBox();
+    await page.mouse.move(bounds.x + 160, bounds.y + 160);
+    await page.keyboard.down("Control");
+    await page.mouse.wheel(0, -100);
+    await page.keyboard.up("Control");
+    await expect.poll(async () => Number(await zoom.inputValue())).toBeGreaterThan(1);
+    const scale = Number(await zoom.inputValue());
+    await page.locator(".viewer-scroll").evaluate((el) => {
+      for (let i = 0; i < 8; i++) el.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true, cancelable: true, ctrlKey: true, deltaY: -3, clientX: 500, clientY: 450,
+      }));
+    });
+    await expect.poll(async () => Number(await zoom.inputValue())).toBeGreaterThan(scale);
+    const thumbs = page.locator(".thumbnail");
+    const ids = await thumbs.evaluateAll(els => els.map(el => el.dataset.pageId));
+    const a = await thumbs.nth(0).boundingBox();
+    const b = await thumbs.nth(1).boundingBox();
+    await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height * 0.55, { steps: 12 });
+    await expect(thumbs.nth(1)).toHaveClass(/drop-after/);
+    await page.mouse.up();
+    const order = () => thumbs.evaluateAll(els => els.map(el => el.dataset.pageId));
+    await expect.poll(order).toEqual([ids[1], ids[0], ids[2]]);
+    await page.keyboard.press("Control+z");
+    await expect.poll(order).toEqual(ids);
+    await page.keyboard.press("Control+y");
+    await expect.poll(order).toEqual([ids[1], ids[0], ids[2]]);
+    await thumbs.nth(2).focus();
+    await page.keyboard.press("Alt+ArrowUp");
+    await expect.poll(order).toEqual([ids[1], ids[2], ids[0]]);
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const saved = await PDFDocument.load(await fs.readFile(path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf")));
+    const contents = saved.getPage(0).node.Contents();
+    const streams = contents instanceof PDFArray ? contents.asArray().map(ref => saved.context.lookup(ref)) : [contents];
+    const expectedHex = Buffer.from("Native Windows fixture 2").toString("hex").toUpperCase();
+    if (!streams.some(stream => stream instanceof PDFRawStream && Buffer.from(decodePDFRawStream(stream).decode()).toString().includes(expectedHex)))
+      throw Error("Native reordered page content did not persist");
+    await page.screenshot({ path: path.join(__dirname, "..", ".tools", "windows-native-navigation.png") });
+    if (errors.length) throw Error(errors.join("\n"));
+    console.log(JSON.stringify({ native: true, ctrlWheelZoom: true, simulatedTrackpadPinch: true, pointerPageReorder: true, keyboardPageReorder: true, undoRedo: true, reorderedPdfSave: true, errors }));
+    await browser.close();
+    return;
+  }
   if (process.env.KIKKI_SMOKE_CONTEXT_ONLY === "1") {
     const root = path.resolve(__dirname, "..");
     await verifyObjectContext(page, root);
@@ -306,6 +480,7 @@ async function verifyObjectContext(page, root) {
   const roundTrip = await PDFDocument.load(new Uint8Array(decrypted));
   if (roundTrip.getPageCount() !== 3)
     throw Error("Native encryption round trip failed");
+  await page.getByRole("button", { name: "ツール", exact: true }).click();
   await page.getByRole("button", { name: "フォーム入力", exact: true }).click();
   await page
     .getByRole("button", { name: "フォームを作成・編集", exact: true })

@@ -610,6 +610,7 @@ kbd {
   background: var(--tint);
 }
 .viewer-scroll {
+  position: relative;
   flex: 1;
   min-width: 0;
   overflow: auto;
@@ -917,6 +918,12 @@ kbd {
   margin-left: 12px;
   padding-left: 22px;
   border-left: 1px solid var(--border);
+}
+.zoom-value {
+  min-width: 42px;
+  text-align: right;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 .zoom-controls select {
   font-size: 11px;
@@ -1677,3 +1684,13 @@ progress {
   align-items: center;
   font-size: 10px;
 }
+
+.thumbnail { user-select: none; touch-action: pan-y; }
+.page-drag-handle { cursor: grab; touch-action: none; }
+.thumbnail.dragging { opacity: 0.5; cursor: grabbing; }
+.thumbnail.drop-before { box-shadow: 0 -3px 0 var(--accent); }
+.thumbnail.drop-after { box-shadow: 0 3px 0 var(--accent); }
+
+.existing-image-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.existing-image-layer rect { pointer-events: all; cursor: pointer; }
+.existing-image-layer rect:hover, .existing-image-layer rect:focus { stroke-width: 2; fill: #078c7f25; outline: none; }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Files,
   Bookmark,
@@ -12,6 +12,7 @@ import {
 import type { DocumentModel } from "../state/model";
 import { pageSize } from "../state/model";
 import { documentStore } from "../state/store";
+import { usePageReorder } from "../pages/usePageReorder";
 import { reorderPage } from "../commands/document";
 import { PageView } from "../viewer/PageView";
 import { SearchPanel } from "../viewer/SearchPanel";
@@ -27,7 +28,9 @@ export function Sidebar({
   selectObject,
   hidden = false,
   onClose,
+  searchRequest = 0,
 }: {
+  searchRequest?: number;
   hidden?: boolean;
   onClose?: () => void;
   model: DocumentModel;
@@ -37,6 +40,25 @@ export function Sidebar({
   selectObject: (pageId: string, id: string) => void;
 }) {
   const [tab, setTab] = useState("pages");
+  const reorder = usePageReorder(jump);
+  const scroll = useRef<HTMLDivElement>(null);
+  const lastSearchRequest = useRef(searchRequest);
+  useEffect(() => {
+    if (searchRequest !== lastSearchRequest.current) {
+      lastSearchRequest.current = searchRequest;
+      setTab("search");
+    }
+  }, [searchRequest]);
+  useEffect(() => {
+    if (hidden || tab !== "pages") return;
+    const el = scroll.current;
+    const selected = el?.querySelector<HTMLElement>(".thumbnail.selected");
+    if (!el || !selected) return;
+    const viewport = el.getBoundingClientRect();
+    const bounds = selected.getBoundingClientRect();
+    if (bounds.top < viewport.top) el.scrollTop += bounds.top - viewport.top - 8;
+    else if (bounds.bottom > viewport.bottom) el.scrollTop += bounds.bottom - viewport.bottom + 8;
+  }, [active, tab, hidden, model.pages]);
   return (
     <aside
       className="sidebar"
@@ -88,39 +110,39 @@ export function Sidebar({
           <X size={15} />
         </button>
       </div>
-      <div className="side-scroll">
+      <div className="side-scroll" ref={scroll}>
         {tab === "pages" &&
           model.pages.map((p, i) => (
             <div
               key={p.id}
-              className={`thumbnail ${active === p.id ? "selected" : ""}`}
-              draggable
+              className={`thumbnail ${active === p.id ? "selected" : ""} ${reorder.source === p.id ? "dragging" : ""} ${reorder.drop?.id === p.id ? `drop-${reorder.drop.edge}` : ""}`}
+              data-page-id={p.id}
               role="button"
               tabIndex={0}
               aria-label={`ページ ${i + 1}`}
               aria-current={active === p.id ? "page" : undefined}
               onKeyDown={(e) => {
+                if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const target = model.pages[i + (e.key === "ArrowUp" ? -1 : 1)];
+                  if (target) {
+                    documentStore.execute(reorderPage(p.id, target.id));
+                    jump(p.id);
+                  }
+                  return;
+                }
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   jump(p.id);
                 }
               }}
-              onDragStart={(e) => {
-                e.dataTransfer.setData("application/x-kikki-page", p.id);
-              }}
-              onDragOver={(e) => {
-                if (e.dataTransfer.types.includes("application/x-kikki-page"))
-                  e.preventDefault();
-              }}
-              onDrop={(e) => {
-                const from = e.dataTransfer.getData("application/x-kikki-page");
-                if (from) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  documentStore.execute(reorderPage(from, p.id));
-                }
-              }}
-              onClick={() => jump(p.id)}
+              onPointerDown={(e) => reorder.onPointerDown(e, p.id)}
+              onPointerMove={reorder.onPointerMove}
+              onPointerUp={reorder.onPointerUp}
+              onPointerCancel={reorder.cancel}
+              onLostPointerCapture={reorder.cancel}
+              onClick={() => reorder.click(p.id)}
             >
               <div className="thumb-paper">
                 <PageView
@@ -131,7 +153,7 @@ export function Sidebar({
                 />
               </div>
               <span>
-                <GripVertical size={12} />
+                <GripVertical className="page-drag-handle" size={16} aria-label="ページをドラッグして並べ替え" />
                 {i + 1}
               </span>
             </div>
@@ -140,7 +162,9 @@ export function Sidebar({
           <BookmarkPanel model={model} active={active} jump={jump} />
         )}
         {tab === "comments" && <CommentsPanel model={model} jump={jump} />}
-        {tab === "search" && <SearchPanel model={model} jump={jump} />}
+        {tab === "search" && (
+          <SearchPanel model={model} jump={jump} focusRequest={searchRequest} />
+        )}
         {tab === "attachments" && <AttachmentPanel model={model} />}
         {tab === "ocr" && (
           <ReviewPanel
@@ -153,7 +177,7 @@ export function Sidebar({
       </div>
       <div className="side-footer">
         {tab === "pages"
-          ? "ドラッグしてページを並べ替え"
+          ? "ドラッグで並べ替え · Alt＋↑／↓でも移動"
           : "すべてローカルで処理"}
       </div>
     </aside>

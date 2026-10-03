@@ -15,11 +15,13 @@ export function useTextLayout(
     family?: string;
   }>({});
   const family = style
-    ? `${style.font}:${style.fontId}:${style.bold}:${style.italic}`
+    ? `${style.writingMode}:${style.font}:${style.fontId}:${style.bold}:${style.italic}`
     : undefined;
   const key = style
     ? JSON.stringify({
         text: style.text,
+        writingMode: style.writingMode,
+        height: style.writingMode === "vertical" ? style.height : undefined,
         width: style.width,
         fontSize: style.fontSize,
         font: style.font,

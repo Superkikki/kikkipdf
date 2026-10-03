@@ -14,7 +14,7 @@ import {
 } from "../state/model";
 import type { LocalFile } from "../platform/files";
 import { previewDirectPage } from "../export/client";
-import { directReferences } from "../direct/model";
+import { directReferences, directImageEdits } from "../direct/model";
 GlobalWorkerOptions.workerSrc = workerUrl;
 const cache = new Map<string, Promise<PDFDocumentProxy>>();
 interface PageLease {
@@ -27,8 +27,8 @@ const previews = new Map<
 >();
 /** Share previews only while a visible viewer, thumbnail or search holds a lease. */
 export function acquirePagePdf(source: Source, page: PageModel): PageLease {
-  const refs = directReferences(page);
-  if (!refs.length)
+  const refs = directReferences(page), images = directImageEdits(page);
+  if (!refs.length && !images.length)
     return {
       ready: sourcePdf(source).then((pdf) => ({
         pdf,
@@ -36,7 +36,7 @@ export function acquirePagePdf(source: Source, page: PageModel): PageLease {
       })),
       release() {},
     };
-  const key = `${source.id}:${page.sourceIndex}:${JSON.stringify(refs)}`;
+  const key = `${source.id}:${page.sourceIndex}:${JSON.stringify({ refs, images })}`;
   let entry = previews.get(key);
   if (!entry) {
     const controller = new AbortController();
@@ -44,7 +44,7 @@ export function acquirePagePdf(source: Source, page: PageModel): PageLease {
       source,
       {
         ...page,
-        objects: page.objects.filter((o) => o.kind === "direct-text"),
+        objects: page.objects.filter((o) => o.kind === "direct-text" || o.kind === "direct-image"),
       },
       controller.signal,
     ).then(async (bytes) => ({

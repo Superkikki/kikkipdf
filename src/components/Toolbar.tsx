@@ -7,6 +7,7 @@ import {
   MousePointer2,
   Type,
   ImagePlus,
+  Image as ImageIcon,
   Square,
   Circle,
   ArrowUpRight,
@@ -137,6 +138,8 @@ export function Toolbar({
   const toolHint =
     tool === "select"
       ? "追加したオブジェクトをクリックして選択 · 元の文字はドラッグでコピー"
+      : tool === "editImage"
+        ? "画像の枠をダブルクリックして選択 · 移動・サイズ変更・削除ができます"
       : tool === "editText" || tool === "appearanceText"
         ? "元の文字をダブルクリックして編集 · Escで選択ツールに戻る"
         : tool === "text"
@@ -409,6 +412,10 @@ export function Toolbar({
                 >
                   <TextCursorInput size={20} />
                   <span>既存文字</span>
+                </button>
+                <button className={`tool ${tool === "editImage" ? "active" : ""}`} aria-pressed={tool === "editImage"}
+                  disabled={!hasDocument} onClick={() => setTool("editImage")}>
+                  <ImageIcon size={20} /><span>既存画像</span>
                 </button>
                 <button
                   className={`tool ${tool === "appearanceText" ? "active" : ""}`}

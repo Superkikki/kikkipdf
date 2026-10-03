@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import type { DocumentModel, LinkTarget } from "../state/model";
+import type { Box, DocumentModel, LinkTarget } from "../state/model";
 import { sourcePdf } from "../viewer/pdf";
 import { documentStore } from "../state/store";
-import { editAnnotation } from "../annotations/commands";
+import { editAnnotation, resetAnnotationBox } from "../annotations/commands";
 import { deleteObject, updateObject } from "../commands/document";
 import { LinkTargetEditor } from "./LinkTargetEditor";
 import { importedLinkUrl } from "./target";
@@ -13,6 +13,7 @@ interface ImportedLink {
   page: number;
   url?: string;
   destination?: number;
+  box?: Box;
 }
 export function LinkPanel({
   model,
@@ -44,6 +45,18 @@ export function LinkPanel({
               page: i,
               url: importedLinkUrl(a.url ?? a.unsafeUrl),
             };
+            const [left, bottom, right, top] = a.rect ?? [];
+            const [cropX, , , cropTop] = page.view;
+            if (
+              [left, bottom, right, top].every(Number.isFinite) &&
+              right > left && top > bottom
+            )
+              item.box = {
+                x: left - cropX,
+                y: cropTop - top,
+                width: right - left,
+                height: top - bottom,
+              };
             try {
               const dest =
                 typeof a.dest === "string"
@@ -103,6 +116,7 @@ export function LinkPanel({
           target,
           added: false,
           editable: /^\d+R\d*$/.test(a.id),
+          box: p.annotationEdits?.[a.id]?.box ?? a.box,
         };
       }),
     ...p.objects
@@ -115,6 +129,7 @@ export function LinkPanel({
         target: o.link,
         added: true,
         editable: true,
+        box: { x: o.x, y: o.y, width: o.width, height: o.height },
       })),
   ]);
   const current = links.find((l) => l.key === selected);
@@ -128,7 +143,7 @@ export function LinkPanel({
   return (
     <div className="dialog-body link-panel">
       <p className="notice">
-        「編集」→「リンク」でページ上に領域を追加できます。既存リンクの移動先変更は保存後に反映されます。外部URLはこのアプリから開きません。
+        「編集」→「リンク」でページ上に領域を追加できます。既存リンクの移動先・配置変更は保存後に反映されます。座標は回転前のページ左上からのptです。外部URLはこのアプリから開きません。
       </p>
       {loading && <p role="status">リンクを読み込み中…</p>}
       {error && <p role="alert">{error}</p>}
@@ -162,6 +177,49 @@ export function LinkPanel({
               }
             />
           )}
+          {current.editable && current.box && (
+            <>
+              <div className="property-grid">
+                {(["x", "y", "width", "height"] as const).map((key) => (
+                  <label key={key}>
+                    {{ x: "X", y: "Y", width: "幅", height: "高さ" }[key]}
+                    <input
+                      aria-label={`リンク領域${key}`}
+                      type="number"
+                      step="0.5"
+                      value={current.box![key]}
+                      onChange={(e) => {
+                        if (!e.target.value) return;
+                        const n = Number(e.target.value);
+                        const position = key === "x" || key === "y";
+                        if (
+                          !Number.isFinite(n) ||
+                          n < (position ? -1e6 : 0.5) ||
+                          n > (position ? 1e6 : 100000)
+                        ) return;
+                        const box = { ...current.box!, [key]: n };
+                        documentStore.execute(
+                          current.added
+                            ? updateObject(current.pageId, current.id, box)
+                            : editAnnotation(current.pageId, current.id, { box }),
+                        );
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+              {!current.added && (
+                <button
+                  disabled={!model.pages.find((p) => p.id === current.pageId)?.annotationEdits?.[current.id]?.box}
+                  onClick={() => documentStore.execute(resetAnnotationBox(current.pageId, current.id))}
+                >元の配置に戻す</button>
+              )}
+            </>
+          )}
+          <div className="form-kind-buttons">
+            <button disabled={!documentStore.history?.canUndo} onClick={() => documentStore.undo()}>リンク編集を元に戻す</button>
+            <button disabled={!documentStore.history?.canRedo} onClick={() => documentStore.redo()}>リンク編集をやり直す</button>
+          </div>
           <button onClick={() => jump(current.pageId)}>配置ページを表示</button>
           {current.editable && (
             <button

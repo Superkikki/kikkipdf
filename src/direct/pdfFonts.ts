@@ -27,9 +27,10 @@ const getNumber = (dict: PDFDict, name: string, fallback?: number) => {
 };
 export interface SourceFont {
   name: string;
+  vertical?: boolean;
   glyphs(
     bytes: Uint8Array,
-  ): { code: number; width: number; text: string; wordSpace: boolean }[];
+  ): { code: number; width: number; text: string; wordSpace: boolean; vmetric?: [number, number, number] }[];
 }
 /** Read the ORIGINAL font widths, never substitute them when retaining text advance. */
 export async function sourceFonts(
@@ -54,12 +55,9 @@ export async function sourceFonts(
         ? unicodeMap(boundedDecode(toUnicode, 8 * 1024 * 1024))
         : undefined;
       if (type === "Type0") {
-        if (
-          dict.lookupMaybe(key("Encoding"), PDFName)?.decodeText() !==
-            "Identity-H" ||
-          !map
-        )
-          continue;
+        const encoding = dict.lookupMaybe(key("Encoding"), PDFName)?.decodeText();
+        if (!["Identity-H", "Identity-V"].includes(encoding ?? "") || !map) continue;
+        const vertical = encoding === "Identity-V";
         const descendants = dict.lookup(key("DescendantFonts"), PDFArray),
           descendant = descendants.lookup(0, PDFDict);
         const subtype = descendant.lookup(key("Subtype"), PDFName).decodeText();
@@ -97,8 +95,44 @@ export async function sourceFonts(
           )
         )
           continue;
+        const vmetrics = new Map<number, [number, number, number]>();
+        let defaultY = 880, defaultAdvance = -1000;
+        if (vertical) {
+          const dw2 = descendant.lookupMaybe(key("DW2"), PDFArray);
+          if (dw2) {
+            if (dw2.size() !== 2) continue;
+            defaultY = dw2.lookup(0, PDFNumber).asNumber();
+            defaultAdvance = dw2.lookup(1, PDFNumber).asNumber();
+          }
+          const validate = (v: [number, number, number]) => {
+            if (!v.every(n => Number.isFinite(n) && Math.abs(n) <= 100000) || v[0] >= 0)
+              throw Error("縦書きの文字送り・原点が不正です。");
+            return v;
+          };
+          validate([defaultAdvance, defaultWidth / 2, defaultY]);
+          const w2 = descendant.lookupMaybe(key("W2"), PDFArray);
+          if (w2 && w2.size() > 200000) continue;
+          const put = (cid: number, value: [number, number, number]) => {
+            if (vmetrics.has(cid)) throw Error("縦書きの幅情報が重複しています。");
+            vmetrics.set(cid, validate(value));
+          };
+          for (let i = 0; w2 && i < w2.size();) {
+            const first = w2.lookup(i++, PDFNumber).asNumber(), next = w2.lookup(i++);
+            if (!Number.isInteger(first) || first < 0 || first > 65535) throw Error("縦書きのCID範囲が不正です。");
+            if (next instanceof PDFArray) {
+              if (next.size() % 3 || first + next.size() / 3 > 65536) throw Error("縦書きの幅情報が不正です。");
+              for (let j = 0; j < next.size(); j += 3)
+                put(first + j / 3, [next.lookup(j, PDFNumber).asNumber(), next.lookup(j + 1, PDFNumber).asNumber(), next.lookup(j + 2, PDFNumber).asNumber()]);
+            } else if (next instanceof PDFNumber) {
+              const last = next.asNumber();
+              if (!Number.isInteger(last) || last < first || last > 65535) throw Error("縦書きのCID範囲が不正です。");
+              const value: [number, number, number] = [w2.lookup(i++, PDFNumber).asNumber(), w2.lookup(i++, PDFNumber).asNumber(), w2.lookup(i++, PDFNumber).asNumber()];
+              for (let cid = first; cid <= last; cid++) put(cid, value);
+            } else throw Error("縦書きの幅情報が不正です。");
+          }
+        }
         result.set(resourceName.decodeText(), {
-          name,
+          name, vertical,
           glyphs(bytes) {
             if (bytes.length % 2) throw Error("2バイト文字コードが不正です。");
             const glyphs = [];
@@ -107,11 +141,13 @@ export async function sourceFonts(
                 text = map.get(code);
               if (text === undefined)
                 throw Error("文字マップに含まれない文字があります。");
-              glyphs.push({
-                code,
-                text,
-                width: widths.get(code) ?? defaultWidth,
-                wordSpace: false,
+              const width = widths.get(code) ?? defaultWidth;
+              // PDF.js uses DW/2 for the implicit vertical origin. Refuse a
+              // differing W entry without explicit W2 rather than guess placement.
+              if (vertical && !vmetrics.has(code) && width !== defaultWidth)
+                throw Error("縦書き文字の原点を検証できません。");
+              glyphs.push({ code, text, width, wordSpace: false,
+                ...(vertical ? { vmetric: vmetrics.get(code) ?? [defaultAdvance, width / 2, defaultY] as [number, number, number] } : {}),
               });
             }
             return glyphs;
@@ -119,21 +155,40 @@ export async function sourceFonts(
         });
       } else if (type === "Type1" || type === "TrueType") {
         const encoding = dict.lookup(key("Encoding"));
+        if (encoding && !(encoding instanceof PDFName) && !(encoding instanceof PDFDict))
+          continue;
         const encodingName =
           encoding instanceof PDFName
             ? encoding.decodeText()
             : encoding instanceof PDFDict
               ? encoding.lookupMaybe(key("BaseEncoding"), PDFName)?.decodeText()
               : undefined;
-        if (
-          encodingName &&
-          !["WinAnsiEncoding", "StandardEncoding"].includes(encodingName)
-        )
-          continue;
-        if (encoding instanceof PDFDict && encoding.has(key("Differences")))
-          continue;
         const first = getNumber(dict, "FirstChar", 0),
           widths = dict.lookupMaybe(key("Widths"), PDFArray);
+        const differences = encoding instanceof PDFDict
+          ? encoding.lookup(key("Differences"))
+          : undefined;
+        // Custom encodings need both authoritative Unicode and original widths.
+        // A glyph name or BaseFont name alone is never enough to infer either.
+        const custom = !!differences || !!encodingName &&
+          !["WinAnsiEncoding", "StandardEncoding", "MacRomanEncoding"].includes(encodingName);
+        if (custom && (!map || !widths)) continue;
+        if (differences) {
+          if (!(differences instanceof PDFArray) || differences.size() > 512)
+            continue;
+          let code: number | undefined;
+          const used = new Set<number>();
+          for (const entry of differences.asArray()) {
+            if (entry instanceof PDFNumber) {
+              code = entry.asNumber();
+              if (!Number.isInteger(code) || code < 0 || code > 255)
+                throw Error("独自エンコーディングの文字コードが不正です。");
+            } else if (entry instanceof PDFName && code !== undefined && code <= 255) {
+              if (used.has(code)) throw Error("独自エンコーディングの文字コードが重複しています。");
+              used.add(code++);
+            } else throw Error("独自エンコーディングの形式が不正です。");
+          }
+        }
         if (
           !Number.isInteger(first) ||
           first < 0 ||
@@ -149,15 +204,32 @@ export async function sourceFonts(
             ? await metrics.embedFont(name as StandardFonts)
             : undefined;
         if (!widths && !builtin) continue;
-        const decoder = new TextDecoder("windows-1252");
+        const requiresUnicode = custom || !encodingName && !builtin;
+        if (requiresUnicode && !map) continue;
+        const decoder = new TextDecoder(
+          encodingName === "MacRomanEncoding" ? "macintosh" : "windows-1252",
+        );
         result.set(resourceName.decodeText(), {
           name,
           glyphs(bytes) {
             return Array.from(bytes, (code) => {
-              if (encodingName !== "WinAnsiEncoding" && code > 126)
+              if (requiresUnicode && !map?.has(code))
+                throw Error("独自エンコーディングの文字に対応するUnicodeがありません。");
+              if (
+                !custom &&
+                !["WinAnsiEncoding", "MacRomanEncoding"].includes(encodingName ?? "") &&
+                code > 126
+                && (!map?.has(code) || !widths)
+              )
                 throw Error("標準エンコーディングの非ASCII文字は未対応です。");
-              const glyphText = decoder.decode(new Uint8Array([code]));
+              const standard = !custom &&
+                (encodingName === "StandardEncoding" || !encodingName);
+              const glyphText = standard && (code === 39 || code === 96)
+                ? code === 39 ? "\u2019" : "\u2018"
+                : decoder.decode(new Uint8Array([code]));
               const text = map?.get(code) ?? glyphText;
+              if (widths && (code < first || code - first >= widths.size()))
+                throw Error("文字コードに対応する幅情報がありません。");
               const width = widths
                 ? widths.lookup(code - first, PDFNumber).asNumber()
                 : builtin!.widthOfTextAtSize(glyphText, 1000);

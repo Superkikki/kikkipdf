@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
-import { PDFArray, PDFDocument, PDFName, StandardFonts, rgb } from "pdf-lib";
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, StandardFonts, rgb } from "pdf-lib";
 import { readFile } from "node:fs/promises";
+import { inspectDirectText } from "../../src/direct/content";
 import { openProject } from "../../src/state/project";
 async function fixture(cropped = false, merged = false) {
   const pdf = await PDFDocument.create(),
@@ -187,7 +188,7 @@ test("direct edit and delete work on a rotated page with original CropBox", asyn
     "Neighbour",
   );
 });
-test("unsupported Form XObject text is explicitly refused and appearance replacement remains opt-in", async ({
+test("unsupported transparency-group Form XObject text is explicitly refused and appearance replacement remains opt-in", async ({
   page,
 }) => {
   const inner = await PDFDocument.create();
@@ -196,6 +197,10 @@ test("unsupported Form XObject text is explicitly refused and appearance replace
     .drawText("Editable original", { x: 40, y: 520, size: 20 });
   const doc = await PDFDocument.create();
   doc.addPage([420, 595]).drawPage(await doc.embedPage(inner.getPage(0)));
+  await doc.flush();
+  for (const [, object] of doc.context.enumerateIndirectObjects())
+    if (object instanceof PDFRawStream && object.dict.get(PDFName.of("Subtype")) === PDFName.of("Form"))
+      object.dict.set(PDFName.of("Group"), doc.context.obj({ S: "Transparency" }));
   await page.goto("/");
   await open(page, Buffer.from(await doc.save()));
   await page.getByRole("button", { name: "ツール", exact: true }).click();
@@ -240,4 +245,129 @@ test("edits a PDF.js span assembled from multiple adjacent text drawing operatio
   await expect(page.locator(".viewer-scroll .textLayer")).not.toContainText(
     "Editable original",
   );
+});
+
+test("directly edits verified Differences text, keeps neighbouring glyphs and saves without the source text", async ({ page }, info) => {
+  const pdf = await PDFDocument.create();
+  const p = pdf.addPage([420, 595]);
+  const originalFont = await pdf.embedFont(StandardFonts.Helvetica);
+  const neighbourFont = await pdf.embedFont(StandardFonts.TimesRoman);
+  await pdf.flush();
+  const font = pdf.context.lookup(originalFont.ref);
+  if (!(font instanceof PDFDict)) throw Error("Font dictionary missing");
+  font.set(PDFName.of("Encoding"), pdf.context.obj({ BaseEncoding: "WinAnsiEncoding", Differences: [128, "eacute", "Agrave"] }));
+  font.set(PDFName.of("FirstChar"), pdf.context.obj(128));
+  font.set(PDFName.of("LastChar"), pdf.context.obj(129));
+  font.set(PDFName.of("Widths"), pdf.context.obj([
+    originalFont.widthOfTextAtSize("é", 1000), originalFont.widthOfTextAtSize("À", 1000),
+  ]));
+  font.set(PDFName.of("ToUnicode"), pdf.context.register(pdf.context.flateStream(
+    "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapType 2 def 1 begincodespacerange <00> <FF> endcodespacerange 2 beginbfchar <80> <00E9> <81> <00C0> endbfchar endcmap CMapName currentdict /CMap defineresource pop end end",
+  )));
+  p.node.set(PDFName.of("Resources"), pdf.context.obj({ Font: { F1: originalFont.ref, F2: neighbourFont.ref } }));
+  p.node.set(PDFName.of("Contents"), pdf.context.register(pdf.context.flateStream(
+    "BT /F1 20 Tf 1 0 0 1 40 520 Tm <8081> Tj /F2 20 Tf ( Neighbour) Tj ET",
+  )));
+  await page.goto("/");
+  await open(page, Buffer.from(await pdf.save()), "custom-encoding.pdf");
+  const target = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^éÀ$/ });
+  const neighbour = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /Neighbour/ });
+  await expect(target).toBeVisible();
+  const before = (await neighbour.boundingBox())!;
+  await page.getByRole("button", { name: "ツール", exact: true }).click();
+  await page.getByRole("button", { name: "既存文字", exact: true }).click();
+  await target.dblclick();
+  await expect(page.locator(".properties")).toContainText("既存テキストを直接編集");
+  await page.getByLabel("テキスト内容").fill("Edited accent text");
+  await expect(target).toHaveCount(0);
+  const after = (await neighbour.boundingBox())!;
+  expect(after.x).toBeCloseTo(before.x, 1);
+  expect(after.y).toBeCloseTo(before.y, 1);
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  const output = info.outputPath("edited-custom-encoding.pdf");
+  await (await download).saveAs(output);
+  const inspected = await inspectDirectText(new Uint8Array(await readFile(output)), 0);
+  expect(inspected.runs.some(r => r.text === "éÀ")).toBe(false);
+  expect(inspected.runs.some(r => r.text === "Edited accent text")).toBe(true);
+  await page.reload();
+  await open(page, await readFile(output));
+  await expect(page.locator(".viewer-scroll .textLayer")).toContainText("Edited accent text");
+  await expect(page.locator(".viewer-scroll .textLayer")).not.toContainText("éÀ");
+  await page.getByRole("button", { name: "ツール", exact: true }).click();
+  await page.getByRole("button", { name: "既存文字", exact: true }).click();
+  await page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Edited accent text$/ }).dblclick();
+  await expect(page.locator(".properties")).toContainText("既存テキストを直接編集");
+  await page.getByLabel("テキスト内容").fill("Edited again");
+  const secondDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  const secondOutput = info.outputPath("edited-again.pdf");
+  await (await secondDownload).saveAs(secondOutput);
+  const second = await inspectDirectText(new Uint8Array(await readFile(secondOutput)), 0);
+  expect(second.runs.some(r => r.text === "Edited accent text" || r.text === "éÀ")).toBe(false);
+  expect(second.runs.some(r => r.text === "Edited again")).toBe(true);
+});
+
+test("edits only the selected shared Form invocation, preserving backgrounds, neighbours, undo and saved PDF", async ({ page }, info) => {
+  const inner = await PDFDocument.create(), ip = inner.addPage([420, 595]);
+  ip.drawRectangle({ x: 0, y: 0, width: 420, height: 595, color: rgb(0.2, 0.6, 0.8) });
+  ip.drawText("Editable original", { x: 40, y: 520, size: 20 });
+  ip.drawText("Neighbour", { x: 210, y: 520, size: 20, font: await inner.embedFont(StandardFonts.TimesRoman) });
+  const middle = await PDFDocument.create();
+  middle.addPage([420, 595]).drawPage(await middle.embedPage((await PDFDocument.load(await inner.save())).getPage(0)));
+  const pdf = await PDFDocument.create(), p = pdf.addPage([420, 595]);
+  const embedded = await pdf.embedPage((await PDFDocument.load(await middle.save())).getPage(0));
+  p.drawPage(embedded);
+  p.drawPage(embedded, { y: -180 });
+  await page.goto("/");
+  await open(page, Buffer.from(await pdf.save()), "nested-shared-form.pdf");
+  await expect(original(page)).toHaveCount(2);
+  const neighbours = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Neighbour$/ });
+  const before = await neighbours.first().boundingBox();
+  await page.getByRole("button", { name: "ツール", exact: true }).click();
+  await page.getByRole("button", { name: "既存文字", exact: true }).click();
+  await original(page).first().dblclick();
+  await expect(page.locator(".properties")).toContainText("既存テキストを直接編集");
+  await page.getByLabel("テキスト内容").fill("Form changed");
+  await expect(original(page)).toHaveCount(1);
+  const after = await neighbours.first().boundingBox();
+  expect(after!.x).toBeCloseTo(before!.x, 1); expect(after!.y).toBeCloseTo(before!.y, 1);
+  await expect(page.locator(".viewer-scroll .page-view[data-rendered=true]")).toBeVisible();
+  const background = await page.locator(".viewer-scroll canvas").first().evaluate((canvas: HTMLCanvasElement) =>
+    Array.from(canvas.getContext("2d")!.getImageData(
+      Math.round(45 * canvas.width / 420), Math.round(65 * canvas.height / 595), 1, 1).data).slice(0, 3));
+  expect(background).toEqual([51, 153, 204]);
+  // Undo the text change and then the direct-edit object creation.
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await expect(original(page)).toHaveCount(2);
+  await page.getByRole("button", { name: /^やり直す/ }).click();
+  await page.getByRole("button", { name: /^やり直す/ }).click();
+  await expect(original(page)).toHaveCount(1);
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  const output = info.outputPath("edited-nested-form.pdf");
+  await (await download).saveAs(output);
+  const inspection = await inspectDirectText(new Uint8Array(await readFile(output)), 0);
+  expect(inspection.runs.filter(r => r.text === "Editable original")).toHaveLength(1);
+  expect(inspection.runs.some(r => r.text === "Form changed")).toBe(true);
+  await page.reload(); await open(page, await readFile(output));
+  await expect(original(page)).toHaveCount(1);
+  await expect(page.locator(".viewer-scroll .textLayer")).toContainText("Form changed");
+  const sourceForm = (await PDFDocument.load(await readFile(output))).context.enumerateIndirectObjects()
+    .map(([, value]) => value).find(value => value instanceof PDFRawStream && value.dict.get(PDFName.of("Subtype")) === PDFName.of("Form"));
+  expect(sourceForm).toBeDefined();
+  // The unedited invocation remains independently editable after saving and reopening.
+  await page.getByRole("button", { name: "ツール", exact: true }).click();
+  await page.getByRole("button", { name: "既存文字", exact: true }).click();
+  await original(page).dblclick();
+  await page.getByLabel("テキスト内容").fill("Other form changed");
+  await expect(original(page)).toHaveCount(0);
+  const secondDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  const secondOutput = info.outputPath("all-forms-edited.pdf");
+  await (await secondDownload).saveAs(secondOutput);
+  const secondInspection = await inspectDirectText(new Uint8Array(await readFile(secondOutput)), 0);
+  expect(secondInspection.runs.some(r => r.text === "Editable original")).toBe(false);
+  expect(secondInspection.runs.filter(r => ["Form changed", "Other form changed"].includes(r.text))).toHaveLength(2);
 });

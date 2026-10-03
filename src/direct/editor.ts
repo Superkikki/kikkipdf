@@ -1,6 +1,6 @@
 import { newObject, type Box, type PageModel } from "../state/model";
 import type { DirectInspection } from "./model";
-import { directReferences } from "./model";
+import { directReferences, textReferenceKey } from "./model";
 const normalized = (s: string) => s.normalize("NFKC").replace(/\s/g, "");
 /** Require both decoded text and position. Duplicate/ambiguous runs are refused. */
 export function directTextObject(
@@ -12,12 +12,12 @@ export function directTextObject(
   const candidates: (typeof inspection.runs)[] = [];
   const value = normalized(selectedText);
   for (const [i, run] of inspection.runs.entries()) {
-    if (
-      Math.abs(run.x - box.x) > Math.max(3, run.fontSize * 0.3) ||
-      run.baseline < box.y - run.fontSize * 0.3 ||
-      run.baseline > box.y + box.height + run.fontSize * 0.3
-    )
-      continue;
+    const matches = run.writingMode === "vertical"
+      ? Math.abs((run.flowX ?? run.x) - (box.x + box.width / 2)) <= run.fontSize * 1.25 &&
+        Math.abs((run.flowTop ?? run.y) - box.y) <= run.fontSize * 0.5
+      : Math.abs(run.x - box.x) <= Math.max(3, run.fontSize * 0.3) &&
+        run.baseline >= box.y - run.fontSize * 0.3 && run.baseline <= box.y + box.height + run.fontSize * 0.3;
+    if (!matches) continue;
     const group = [run];
     let joined = normalized(run.text);
     for (
@@ -30,13 +30,16 @@ export function directTextObject(
       const next = inspection.runs[j],
         previous = group.at(-1)!;
       if (
-        Math.abs(next.baseline - run.baseline) > 0.1 ||
+        next.writingMode !== run.writingMode ||
+        (run.writingMode === "vertical"
+          ? Math.abs((next.flowX ?? 0) - (run.flowX ?? 0)) > 0.1 || Math.abs((next.flowTop ?? 0) - (previous.flowEnd ?? 0)) > 0.1
+          : Math.abs(next.baseline - run.baseline) > 0.1) ||
         Math.abs(next.fontSize - run.fontSize) > 0.1 ||
         next.font !== run.font ||
         next.bold !== run.bold ||
         next.italic !== run.italic ||
-        Math.abs(next.x - (previous.x + previous.width)) >
-          Math.max(3, run.fontSize * 0.3)
+        (run.writingMode !== "vertical" && Math.abs(next.x - (previous.x + previous.width)) >
+          Math.max(3, run.fontSize * 0.3))
       )
         break;
       group.push(next);
@@ -47,24 +50,26 @@ export function directTextObject(
   if (candidates.length !== 1 || !page.sourceId)
     throw Error(
       inspection.unsupported ??
-        "この文字領域は直接編集できません。曖昧な文字領域やForm XObject内の文字は対象外です。",
+        "この文字領域は直接編集できません。曖昧な文字領域や特殊な描画は対象外です。",
     );
   const group = candidates[0],
     run = group[0];
-  const edited = new Set(directReferences(page).map((r) => r.operatorIndex));
-  if (group.some((r) => edited.has(r.reference.operatorIndex)))
+  const edited = new Set(directReferences(page).map(textReferenceKey));
+  if (group.some((r) => edited.has(textReferenceKey(r.reference))))
     throw Error(
       "この文字は既に編集対象です。選択ツールで編集オブジェクトを選んでください。",
     );
   return {
-    ...newObject("direct-text", run.x, run.y),
-    width: Math.max(1, box.width),
-    height: run.height,
+    ...newObject("direct-text", run.writingMode === "vertical" ? run.flowX! - run.fontSize / 2 : run.x,
+      run.writingMode === "vertical" ? run.flowTop! : run.y),
+    ...(run.writingMode ? { writingMode: run.writingMode } : {}),
+    width: run.writingMode === "vertical" ? run.fontSize : Math.max(1, box.width),
+    height: run.writingMode === "vertical" ? Math.max(run.fontSize, (group.at(-1)!.flowEnd ?? 0) - run.flowTop!) : run.height,
     text: selectedText,
     fontSize: run.fontSize,
     font: run.font,
-    bold: run.bold,
-    italic: run.italic,
+    bold: run.writingMode === "vertical" ? false : run.bold,
+    italic: run.writingMode === "vertical" ? false : run.italic,
     color: run.color,
     opacity: run.opacity,
     wrap: false,

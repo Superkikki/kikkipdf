@@ -51,6 +51,10 @@ export function ObjectShape({
 }) {
   const { x, y, width: w, height: h } = o;
   const common = { stroke: o.color, strokeWidth: o.strokeWidth, fill: o.fill };
+  if (o.kind === "direct-image") return <rect x={x} y={y} width={w} height={h}
+    fill="transparent" stroke={o.imageDeleted ? "#d95c59" : "none"} strokeDasharray="5 3">
+    <title>{o.imageDeleted ? "削除した既存画像（元に戻すことができます）" : "既存画像の編集領域"}</title>
+  </rect>;
   if (o.kind === "image") return <AssetImage object={o} model={model} />;
   if (o.kind === "ocr")
     return (

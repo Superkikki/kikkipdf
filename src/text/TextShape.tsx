@@ -12,6 +12,23 @@ export function TextShape({
 }) {
   const { layout, error, pending } = useTextLayout(o, true, asset);
   const face = useFontFace(asset);
+  if (o.writingMode === "vertical") {
+    const vertical = layout?.vertical;
+    const scale = o.fontSize / (vertical?.unitsPerEm ?? 1000);
+    const glyphs = new Map(vertical?.glyphs.map(g => [g.id, g]));
+    return <g className="editable-text" data-layout-ready={!!vertical && !pending} fill={o.color}
+      transform={`rotate(${o.rotation} ${o.x} ${o.y + o.height})`}>
+      <title>{error ?? o.text}</title>
+      {o.kind === "replacement" && <rect x={o.x} y={o.y} width={o.width} height={o.height} fill={o.fill === "none" ? "white" : o.fill} />}
+      <defs>{vertical?.glyphs.map(g => <path key={g.id} id={`vertical-${o.id}-${g.id}`} d={g.path} />)}</defs>
+      {vertical?.cells.map((cell, i) => {
+        const glyph = glyphs.get(cell.id)!;
+        const x = o.x + o.width - o.fontSize / 2 - cell.column * o.fontSize * (o.lineHeight ?? 1.25) - glyph.width * o.fontSize / 2000;
+        const y = o.y + (cell.row + 0.88) * o.fontSize;
+        return <use key={i} href={`#vertical-${o.id}-${cell.id}`} transform={`translate(${x} ${y}) scale(${scale} ${-scale})`} />;
+      })}
+    </g>;
+  }
   const anchor =
     o.x +
     (o.align === "center" ? o.width / 2 : o.align === "right" ? o.width : 0);

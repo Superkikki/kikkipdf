@@ -55,6 +55,15 @@ test("creates a link region, edits an imported link, and persists both destinati
     3,
   );
   await page.getByLabel("文書内のリンク").selectOption({ index: 1 });
+  await expect(page.getByLabel("リンク領域x", { exact: true })).toHaveValue("20");
+  await expect(page.getByLabel("リンク領域y", { exact: true })).toHaveValue("100");
+  await page.getByLabel("リンク領域x", { exact: true }).fill("40");
+  await page.getByLabel("リンク領域width", { exact: true }).fill("120");
+  await page.getByRole("button", { name: "元の配置に戻す", exact: true }).click();
+  await expect(page.getByLabel("リンク領域x", { exact: true })).toHaveValue("20");
+  await page.getByRole("button", { name: "リンク編集を元に戻す", exact: true }).click();
+  await expect(page.getByLabel("リンク領域x", { exact: true })).toHaveValue("40");
+  await expect(page.getByLabel("リンク領域width", { exact: true })).toHaveValue("120");
   await page
     .getByLabel("リンクURL", { exact: true })
     .fill("https://after.example/path");
@@ -65,6 +74,9 @@ test("creates a link region, edits an imported link, and persists both destinati
   await (await download).saveAs(dest);
   const output = await PDFDocument.load(await readFile(dest)),
     annotations = output.getPage(0).node.Annots()!;
+  expect(annotations.lookup(0, PDFDict).lookup(PDFName.of("Rect"), PDFArray).asRectangle()).toEqual({
+    x: 40, y: 650, width: 120, height: 50,
+  });
   expect(
     annotations
       .lookup(0, PDFDict)
@@ -85,6 +97,8 @@ test("creates a link region, edits an imported link, and persists both destinati
     3,
   );
   await page.getByLabel("文書内のリンク").selectOption({ index: 1 });
+  await expect(page.getByLabel("リンク領域x", { exact: true })).toHaveValue("40");
+  await expect(page.getByLabel("リンク領域width", { exact: true })).toHaveValue("120");
   await expect(page.getByLabel("リンクURL", { exact: true })).toHaveValue(
     "https://after.example/path",
   );

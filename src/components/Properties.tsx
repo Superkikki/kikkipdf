@@ -15,6 +15,7 @@ import {
   deleteObject,
   updateObject,
   revertDirectText,
+  revertDirectImage,
 } from "../commands/document";
 import { LinkTargetEditor } from "../links/LinkTargetEditor";
 import { useTextLayout } from "../text/useTextLayout";
@@ -71,7 +72,7 @@ export function Properties({
                     ? "付箋コメント"
                     : o.kind === "redaction"
                       ? "墨消し候補"
-                      : o.kind === "image"
+                      : (o.kind === "image" || o.kind === "direct-image")
                         ? "画像"
                         : o.kind === "text"
                           ? "テキスト"
@@ -104,6 +105,10 @@ export function Properties({
               </button>
             </>
           )}
+          {o.kind === "direct-image" && <>
+            <p className="hint">{o.imageDeleted ? "元の画像を削除しています。" : "既存画像の位置とサイズを編集します。同じ画像を使う別の箇所は保持します。"}</p>
+            <button onClick={() => page && documentStore.execute(revertDirectImage(page.id, o.id))}>元の画像に戻す</button>
+          </>}
           {o.kind === "ocr" && (
             <p className="hint">
               透明な検索テキストを編集します。元画像や元PDFの文字は変更しません。修正後は左の一覧で確認済みにできます。
@@ -162,6 +167,12 @@ export function Properties({
           {["text", "replacement", "ocr", "direct-text"].includes(o.kind) && (
             <div className="property-group">
               <h3>テキスト</h3>
+              {o.kind !== "ocr" && <label>文字の方向
+                <select aria-label="文字の方向" value={o.writingMode ?? "horizontal"} onChange={e => {
+                  if (e.target.value === "vertical") patch({ writingMode: "vertical", font: o.font === "custom" ? "custom" : "japanese", bold: false, italic: false, wrap: false, align: "left", width: o.fontSize, height: Math.max(o.fontSize, Array.from(o.text ?? "").length * o.fontSize) });
+                  else patch({ writingMode: undefined, width: Math.max(o.fontSize, Array.from(o.text ?? "").length * o.fontSize), height: o.fontSize * 1.25 });
+                }}><option value="horizontal">横書き</option><option value="vertical">縦書き（右から左へ）</option></select>
+              </label>}
               {page && (
                 <FontPicker
                   key={o.id}
@@ -187,6 +198,7 @@ export function Properties({
                   />
                 </label>
                 <button
+                  disabled={o.writingMode === "vertical"}
                   title="太字"
                   className={o.bold ? "active" : ""}
                   onClick={() => patch({ bold: !o.bold })}
@@ -194,6 +206,7 @@ export function Properties({
                   <Bold size={16} />
                 </button>
                 <button
+                  disabled={o.writingMode === "vertical"}
                   title="斜体"
                   className={o.italic ? "active" : ""}
                   onClick={() => patch({ italic: !o.italic })}
@@ -204,6 +217,7 @@ export function Properties({
               <label>
                 文字揃え
                 <select
+                  disabled={o.writingMode === "vertical"}
                   value={o.align}
                   onChange={(e) =>
                     patch({ align: e.target.value as EditObject["align"] })
@@ -224,10 +238,10 @@ export function Properties({
                       checked={!!o.wrap}
                       onChange={(e) => patch({ wrap: e.target.checked })}
                     />
-                    幅に合わせて折り返す
+                    {o.writingMode === "vertical" ? "高さに合わせて折り返す" : "幅に合わせて折り返す"}
                   </label>
                   <label>
-                    行間（文字サイズの倍率）
+                    {o.writingMode === "vertical" ? "列間（文字サイズの倍率）" : "行間（文字サイズの倍率）"}
                     <input
                       aria-label="行間"
                       type="number"
@@ -248,7 +262,7 @@ export function Properties({
                   {layout && (
                     <>
                       <p className="hint text-layout-summary">
-                        {layout.lines.length} 行・必要な高さ{" "}
+                        {layout.lines.length} {o.writingMode === "vertical" ? "列" : "行"}・必要な高さ{" "}
                         {Math.ceil(layout.height)} pt
                       </p>
                       {(layout.height > o.height + 0.1 ||
@@ -257,6 +271,7 @@ export function Properties({
                           文字がボックスの範囲を超えています。保存時も全文を描画します。幅・高さ・文字サイズを調整してください。
                         </p>
                       )}
+                      {o.writingMode === "vertical" && <button onClick={() => patch({ x: o.x + o.width - Math.ceil(layout.width), width: Math.ceil(layout.width) })}>文字に合わせて幅を調整</button>}
                       <button
                         onClick={() =>
                           patch({ height: Math.ceil(layout.height) })
@@ -270,7 +285,7 @@ export function Properties({
               )}
             </div>
           )}
-          {o.kind !== "link" && o.kind !== "ocr" && (
+          {o.kind !== "link" && o.kind !== "ocr" && o.kind !== "direct-image" && (
             <div className="property-group">
               <h3>外観</h3>
               <label>
@@ -333,7 +348,7 @@ export function Properties({
               )}
             </div>
           )}
-          <div className="form-kind-buttons">
+          {o.kind !== "direct-image" && <div className="form-kind-buttons">
             <button
               title="オブジェクトを複製"
               onClick={() => {
@@ -374,7 +389,7 @@ export function Properties({
             >
               <ArrowDownToLine size={16} />
             </button>
-          </div>
+          </div>}
           <button
             className="danger full"
             onClick={() =>

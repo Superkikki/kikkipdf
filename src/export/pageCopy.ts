@@ -15,8 +15,8 @@ import type { PageModel, LinkTarget } from "../state/model";
 import { setLinkTarget } from "../links/pdfLinks";
 import { importedLinkUrl } from "../links/target";
 import type { AttachmentWriter } from "../attachments/pdfAttachments";
-import { rewrittenContent } from "../direct/content";
-import { directReferences } from "../direct/model";
+import { rewrittenPage } from "../direct/content";
+import { directReferences, directImageEdits } from "../direct/model";
 
 const key = (name: string) => PDFName.of(name);
 const text = (value: PDFObject | undefined) =>
@@ -96,11 +96,15 @@ export class PageCopier {
     const edits = directReferences(model);
     if (edits.some((r) => r.sourceId !== model.sourceId))
       throw Error("直接編集の参照元PDFが一致しません。");
-    const content = edits.length
-      ? await rewrittenContent(source, model.sourceIndex, edits)
+    const imageEdits = directImageEdits(model);
+    const content = edits.length || imageEdits.length
+      ? await rewrittenPage(source, model.sourceIndex, edits, imageEdits)
       : undefined;
     // Never copy the original content first: pdf-lib serializes orphan objects too.
-    if (content) node.delete(key("Contents"));
+    if (content) {
+      node.delete(key("Contents"));
+      if (content.resources) node.set(key("Resources"), content.resources);
+    }
     const copied = this.copier.copy(node),
       page = PDFPage.of(
         copied,
@@ -111,7 +115,7 @@ export class PageCopier {
     if (content)
       page.node.set(
         key("Contents"),
-        this.output.context.register(this.output.context.flateStream(content)),
+        this.output.context.register(this.output.context.flateStream(content.bytes)),
       );
     if (!this.exported.has(model.sourceIndex))
       this.exported.set(model.sourceIndex, page);
@@ -155,6 +159,28 @@ export class PageCopier {
         if (edit?.text !== undefined)
           safe.set(key("Contents"), PDFHexString.fromText(edit.text));
         const annotation = this.copier.copy(safe);
+        if (edit?.box && text(original.get(key("Subtype"))) === "Link") {
+          const box = edit.box;
+          if (
+            !Object.values(box).every(Number.isFinite) ||
+            Math.abs(box.x) > 1e6 ||
+            Math.abs(box.y) > 1e6 ||
+            box.width <= 0 ||
+            box.height <= 0 ||
+            box.width > 100000 ||
+            box.height > 100000
+          ) throw Error("リンクの位置・サイズが不正です。");
+          const crop = source.getCropBox();
+          annotation.set(key("Rect"), this.output.context.obj([
+            crop.x + box.x,
+            crop.y + crop.height - box.y - box.height,
+            crop.x + box.x + box.width,
+            crop.y + crop.height - box.y,
+          ]));
+          // A source appearance or quad geometry refers to the old rectangle.
+          annotation.delete(key("AP"));
+          annotation.delete(key("QuadPoints"));
+        }
         if (fileSpec) annotation.set(key("FS"), fileSpec);
         annotation.set(key("P"), page.ref);
         const action = original.lookupMaybe(key("A"), PDFDict);

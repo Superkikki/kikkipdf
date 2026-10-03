@@ -54,6 +54,8 @@ export function deleteObject(pageId: string, id: string) {
           ? [o]
           : o.kind === "direct-text"
             ? [{ ...o, text: "" }]
+            : o.kind === "direct-image"
+              ? [{ ...o, imageDeleted: true }]
             : [],
       ),
     }),
@@ -66,6 +68,9 @@ export function revertDirectText(pageId: string, id: string) {
     (p) => ({ ...p, objects: p.objects.filter((o) => o.id !== id) }),
     "元の文字に戻す",
   );
+}
+export function revertDirectImage(pageId: string, id: string) {
+  return editPage(pageId, p => ({ ...p, objects: p.objects.filter(o => o.id !== id) }), "元の画像に戻す");
 }
 export function rotatePage(id: string) {
   return editPage(
@@ -119,13 +124,18 @@ export function duplicatePage(id: string): Command {
     };
   });
 }
-export function reorderPage(from: string, to: string): Command {
+export function reorderPage(from: string, to: string, edge?: "before" | "after"): Command {
   return change("ページ並べ替え", (d) => {
     const pages = [...d.pages];
     const a = pages.findIndex((p) => p.id === from),
       b = pages.findIndex((p) => p.id === to);
     if (a < 0 || b < 0 || a === b) return d;
-    pages.splice(b, 0, pages.splice(a, 1)[0]);
+    const [moved] = pages.splice(a, 1);
+    const target = edge
+      ? pages.findIndex((p) => p.id === to) + (edge === "after" ? 1 : 0)
+      : b;
+    pages.splice(target, 0, moved);
+    if (pages.every((p, i) => p === d.pages[i])) return d;
     return { ...d, pages };
   });
 }

@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search, ChevronUp, ChevronDown } from "lucide-react";
 import type { DocumentModel } from "../state/model";
 import { acquirePagePdf } from "./pdf";
 export function SearchPanel({
   model,
   jump,
+  focusRequest = 0,
 }: {
+  focusRequest?: number;
   model: DocumentModel;
   jump: (id: string) => void;
 }) {
@@ -14,13 +16,21 @@ export function SearchPanel({
     [current, setCurrent] = useState(0),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  const visited = useRef<number | null>(null);
+  useEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, [focusRequest]);
   useEffect(() => {
     let cancelled = false;
+    setResults([]);
+    setCurrent(0);
+    setError("");
+    setBusy(!!query.trim());
+    visited.current = null;
     const timer = setTimeout(() => {
       void (async () => {
-        setResults([]);
-        setCurrent(0);
-        setError("");
         if (!query.trim()) {
           setBusy(false);
           return;
@@ -78,8 +88,12 @@ export function SearchPanel({
     };
   }, [query, model]);
   function navigate(step: number) {
-    if (!results.length) return;
-    const n = (current + step + results.length) % results.length;
+    if (busy || !results.length) return;
+    const n =
+      visited.current === null
+        ? step > 0 ? current : results.length - 1
+        : (current + step + results.length) % results.length;
+    visited.current = n;
     setCurrent(n);
     jump(results[n].id);
   }
@@ -88,25 +102,44 @@ export function SearchPanel({
       <label className="search-input">
         <Search size={16} />
         <input
+          ref={input}
           aria-label="PDF内を検索"
           placeholder="文書内を検索"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              navigate(e.shiftKey ? -1 : 1);
+            }
+          }}
         />
       </label>
       <div className="search-count">
-        <span>
+        <span role="status" aria-live="polite">
           {busy
             ? "検索中…"
             : `${results.length ? current + 1 : 0} / ${results.length} 件`}
         </span>
-        <button title="前の検索結果" onClick={() => navigate(-1)}>
+        <button
+          title="前の検索結果"
+          disabled={busy || !results.length}
+          onClick={() => navigate(-1)}
+        >
           <ChevronUp size={16} />
         </button>
-        <button title="次の検索結果" onClick={() => navigate(1)}>
+        <button
+          title="次の検索結果"
+          disabled={busy || !results.length}
+          onClick={() => navigate(1)}
+        >
           <ChevronDown size={16} />
         </button>
       </div>
+      <p className="hint">Enterで次の結果 · Shift+Enterで前の結果</p>
+      {!busy && !error && query.trim() && !results.length && (
+        <p className="empty-panel">一致するテキストがありません。</p>
+      )}
       {error && <p className="warning">{error}</p>}
       <div className="search-results">
         {results.map((r, i) => (
@@ -114,6 +147,7 @@ export function SearchPanel({
             className={current === i ? "current" : ""}
             key={`${r.id}-${i}`}
             onClick={() => {
+              visited.current = i;
               setCurrent(i);
               jump(r.id);
             }}

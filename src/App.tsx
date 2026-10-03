@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   FileText,
   FolderOpen,
@@ -8,13 +8,12 @@ import {
   ChevronRight,
   PanelLeft,
   SlidersHorizontal,
-  Minus,
-  Plus as ZoomIn,
   X,
   Clock3,
   Images,
 } from "lucide-react";
 import { useWorkspace } from "./editor/useWorkspace";
+import { ZoomControls } from "./components/ZoomControls";
 import { PageNavigation } from "./components/PageNavigation";
 import { Toolbar } from "./components/Toolbar";
 import { Sidebar } from "./components/Sidebar";
@@ -35,6 +34,34 @@ export function App() {
   useEffect(() => {
     if (w.selected) setShowProperties(true);
   }, [w.selected]);
+  const [renderedScale, setRenderedScale] = useState(1);
+  const [searchRequest, setSearchRequest] = useState(0);
+  const { active, setActive, setSelected } = w;
+  const onActive = useCallback(
+    (id: string) => {
+      if (id !== active) {
+        setActive(id);
+        setSelected(null);
+      }
+    },
+    [active, setActive, setSelected],
+  );
+  useEffect(() => {
+    function search(e: KeyboardEvent) {
+      if (
+        !doc || w.busy || e.defaultPrevented || e.altKey ||
+        !(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "f" ||
+        document.querySelector("dialog[open]")
+      ) {
+        return;
+      }
+      e.preventDefault();
+      setShowSidebar(true);
+      setSearchRequest((request) => request + 1);
+    }
+    window.addEventListener("keydown", search);
+    return () => window.removeEventListener("keydown", search);
+  }, [doc, w.busy]);
   return (
     <div
       className="app"
@@ -103,6 +130,8 @@ export function App() {
           </div>
           <main className="workspace" inert={!!w.busy}>
             <Sidebar
+              key={`sidebar:${doc.id}`}
+              searchRequest={searchRequest}
               hidden={!showSidebar}
               onClose={() => setShowSidebar(false)}
               model={doc}
@@ -116,9 +145,12 @@ export function App() {
               }}
             />
             <Viewer
+              key={`viewer:${doc.id}`}
+              onScale={setRenderedScale}
+              onZoom={w.setZoom}
               model={doc}
               active={w.active}
-              onActive={w.setActive}
+              onActive={onActive}
               zoom={w.zoom}
               tool={w.tool}
               selected={w.selected}
@@ -229,60 +261,16 @@ export function App() {
         {doc && (
           <>
             <PageNavigation
+              key={doc.id}
               index={index}
               count={doc.pages.length}
               jump={(n) => w.jump(doc.pages[n].id)}
             />
-            <div className="zoom-controls">
-              <button
-                title="縮小"
-                onClick={() =>
-                  w.setZoom(
-                    Math.max(
-                      0.25,
-                      (typeof w.zoom === "number" ? w.zoom : 1) - 0.25,
-                    ),
-                  )
-                }
-              >
-                <Minus size={15} />
-              </button>
-              <select
-                aria-label="ズーム"
-                value={String(w.zoom)}
-                onChange={(e) =>
-                  w.setZoom(
-                    ["width", "page"].includes(e.target.value)
-                      ? (e.target.value as "width" | "page")
-                      : Number(e.target.value),
-                  )
-                }
-              >
-                <option value="width">ページ幅に合わせる</option>
-                <option value="page">ページ全体を表示</option>
-                {[
-                  0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3,
-                  3.25, 3.5, 3.75, 4,
-                ].map((n) => (
-                  <option value={n} key={n}>
-                    {n * 100}%
-                  </option>
-                ))}
-              </select>
-              <button
-                title="拡大"
-                onClick={() =>
-                  w.setZoom(
-                    Math.min(
-                      4,
-                      (typeof w.zoom === "number" ? w.zoom : 1) + 0.25,
-                    ),
-                  )
-                }
-              >
-                <ZoomIn size={15} />
-              </button>
-            </div>
+            <ZoomControls
+              zoom={w.zoom}
+              scale={renderedScale}
+              onChange={w.setZoom}
+            />
           </>
         )}
       </footer>

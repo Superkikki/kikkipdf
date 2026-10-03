@@ -66,9 +66,9 @@ export function FontPicker({
           }}
         >
           <option value="japanese">Noto Sans JP（日本語）</option>
-          <option value="sans">Helvetica</option>
-          <option value="serif">Times</option>
-          <option value="mono">Courier</option>
+          <option disabled={object.writingMode === "vertical"} value="sans">Helvetica</option>
+          <option disabled={object.writingMode === "vertical"} value="serif">Times</option>
+          <option disabled={object.writingMode === "vertical"} value="mono">Courier</option>
           {Object.values(fonts).map((f) => (
             <option key={f.id} value={f.id}>
               {f.family} · {f.name}

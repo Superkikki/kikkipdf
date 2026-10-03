@@ -255,3 +255,14 @@ describe("save identity and stroke resizing", () => {
     });
   });
 });
+
+it("moves pages before or after a target without changing identity or recording no-op moves", () => {
+  const d = model(4);
+  const [a, b, c, e] = d.pages.map(p => p.id);
+  const after = reorderPage(a, c, "after").apply(d);
+  expect(after.pages.map(p => p.id)).toEqual([b, c, a, e]);
+  expect(reorderPage(e, b, "before").apply(d).pages.map(p => p.id)).toEqual([a, e, b, c]);
+  expect(reorderPage(b, c, "before").apply(d)).toBe(d);
+  expect(reorderPage(c, b, "after").apply(d)).toBe(d);
+  expect(reorderPage(a, a, "after").apply(d)).toBe(d);
+});

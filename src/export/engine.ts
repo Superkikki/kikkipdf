@@ -31,10 +31,11 @@ import { APP_NAME } from "../config";
 import fontkit from "@pdf-lib/fontkit";
 import type { DocumentModel, EditObject } from "../state/model";
 import { embedTextFont, fontKey, assertGlyphs } from "../text/fonts";
+import { createVerticalWriter } from "../text/vertical";
 import { layoutText } from "../text/layout";
 import { inspectFont } from "../fonts/inspect";
 import { checkFontBudget } from "../fonts/budget";
-import { directReferences } from "../direct/model";
+import { directReferences, directImageEdits } from "../direct/model";
 export interface ExportOptions {
   indices?: number[];
 }
@@ -55,6 +56,7 @@ export async function exportPdf(
   const output = await PDFDocument.create();
   checkFontBudget(model.fonts ?? {});
   output.registerFontkit(fontkit);
+  const drawVertical = createVerticalWriter(output);
   const fonts = new Map<string, PDFFont>();
   const fontFor = async (o: EditObject) => {
     const key = fontKey(o);
@@ -126,6 +128,7 @@ export async function exportPdf(
   for (let n = 0; n < indices.length; n++) {
     const p = model.pages[indices[n]];
     directReferences(p);
+    directImageEdits(p);
     let page: PDFPage;
     if (p.sourceId) {
       const copier = copiers.get(p.sourceId);
@@ -143,7 +146,7 @@ export async function exportPdf(
     const px = (x: number) => base.x + x,
       py = (y: number) => base.y + p.height - y;
     for (const o of p.objects) {
-      if (o.kind === "redaction" || o.kind === "link") continue;
+      if (o.kind === "redaction" || o.kind === "link" || o.kind === "direct-image") continue;
       if (["highlight", "underline", "strike", "ink"].includes(o.kind)) {
         writeMarkup(output, page, o, base.x, base.y + p.height);
         continue;
@@ -162,6 +165,14 @@ export async function exportPdf(
             height: o.height,
             color: fill ?? rgb(1, 1, 1),
           });
+        if (o.writingMode === "vertical") {
+          const asset = o.fontId ? model.fonts?.[o.fontId] : undefined;
+          if (o.font === "custom" && (!asset || (await inspectFont(asset.bytes, asset.name)).id !== asset.id))
+            throw Error("登録フォントの整合性エラー");
+          const bytes = o.font === "japanese" ? fontBytes : asset?.bytes;
+          if (!bytes) throw Error("縦書きフォントが見つかりません。");
+          await drawVertical(page, o, bytes, base.x, base.y + p.height); continue;
+        }
         page.pushOperators(
           pushGraphicsState(),
           translate(x, y),

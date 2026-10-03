@@ -9,7 +9,8 @@ import {
 } from "pdf-lib";
 import { blankPage, emptyDocument, newObject } from "../src/state/model";
 import { exportPdf } from "../src/export/engine";
-import { editAnnotation } from "../src/annotations/commands";
+import { History } from "../src/commands/history";
+import { editAnnotation, resetAnnotationBox } from "../src/annotations/commands";
 import { validatedLinkUrl } from "../src/links/target";
 import { openProject, saveProject } from "../src/state/project";
 const key = PDFName.of;
@@ -99,4 +100,48 @@ it("rejects executable and local-file link destinations", () => {
   expect(validatedLinkUrl("mailto:hello@example.com")).toBe(
     "mailto:hello@example.com",
   );
+});
+
+it("keeps imported link layout through crop, rotation, duplication, project reload and undo", async () => {
+  const input = await PDFDocument.create();
+  const sourcePage = input.addPage([700, 900]);
+  sourcePage.setCropBox(40, 60, 600, 800);
+  const ref = input.context.register(input.context.obj({
+    Type: "Annot", Subtype: "Link", Rect: [60, 710, 140, 760],
+    QuadPoints: [60, 760, 140, 760, 60, 710, 140, 710],
+    A: { S: "URI", URI: PDFString.of("https://example.com/") },
+  }));
+  sourcePage.node.addAnnot(ref);
+  const model = emptyDocument();
+  model.sources.s = { id: "s", name: "layout.pdf", bytes: await input.save() };
+  model.pages = [{ ...blankPage(), sourceId: "s", width: 600, height: 800,
+    rotation: 90, crop: { x: 10, y: 20, width: 500, height: 700 } }];
+  const id = `${ref.objectNumber}R`;
+  const box = { x: 100, y: 120, width: 160, height: 45 };
+  const history = new History(model);
+  history.execute(editAnnotation(model.pages[0].id, id, { box }));
+  history.undo();
+  expect(history.current.document.pages[0].annotationEdits?.[id]?.box).toBeUndefined();
+  history.redo();
+  const restored = await openProject(await saveProject(history.current.document));
+  expect(restored.pages[0].annotationEdits?.[id]?.box).toEqual(box);
+  restored.pages.push({ ...restored.pages[0], id: crypto.randomUUID() });
+  const output = await PDFDocument.load(await exportPdf(restored, undefined, { indices: [1, 0] }));
+  for (const page of output.getPages()) {
+    const annotation = page.node.Annots()!.lookup(0, PDFDict);
+    expect(annotation.lookup(key("Rect"), PDFArray).asRectangle()).toEqual({
+      x: 140, y: 695, width: 160, height: 45,
+    });
+    expect(annotation.has(key("QuadPoints"))).toBe(false);
+    expect(annotation.lookup(key("A"), PDFDict).lookup(key("URI"), PDFString).decodeText()).toBe("https://example.com/");
+    expect(page.getRotation().angle).toBe(90);
+  }
+  history.execute(resetAnnotationBox(model.pages[0].id, id));
+  const reset = await PDFDocument.load(await exportPdf(history.current.document));
+  expect(reset.getPage(0).node.Annots()!.lookup(0, PDFDict).lookup(key("Rect"), PDFArray).asRectangle()).toEqual({ x: 60, y: 710, width: 80, height: 50 });
+  history.undo();
+  expect(history.current.document.pages[0].annotationEdits?.[id]?.box).toEqual(box);
+  const invalid = editAnnotation(model.pages[0].id, id, { box: { ...box, width: 0 } }).apply(model);
+  await expect(exportPdf(invalid)).rejects.toThrow("リンクの位置・サイズ");
+  await expect(saveProject(invalid)).rejects.toThrow();
 });

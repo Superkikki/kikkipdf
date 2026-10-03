@@ -983,6 +983,10 @@ export function useWorkspace() {
             ["c", "x", "d"].includes(k)
           ) {
             e.preventDefault();
+            if (current.kind === "direct-image") {
+              setStatus("既存画像のコピー・複製は未対応です。移動・サイズ変更・削除ができます。");
+              return;
+            }
             const data = {
               object: current,
               font: current.fontId

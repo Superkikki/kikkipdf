@@ -7,6 +7,7 @@ export function unicodeMap(bytes: Uint8Array): Map<number, string> {
   const result = new Map<number, string>();
   let mode = "";
   let expected = 0;
+  let decodedBytes = 0;
   const decoder = new TextDecoder("utf-16be", { fatal: true });
   const code = (value: Operand) => {
     if (!(value instanceof Uint8Array) || value.length < 1 || value.length > 2)
@@ -25,6 +26,9 @@ export function unicodeMap(bytes: Uint8Array): Map<number, string> {
       throw Error("文字マップの項目数が不正です。");
     const put = (code: number, value: string) => {
       if (result.has(code)) throw Error("文字マップの範囲が重複しています。");
+      decodedBytes += value.length * 2;
+      if (decodedBytes > 8 * 1024 * 1024)
+        throw Error("展開後のUnicode文字マップが大きすぎます。");
       result.set(code, value);
     };
     if (mode === "bfchar") {
@@ -44,21 +48,22 @@ export function unicodeMap(bytes: Uint8Array): Map<number, string> {
             throw Error("文字マップが不正です。");
           target.forEach((v, index) => put(first + index, text(v)));
         } else {
-          if (!(target instanceof Uint8Array) || target.length !== 2)
-            throw Error("複雑なUnicode範囲は未対応です。");
-          const start = code(target);
-          if (start + last - first > 65535)
+          if (!(target instanceof Uint8Array) || !target.length || target.length % 2)
             throw Error("文字マップが不正です。");
-          for (let c = first; c <= last; c++)
-            put(
-              c,
-              text(
-                new Uint8Array([
-                  (start + c - first) >> 8,
-                  (start + c - first) & 255,
-                ]),
-              ),
-            );
+          const tail = target[target.length - 2] * 256 + target[target.length - 1];
+          if (tail + last - first > 65535)
+            throw Error("Unicode文字マップの範囲があふれています。");
+          const current = new Uint8Array(target);
+          for (let c = first; c <= last; c++) {
+            put(c, text(current));
+            if (c === last) break;
+            // PDF bfrange increments the destination byte string, not a
+            // Unicode scalar. Fatal decoding rejects broken surrogate pairs.
+            let at = current.length - 1;
+            while (at >= 0 && current[at] === 255) current[at--] = 0;
+            if (at < 0) throw Error("Unicode文字マップの範囲があふれています。");
+            current[at]++;
+          }
         }
       }
     }

@@ -11,9 +11,12 @@ import { boundedDecode, sourceFonts } from "./pdfFonts";
 import { isName, parseContent, type Operand, type Operation } from "./parser";
 import type {
   DirectInspection,
+  DirectImageRun,
+  DirectImageEdit,
   DirectTextRun,
   SourceTextReference,
 } from "./model";
+import { textReferenceKey } from "./model";
 type Matrix = [number, number, number, number, number, number];
 const identity = (): Matrix => [1, 0, 0, 1, 0, 0];
 function multiply(a: Matrix, b: Matrix): Matrix {
@@ -27,6 +30,11 @@ function multiply(a: Matrix, b: Matrix): Matrix {
   ];
 }
 const key = (name: string) => PDFName.of(name);
+const containsBox = (outer: { x: number; y: number; width: number; height: number },
+  inner: { x: number; y: number; width: number; height: number }) =>
+  inner.x >= outer.x - 1e-7 && inner.y >= outer.y - 1e-7 &&
+  inner.x + inner.width <= outer.x + outer.width + 1e-7 &&
+  inner.y + inner.height <= outer.y + outer.height + 1e-7;
 const number = (n: Operand | undefined) => {
   if (typeof n !== "number" || !Number.isFinite(n))
     throw Error("文字描画の引数が不正です。");
@@ -50,12 +58,25 @@ const rgb = (r: number, g: number, b: number) =>
         .padStart(2, "0"),
     )
     .join("");
+interface GraphicsState {
+  ctm: Matrix; font: string; size: number; tc: number; tw: number; tz: number;
+  leading: number; rise: number; render: number; color: string | undefined;
+  opacity: number; clip: boolean; effects: boolean;
+}
+const initialState = (): GraphicsState => ({
+  ctm: identity(), font: "", size: 0, tc: 0, tw: 0, tz: 1, leading: 0,
+  rise: 0, render: 0, color: "#000000", opacity: 1, clip: false, effects: false,
+});
+interface AnalysisBudget { bytes: number; operations: number; forms: number; }
 interface Analyzed extends DirectInspection {
   bytes: Uint8Array;
+  images: DirectImageRun[];
   replacements: Map<number, { start: number; end: number; text: string }>;
   hash: string;
+  resources: PDFDict | undefined;
+  children: Map<number, { analysis: Analyzed; stream: PDFRawStream; name: string }>;
 }
-/** Only page-local horizontal, visible fill text with verified font widths is editable.
+/** Only horizontal, visible fill text with verified font widths is editable.
  * Replacement removes glyph strings; numeric TJ movement retains downstream positions.
  * This is editing, not a guarantee of redaction across other objects/metadata.
  */
@@ -93,38 +114,38 @@ export async function analyzePage(
     bytes.set(part, offset);
     offset += part.length;
   }
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  const hash = Array.from(new Uint8Array(digest), (b) =>
-    b.toString(16).padStart(2, "0"),
-  ).join("");
-  const operations = parseContent(bytes),
-    resources = page.node.Resources(),
-    fonts = await sourceFonts(resources);
-  // Keep stream concatenation byte-for-byte. A comment/token crossing a boundary
-  // can change the meaning of unrelated operations, so refuse such documents.
+  const operations = parseContent(bytes);
+  // Keep stream concatenation byte-for-byte. Refuse tokens crossing a boundary.
   if (operations.length !== operationCount)
     throw Error("ストリーム境界をまたぐ描画命令は直接編集できません。");
+  return analyzeContent(page, sourceIndex, bytes, page.node.Resources(), initialState(), [],
+    new Set(), { bytes: 0, operations: 0, forms: 0 }, []);
+}
+async function analyzeContent(
+  page: PDFPage, sourceIndex: number, bytes: Uint8Array, resources: PDFDict | undefined,
+  inherited: GraphicsState, formPath: number[], active: Set<PDFRawStream>, budget: AnalysisBudget,
+  bounds: { x: number; y: number; width: number; height: number }[], parentHash = "",
+): Promise<Analyzed> {
+  budget.bytes += bytes.length;
+  if (budget.bytes > 64 * 1024 * 1024) throw Error("Form XObjectの展開サイズが大きすぎます。");
+  const parentBytes = new TextEncoder().encode(parentHash);
+  const digestInput = new Uint8Array(bytes.length + parentBytes.length);
+  digestInput.set(parentBytes);
+  digestInput.set(bytes, parentBytes.length);
+  const digest = await crypto.subtle.digest("SHA-256", digestInput);
+  const hash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+  const operations = parseContent(bytes), fonts = await sourceFonts(resources);
+  budget.operations += operations.length;
+  if (budget.operations > 200000) throw Error("Form XObjectの描画命令が多すぎます。");
+  const children: Analyzed["children"] = new Map();
   const base = page.getCropBox();
+  const images: DirectImageRun[] = [];
   const runs: DirectTextRun[] = [],
     replacements = new Map<
       number,
       { start: number; end: number; text: string }
     >();
-  let state = {
-    ctm: identity(),
-    font: "",
-    size: 0,
-    tc: 0,
-    tw: 0,
-    tz: 1,
-    leading: 0,
-    rise: 0,
-    render: 0,
-    color: "#000000" as string | undefined,
-    opacity: 1,
-    clip: false,
-    effects: false,
-  };
+  let state = { ...inherited, ctm: [...inherited.ctm] as Matrix };
   const stack: (typeof state)[] = [],
     marked: boolean[] = [];
   let tm = identity(),
@@ -247,9 +268,63 @@ export async function analyzePage(
       case "W*":
         state.clip = true;
         break;
-      case "Do":
-        unsupported ??= "Form XObject内の文字は未対応です。";
+      case "Do": {
+        if (!isName(args[0]) || args.length !== 1 || inside)
+          throw Error("Form XObjectの呼び出しが不正です。");
+        const stream = resources?.lookupMaybe(key("XObject"), PDFDict)?.lookup(key(args[0].name));
+        if (!(stream instanceof PDFRawStream)) throw Error("XObjectがありません。");
+        const subtype = stream.dict.lookupMaybe(key("Subtype"), PDFName)?.decodeText();
+        if (subtype === "Image") {
+          const [a, b, c, d, e, f] = state.ctm;
+          const box = { x: e - base.x, y: base.y + base.height - f - d, width: a, height: d };
+          if (Math.abs(b) < 1e-7 && Math.abs(c) < 1e-7 && a > 0 && d > 0 &&
+              [a, d, e, f].every(Number.isFinite) && !state.clip && !state.effects && state.opacity > 0 &&
+              !marked.some(Boolean) && !stream.dict.has(key("OC")) && !stream.dict.has(key("F")) &&
+              bounds.every(limit => containsBox(limit, box)))
+            images.push({ ...box, bounds, reference: { sourceIndex, contentHash: hash,
+              operatorIndex, resourceName: args[0].name, ...(formPath.length ? { formPath } : {}) } });
+          else unsupported ??= "クリッピング・回転など特殊な既存画像は直接編集できません。";
+          break;
+        }
+        if (subtype !== "Form" || stream.dict.has(key("Group")) ||
+            stream.dict.has(key("Ref")) || stream.dict.has(key("OC")) || stream.dict.has(key("F")) ||
+            (stream.dict.lookupMaybe(key("FormType"), PDFNumber)?.asNumber() ?? 1) !== 1) {
+          unsupported ??= "特殊なForm XObject内の文字は直接編集できません。";
+          break;
+        }
+        if (active.has(stream) || formPath.length >= 16 || ++budget.forms > 4096)
+          throw Error("Form XObjectが循環参照しているか、複雑すぎます。");
+        const array = (name: string, count: number, fallback?: number[]) => {
+          const value = stream.dict.lookupMaybe(key(name), PDFArray);
+          if (!value && fallback) return fallback;
+          if (!value || value.size() !== count) throw Error("Form XObjectの配置が不正です。");
+          return value.asArray().map(v => number(page.doc.context.lookup(v) instanceof PDFNumber
+            ? (page.doc.context.lookup(v) as PDFNumber).asNumber() : undefined));
+        };
+        const matrix = array("Matrix", 6, identity()) as Matrix,
+          bbox = array("BBox", 4), ctm = multiply(state.ctm, matrix);
+        if (bbox[2] <= bbox[0] || bbox[3] <= bbox[1]) throw Error("Form XObjectの範囲が不正です。");
+        // A transformed rectangular BBox must remain an axis-aligned rectangle.
+        if (Math.abs(ctm[1]) > 1e-7 || Math.abs(ctm[2]) > 1e-7 || ctm[0] <= 0 || ctm[3] <= 0) {
+          unsupported ??= "回転・傾斜したForm XObject内の文字は直接編集できません。";
+          break;
+        }
+        const formBounds = { x: ctm[0] * bbox[0] + ctm[4] - base.x,
+          y: base.y + base.height - (ctm[3] * bbox[3] + ctm[5]),
+          width: ctm[0] * (bbox[2] - bbox[0]), height: ctm[3] * (bbox[3] - bbox[1]) };
+        active.add(stream);
+        const childResources = stream.dict.lookupMaybe(key("Resources"), PDFDict) ?? resources;
+        const analysis = await analyzeContent(page, sourceIndex,
+          boundedDecode(stream, 64 * 1024 * 1024 - budget.bytes), childResources,
+          { ...state, ctm, font: "", size: 0, effects: state.effects || marked.some(Boolean) }, [...formPath, operatorIndex], active, budget,
+          [...bounds, formBounds], hash + JSON.stringify({ matrix, bbox }));
+        active.delete(stream);
+        children.set(operatorIndex, { analysis, stream, name: args[0].name });
+        runs.push(...analysis.runs);
+        images.push(...analysis.images);
+        unsupported ??= analysis.unsupported;
         break;
+      }
       case "gs": {
         if (!isName(args[0])) throw Error("描画状態の指定が不正です。");
         const ext = resources
@@ -316,22 +391,30 @@ export async function analyzePage(
               ? [value]
               : undefined;
         if (!items) throw Error("文字描画の引数が不正です。");
-        const font = fonts.get(state.font);
+        const font = fonts.get(state.font), vertical = !!font?.vertical, m = multiply(state.ctm, tm);
+        const verticalBoxes: { x: number; y: number; width: number; height: number }[] = [];
+        let firstVerticalPen: number | undefined;
         let advance = 0,
           text = "",
           verified = !!font;
         try {
           for (const item of items) {
             if (typeof item === "number")
-              advance -= (item / 1000) * state.size * state.tz;
+              advance -= (item / 1000) * state.size * (vertical ? 1 : state.tz);
             else if (item instanceof Uint8Array && font)
               for (const glyph of font.glyphs(item)) {
                 text += glyph.text;
-                advance +=
-                  ((glyph.width / 1000) * state.size +
-                    state.tc +
-                    (glyph.wordSpace ? state.tw : 0)) *
-                  state.tz;
+                if (vertical) {
+                  if (!glyph.vmetric) throw Error("縦書きの原点情報がありません。");
+                  const [dy, vx, vy] = glyph.vmetric;
+                  firstVerticalPen ??= advance;
+                  const baseline = base.y + base.height - (m[5] + (advance + state.rise - vy / 1000 * state.size) * m[3]);
+                  verticalBoxes.push({ x: m[4] - vx / 1000 * state.size * state.tz * m[0] - base.x,
+                    y: baseline - state.size * m[3], width: glyph.width / 1000 * state.size * state.tz * m[0],
+                    height: state.size * m[3] * 1.25 });
+                  advance += dy / 1000 * state.size + state.tc;
+                } else advance += ((glyph.width / 1000) * state.size + state.tc +
+                    (glyph.wordSpace ? state.tw : 0)) * state.tz;
               }
             else {
               if (!(item instanceof Uint8Array))
@@ -342,14 +425,19 @@ export async function analyzePage(
         } catch {
           verified = false;
         }
-        const m = multiply(state.ctm, tm),
-          horizontal =
+        const horizontal =
             Math.abs(m[1]) < 1e-7 &&
             Math.abs(m[2]) < 1e-7 &&
             m[0] > 0 &&
             m[3] > 0;
         const size = state.size * m[3],
           baseline = base.y + base.height - (m[5] + state.rise * m[3]);
+        const extent = verticalBoxes.reduce((v, b) => ({ left: Math.min(v.left, b.x), top: Math.min(v.top, b.y),
+          right: Math.max(v.right, b.x + b.width), bottom: Math.max(v.bottom, b.y + b.height) }),
+          { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
+        const box = vertical && verticalBoxes.length ? {
+          x: extent.left, y: extent.top, width: extent.right - extent.left, height: extent.bottom - extent.top,
+        } : { x: m[4] - base.x, y: baseline - size, width: Math.max(1, Math.abs(advance * m[0])), height: size * 1.25 };
         if (
           verified &&
           positionValid &&
@@ -362,7 +450,8 @@ export async function analyzePage(
           !state.effects &&
           state.color &&
           !marked.some(Boolean) &&
-          text.trim()
+          text.trim() &&
+          bounds.every(b => containsBox(b, box))
         ) {
           runs.push({
             reference: {
@@ -370,17 +459,18 @@ export async function analyzePage(
               contentHash: hash,
               operatorIndex,
               originalText: text,
+              ...(formPath.length ? { formPath } : {}),
             },
             text,
-            x: m[4] - base.x,
-            y: baseline - size,
-            width: Math.max(1, Math.abs(advance * m[0])),
-            height: size * 1.25,
+            ...box,
+            ...(vertical ? { writingMode: "vertical" as const, flowX: m[4] - base.x,
+              flowTop: base.y + base.height - (m[5] + ((firstVerticalPen ?? 0) + state.rise) * m[3]),
+              flowEnd: base.y + base.height - (m[5] + (advance + state.rise) * m[3]) } : {}),
             baseline,
             fontSize: size,
             color: state.color,
             opacity: Math.max(0, Math.min(1, state.opacity)),
-            font: /Times/.test(font!.name)
+            font: vertical ? "japanese" : /Times/.test(font!.name)
               ? "serif"
               : /Courier/.test(font!.name)
                 ? "mono"
@@ -393,13 +483,15 @@ export async function analyzePage(
           replacements.set(operatorIndex, {
             start: op.start,
             end: op.end,
-            text: `${prefix}[${format((-advance * 1000) / (state.size * state.tz))}] TJ`,
+            // PDF.js text extraction adds Tc even to an empty numeric TJ.
+            // Temporarily clear it so both raster and text-layer positions stay exact.
+            text: `${prefix}${state.tc ? "0 Tc " : ""}[${format((-advance * 1000) / (state.size * (vertical ? 1 : state.tz)))}] TJ${state.tc ? ` ${format(state.tc)} Tc` : ""}`,
           });
         } else
           unsupported ??=
             "この文字のフォント・文字組み・クリッピングは直接編集の対象外です。";
         if (!verified) positionValid = false;
-        else tm = multiply(tm, [1, 0, 0, 1, advance, 0]);
+        else tm = multiply(tm, [1, 0, 0, 1, vertical ? 0 : advance, vertical ? advance : 0]);
         break;
       }
       default:
@@ -409,7 +501,7 @@ export async function analyzePage(
   }
   if (inside || stack.length || marked.length)
     throw Error("閉じられていない描画状態があります。");
-  return { runs, unsupported, bytes, replacements, hash };
+  return { runs, images, unsupported, bytes, replacements, hash, resources, children };
 }
 export async function inspectDirectText(
   bytes: Uint8Array,
@@ -418,7 +510,7 @@ export async function inspectDirectText(
   try {
     const doc = await PDFDocument.load(bytes),
       result = await analyzePage(doc.getPage(index), index);
-    return { runs: result.runs, unsupported: result.unsupported };
+    return { runs: result.runs, images: result.images, unsupported: result.unsupported };
   } catch (e) {
     return {
       runs: [],
@@ -426,46 +518,96 @@ export async function inspectDirectText(
     };
   }
 }
-export async function rewrittenContent(
-  page: PDFPage,
-  index: number,
-  references: SourceTextReference[],
-): Promise<Uint8Array> {
-  const analysis = await analyzePage(page, index),
-    selected = new Set<number>();
+export async function rewrittenPage(
+  page: PDFPage, index: number, references: SourceTextReference[], imageEdits: DirectImageEdit[] = [],
+): Promise<{ bytes: Uint8Array; resources: PDFDict | undefined }> {
+  const analysis = await analyzePage(page, index), selected = new Set<string>();
   for (const reference of references) {
-    const run = analysis.runs.find(
-      (r) => r.reference.operatorIndex === reference.operatorIndex,
-    );
-    if (
-      reference.sourceIndex !== index ||
-      reference.contentHash !== analysis.hash ||
-      !run ||
-      run.text !== reference.originalText ||
-      selected.has(reference.operatorIndex)
-    )
+    const id = textReferenceKey(reference);
+    const run = analysis.runs.find(r => textReferenceKey(r.reference) === id);
+    if (reference.sourceIndex !== index || !run ||
+        reference.contentHash !== run.reference.contentHash || run.text !== reference.originalText || selected.has(id))
       throw Error("直接編集する元の文字を確認できません。保存を停止しました。");
-    selected.add(reference.operatorIndex);
+    selected.add(id);
   }
-  const edits = [...selected]
-    .map((i) => analysis.replacements.get(i)!)
-    .sort((a, b) => a.start - b.start);
-  const parts: Uint8Array[] = [];
-  let previous = 0;
-  for (const edit of edits) {
-    parts.push(
-      analysis.bytes.subarray(previous, edit.start),
-      new TextEncoder().encode(edit.text),
-    );
-    previous = edit.end;
+  const images = new Map<string, { run: DirectImageRun; edit: DirectImageEdit }>();
+  for (const edit of imageEdits) {
+    const ref = edit.reference, id = textReferenceKey(ref);
+    const run = analysis.images.find(r => textReferenceKey(r.reference) === id);
+    const original = ref.originalBox;
+    if (!run || ref.sourceIndex !== index || ref.contentHash !== run.reference.contentHash ||
+        ref.resourceName !== run.reference.resourceName || selected.has(id) ||
+        !original || !["x", "y", "width", "height"].every(k => Math.abs(original[k as keyof typeof original] - run[k as keyof typeof original]) < 1e-7))
+      throw Error("直接編集する元の画像を確認できません。保存を停止しました。");
+    if (![edit.x, edit.y, edit.width, edit.height].every(n => Number.isFinite(n) && Math.abs(n) <= 1000000) ||
+        edit.width <= 0 || edit.height <= 0 || (!edit.deleted && !run.bounds.every(limit => containsBox(limit, edit))))
+      throw Error("画像の配置が不正か、元の部品の表示範囲を超えています。");
+    selected.add(id); images.set(id, { run, edit });
   }
-  // Delimit this NEW stream from wrappers/appended streams generated by pdf-lib.
-  parts.push(analysis.bytes.subarray(previous), new Uint8Array([10]));
-  const bytes = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let at = 0;
-  for (const part of parts) {
-    bytes.set(part, at);
-    at += part.length;
+  function rewrite(node: Analyzed, path: number[]): { bytes: Uint8Array; resources: PDFDict | undefined } {
+    const edits = [...node.replacements.entries()]
+      .filter(([i]) => selected.has([...path, i].join("/"))).map(([, edit]) => edit);
+    let resources = node.resources;
+    const operations = parseContent(node.bytes);
+    for (const run of node.images) {
+      if (JSON.stringify(run.reference.formPath ?? []) !== JSON.stringify(path)) continue;
+      const changed = images.get(textReferenceKey(run.reference));
+      if (!changed) continue;
+      const { edit } = changed, op = operations[run.reference.operatorIndex];
+      const correction = [edit.width / run.width, 0, 0, edit.height / run.height,
+        (edit.x - run.x) / run.width, (run.y + run.height - edit.y - edit.height) / run.height];
+      edits.push({ start: op.start, end: op.end, text: edit.deleted ? "" :
+        `q ${correction.map(format).join(" ")} cm ${key(run.reference.resourceName).toString()} Do Q` });
+      if (resources === node.resources && resources) {
+        resources = resources.clone();
+        const xobjects = resources.lookupMaybe(key("XObject"), PDFDict);
+        if (xobjects) resources.set(key("XObject"), xobjects.clone());
+      }
+    }
+    for (const [i, child] of node.children) {
+      const childPath = [...path, i], prefix = childPath.join("/") + "/";
+      if (![...selected].some(id => id.startsWith(prefix))) continue;
+      const rewritten = rewrite(child.analysis, childPath);
+      resources ??= page.doc.context.obj({});
+      if (resources === node.resources) resources = resources.clone();
+      let xobjects = resources.lookupMaybe(key("XObject"), PDFDict);
+      xobjects = xobjects?.clone() ?? page.doc.context.obj({});
+      resources.set(key("XObject"), xobjects);
+      let name = "KikkiEditedForm" + i;
+      while (xobjects.has(key(name))) name += "_";
+      // Give this invocation its own stream/resources; shared source objects stay immutable.
+      const dict = child.stream.dict.clone();
+      for (const entry of ["Filter", "DecodeParms", "Length"]) dict.delete(key(entry));
+      if (rewritten.resources) dict.set(key("Resources"), rewritten.resources);
+      const stream = PDFRawStream.of(dict, rewritten.bytes);
+      xobjects.set(key(name), page.doc.context.register(stream));
+      edits.push({ start: operations[i].start, end: operations[i].end, text: `${key(name).toString()} Do` });
+    }
+    edits.sort((a, b) => a.start - b.start);
+    const parts: Uint8Array[] = [];
+    let previous = 0;
+    for (const edit of edits) {
+      parts.push(node.bytes.subarray(previous, edit.start), new TextEncoder().encode(edit.text));
+      previous = edit.end;
+    }
+    parts.push(node.bytes.subarray(previous), new Uint8Array([10]));
+    const bytes = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const part of parts) { bytes.set(part, at); at += part.length; }
+    if (resources !== node.resources) {
+      const used = new Set(parseContent(bytes).filter(op => op.operator === "Do" && isName(op.args[0]))
+        .map(op => (op.args[0] as { name: string }).name));
+      const xobjects = resources?.lookupMaybe(key("XObject"), PDFDict);
+      for (const [name] of xobjects?.entries() ?? [])
+        if (!used.has(name.decodeText())) xobjects!.delete(name);
+    }
+    return { bytes, resources };
   }
-  return bytes;
+  return rewrite(analysis, []);
+}
+/** Byte-only helper; Form edits also install their isolated resources on this page. */
+export async function rewrittenContent(page: PDFPage, index: number, references: SourceTextReference[]) {
+  const result = await rewrittenPage(page, index, references);
+  if (result.resources) page.node.set(key("Resources"), result.resources);
+  return result.bytes;
 }

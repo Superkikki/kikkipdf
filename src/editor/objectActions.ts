@@ -12,6 +12,7 @@ export interface ObjectClipboard {
   font?: FontAsset;
 }
 export function pasteObject(pageId: string, clipboard: ObjectClipboard) {
+  if (clipboard.object.kind === "direct-image") throw Error("既存画像のコピー・複製は未対応です。");
   const id = uid(),
     image = clipboard.image ? { ...clipboard.image, id: uid() } : undefined;
   return {

@@ -9,7 +9,7 @@ import { zipSync, unzipSync, strToU8, strFromU8 } from "fflate";
 import type { BookmarkModel, DocumentModel } from "./model";
 import { inspectFont } from "../fonts/inspect";
 import { checkFontBudget, MAX_FONT_BYTES } from "../fonts/budget";
-import { directReferences } from "../direct/model";
+import { directReferences, directImageEdits } from "../direct/model";
 
 const id = z
   .string()
@@ -43,6 +43,7 @@ const object = z.object({
   id,
   kind: z.enum([
     "direct-text",
+    "direct-image",
     "text",
     "image",
     "rect",
@@ -77,6 +78,7 @@ const object = z.object({
       contentHash: z.string().regex(/^[a-f0-9]{64}$/),
       operatorIndex: z.number().int().min(0).max(200000),
       originalText: text,
+      formPath: z.array(z.number().int().min(0).max(200000)).min(1).max(16).optional(),
       additional: z
         .array(
           z.object({
@@ -84,12 +86,21 @@ const object = z.object({
             contentHash: z.string().regex(/^[a-f0-9]{64}$/),
             operatorIndex: z.number().int().min(0).max(200000),
             originalText: text,
+            formPath: z.array(z.number().int().min(0).max(200000)).min(1).max(16).optional(),
           }),
         )
         .max(200000)
         .optional(),
     })
     .optional(),
+  sourceImage: z.object({
+    sourceId: id, sourceIndex: z.number().int().min(0).max(100000),
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/), operatorIndex: z.number().int().min(0).max(200000),
+    formPath: z.array(z.number().int().min(0).max(200000)).min(1).max(16).optional(),
+    resourceName: z.string().min(1).max(1000), originalBox: z.object(box),
+    bounds: z.array(z.object(box)).max(16).optional(),
+  }).optional(),
+  imageDeleted: z.boolean().optional(),
   bold: z.boolean(),
   italic: z.boolean(),
   align: z.enum(["left", "center", "right"]),
@@ -99,6 +110,7 @@ const object = z.object({
   ocrConfidence: number.min(0).max(100).optional(),
   ocrReviewed: z.boolean().optional(),
   wrap: z.boolean().optional(),
+  writingMode: z.literal("vertical").optional(),
   lineHeight: number.min(1).max(3).optional(),
   points: z
     .array(z.object({ x: number, y: number }))
@@ -172,6 +184,7 @@ const schema = z.object({
                 text: text.optional(),
                 deleted: z.boolean().optional(),
                 link: linkTarget.optional(),
+                box: z.object(box).optional(),
               }),
             )
             .optional(),
@@ -231,7 +244,7 @@ const hash = async (bytes: Uint8Array) =>
 export async function saveProject(model: DocumentModel): Promise<Uint8Array> {
   await checkImportedFormSettings(model);
   checkFontBudget(model.fonts ?? {});
-  for (const page of model.pages) directReferences(page);
+  for (const page of model.pages) { directReferences(page); directImageEdits(page); }
   const files: Record<string, Uint8Array> = {},
     sources: Record<
       string,
@@ -416,6 +429,7 @@ export async function openProject(bytes: Uint8Array): Promise<DocumentModel> {
       throw Error("ページIDが重複しています");
     for (const page of model.pages) {
       directReferences(page);
+      directImageEdits(page);
       if (page.sourceId && !model.sources[page.sourceId])
         throw Error("参照元PDFがありません");
       for (const o of page.objects) {

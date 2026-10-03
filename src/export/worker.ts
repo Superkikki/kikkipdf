@@ -4,8 +4,8 @@ import { exportPdf, inspectForms, imagesToPdf } from "./engine";
 import type { DocumentModel } from "../state/model";
 import { splitPdfZip } from "./split";
 import { inspectFont } from "../fonts/inspect";
-import { inspectDirectText, rewrittenContent } from "../direct/content";
-import { directReferences } from "../direct/model";
+import { inspectDirectText, rewrittenPage } from "../direct/content";
+import { directReferences, directImageEdits } from "../direct/model";
 import { PDFDocument, PDFName } from "pdf-lib";
 import type { Source, PageModel } from "../state/model";
 import {
@@ -46,17 +46,13 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     else if (req.type === "directPreview") {
       const input = await PDFDocument.load(req.source.bytes),
         source = input.getPage(req.page.sourceIndex);
+      if (req.page.sourceId !== req.source.id) throw Error("画像・文字の参照元が一致しません。");
       const refs = directReferences(req.page);
       if (refs.some((r) => r.sourceId !== req.source.id))
         throw Error("文字の参照元が一致しません。");
-      source.node.set(
-        PDFName.of("Contents"),
-        input.context.register(
-          input.context.flateStream(
-            await rewrittenContent(source, req.page.sourceIndex, refs),
-          ),
-        ),
-      );
+      const rewritten = await rewrittenPage(source, req.page.sourceIndex, refs, directImageEdits(req.page));
+      if (rewritten.resources) source.node.set(PDFName.of("Resources"), rewritten.resources);
+      source.node.set(PDFName.of("Contents"), input.context.register(input.context.flateStream(rewritten.bytes)));
       const output = await PDFDocument.create();
       const [page] = await output.copyPages(input, [req.page.sourceIndex]);
       output.addPage(page);

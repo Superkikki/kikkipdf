@@ -1,6 +1,7 @@
-import type { SourceTextReference } from "../direct/model";
+import type { SourceTextReference, SourceImageReference } from "../direct/model";
 export type ObjectKind =
   | "direct-text"
+  | "direct-image"
   | "text"
   | "image"
   | "rect"
@@ -23,6 +24,8 @@ export interface AnnotationEdit {
   text?: string;
   deleted?: boolean;
   link?: LinkTarget;
+  /** Link rectangle relative to the original CropBox, before page rotation. */
+  box?: Box;
 }
 export interface Point {
   x: number;
@@ -44,6 +47,8 @@ export interface EditObject extends Box {
   font: "sans" | "serif" | "mono" | "japanese" | "custom";
   fontId?: string;
   sourceText?: SourceTextReference;
+  sourceImage?: SourceImageReference;
+  imageDeleted?: boolean;
   bold: boolean;
   italic: boolean;
   align: "left" | "center" | "right";
@@ -55,6 +60,7 @@ export interface EditObject extends Box {
   ocrReviewed?: boolean;
   wrap?: boolean;
   lineHeight?: number;
+  writingMode?: "vertical";
 }
 export interface PageModel {
   id: string;

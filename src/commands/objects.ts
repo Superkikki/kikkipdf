@@ -5,6 +5,15 @@ export function patchObject(
   patch: Partial<EditObject>,
 ): EditObject {
   const result = { ...object, ...patch };
+  if (object.kind === "direct-image" && object.sourceImage?.bounds?.length) {
+    const bounds = object.sourceImage.bounds;
+    const left = Math.max(...bounds.map(b => b.x)), top = Math.max(...bounds.map(b => b.y));
+    const right = Math.min(...bounds.map(b => b.x + b.width)), bottom = Math.min(...bounds.map(b => b.y + b.height));
+    result.width = Math.min(Math.max(1, result.width), right - left);
+    result.height = Math.min(Math.max(1, result.height), bottom - top);
+    result.x = Math.max(left, Math.min(right - result.width, result.x));
+    result.y = Math.max(top, Math.min(bottom - result.height, result.y));
+  }
   if (
     object.kind === "ocr" &&
     patch.text !== undefined &&

@@ -1,3 +1,4 @@
+import type { VerticalCell, VerticalGlyph } from "./vertical";
 import type { EditObject } from "../state/model";
 
 export type TextStyle = Pick<
@@ -11,13 +12,14 @@ export type TextStyle = Pick<
   | "italic"
   | "wrap"
   | "lineHeight"
->;
+> & { height?: number; writingMode?: "vertical" };
 export interface TextLine {
   text: string;
   width: number;
   baseline: number;
 }
 export interface TextLayout {
+  vertical?: { cells: VerticalCell[]; glyphs: VerticalGlyph[]; unitsPerEm: number };
   lines: TextLine[];
   height: number;
   width: number;
