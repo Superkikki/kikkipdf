@@ -4,7 +4,7 @@ Tauri 2 / React / TypeScript / Vite / Rust で作った、ローカル処理のP
 
 **バージョン0.9.3は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
 
-このワークスペースのWindows配布物は [0.9.4インストーラー](artifacts/windows/Kikki%20PDF_0.9.4_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki%20PDF_0.9.4_x64-setup.zip) です。チェックサムは隣の `SHA256SUMS.txt` に記録しています。配布物はGit管理に含めません。
+このワークスペースのWindows配布物は [0.9.4インストーラー](artifacts/windows/Kikki%20PDF_0.9.4_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki%20PDF_0.9.4_x64-setup.zip) です。チェックサムは隣の `SHA256SUMS-0.9.4.txt` に記録しています。0.9.4以降のWindows配布物もGit管理に含めます。
 
 ## セットアップ（Windows 11）
 
