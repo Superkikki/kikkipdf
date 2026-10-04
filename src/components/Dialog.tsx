@@ -5,11 +5,13 @@ export function Dialog({
   children,
   onClose,
   wide = false,
+  className = "",
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -20,7 +22,7 @@ export function Dialog({
     <dialog
       ref={ref}
       aria-labelledby={titleId}
-      className={wide ? "dialog wide" : "dialog"}
+      className={`${wide ? "dialog wide" : "dialog"} ${className}`.trim()}
       onCancel={(e) => {
         e.preventDefault();
         onClose();

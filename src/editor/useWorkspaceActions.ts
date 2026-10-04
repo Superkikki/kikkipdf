@@ -101,6 +101,7 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
           "print",
           "batchImages",
           "textExport",
+          "compare",
           "extract",
           "split",
           "splitZip",
@@ -115,6 +116,9 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
         );
       }
       switch (a) {
+        case "compare":
+          setModal("compare");
+          return;
         case "pageLabels":
           setModal("pageLabels");
           return;

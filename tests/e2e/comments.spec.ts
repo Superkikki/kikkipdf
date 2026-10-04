@@ -102,3 +102,60 @@ test("paginates large comment lists in batches of 100", async ({ page }) => {
   await expect(page.locator(".comment-card")).toHaveCount(1);
   await expect(page.locator(".comment-card").first()).toContainText("Comment 205");
 });
+
+test("exports every comment and the filtered live result without changing history", async ({ page }, info) => {
+  const pdf = await PDFDocument.create();
+  const sourcePage = pdf.addPage();
+  for (let i = 0; i < 105; i++) {
+    const ref = pdf.context.register(pdf.context.obj({
+      Type: "Annot", Subtype: "Text", Rect: [10, 10, 30, 30],
+      Contents: PDFHexString.fromText(`Comment ${i + 1}`),
+      T: PDFHexString.fromText(i === 104 ? "Special" : "Reviewer"), P: sourcePage.ref,
+    }));
+    sourcePage.node.addAnnot(ref);
+  }
+  await page.goto("/");
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "PDFを開く", exact: true }).click();
+  await (await chooser).setFiles({ name: "csv-comments.pdf", mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()) });
+  await page.getByRole("button", { name: "コメント", exact: true }).click();
+  await expect(page.locator(".comment-card")).toHaveCount(100);
+
+  const firstCard = page.locator(".comment-card").filter({ hasText: "Comment 1" }).first();
+  await firstCard.click();
+  await page.getByLabel("コメント内容").fill("Edited live comment");
+  const secondCard = page.locator(".comment-card").filter({ hasText: "Comment 2" }).first();
+  await secondCard.click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "コメントを削除" }).click();
+
+  const allDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "全件をCSV保存" }).click();
+  const allPath = info.outputPath("comments-all.csv");
+  await (await allDownload).saveAs(allPath);
+  const allBytes = await readFile(allPath);
+  expect([...allBytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+  const allCsv = allBytes.toString("utf8");
+  expect(allCsv).toContain('"ページ","作成者","レビュー状態","コメント","区分"');
+  expect(allCsv).toContain('"1","Reviewer","未確認","Edited live comment","既存"');
+  expect(allCsv).not.toContain('"1","Reviewer","未確認","Comment 2","既存"');
+  expect(allCsv.match(/\r\n/g)).toHaveLength(105);
+
+  await page.getByLabel("コメントの作成者で絞り込み").selectOption({ label: "Special" });
+  const filteredDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "絞り込み結果をCSV保存" }).click();
+  const filteredPath = info.outputPath("comments-filtered.csv");
+  await (await filteredDownload).saveAs(filteredPath);
+  const filteredBytes = await readFile(filteredPath);
+  expect([...filteredBytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+  expect(filteredBytes.toString("utf8")).toBe('\uFEFF"ページ","作成者","レビュー状態","コメント","区分"\r\n"1","Special","未確認","Comment 105","既存"\r\n');
+  await page.screenshot({ path: info.outputPath("comments-csv-buttons.png") });
+
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await page.getByLabel("コメントの作成者で絞り込み").selectOption({ label: "Reviewer" });
+  await expect(page.getByText("104 / 105 件", { exact: true })).toBeVisible();
+  await page.locator(".comment-card").filter({ hasText: "Edited live comment" }).click();
+  await expect(page.getByLabel("コメント内容")).toHaveValue("Edited live comment");
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await expect(page.getByLabel("コメント内容")).toHaveValue("Comment 1");
+});

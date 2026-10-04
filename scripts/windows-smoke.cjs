@@ -9,11 +9,20 @@ const {
   PDFString,
   PDFRawStream,
   decodePDFRawStream,
+  rgb,
 } = require("pdf-lib");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
+async function pickNativeFile(filePath) {
+  const selection = promisify(execFile)("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+    path.join(__dirname, "windows-pick-test-file.ps1"), "-TargetProcessId", process.env.KIKKI_SMOKE_PROCESS,
+    "-FilePath", filePath], { timeout: 30000 });
+  const result = selection.then(value => ({ value }), error => ({ error }));
+  const picked = await result;
+  if (picked.error) throw picked.error;
+}
 let testBrowser;
 async function verifyObjectContext(page, root) {
   await page.getByRole("button", { name: "編集", exact: true }).click();
@@ -826,6 +835,61 @@ async function verifyObjectContext(page, root) {
   await page.screenshot({
     path: path.join(root, ".tools", "windows-native-advanced.png"),
   });
+  const dirtyBeforeComparison = await page.locator(".unsaved-dot").count();
+  const comparisonTarget = path.join(process.env.KIKKI_SMOKE_DIR, "comparison-target.pdf");
+  const targetPdf = await PDFDocument.load(await fs.readFile(fixture));
+  targetPdf.getPage(0).drawRectangle({ x: 42, y: 48, width: 32, height: 26, color: rgb(0.95, 0.05, 0.45) });
+  await fs.writeFile(comparisonTarget, await targetPdf.save());
+  await page.getByRole("button", { name: "ツール", exact: true }).click();
+  await page.getByRole("button", { name: "PDF比較", exact: true }).click();
+  const comparisonPicker = pickNativeFile(comparisonTarget);
+  await page.getByRole("button", { name: "比較するPDFを選ぶ", exact: true }).click();
+  await comparisonPicker;
+  const comparison = page.getByRole("dialog", { name: "PDF比較" });
+  await expect(comparison.getByRole("button", { name: "比較を実行", exact: true })).toBeEnabled();
+  await comparison.getByRole("button", { name: "比較を実行", exact: true }).click();
+  await expect(comparison.getByRole("status")).toContainText("比較完了：3ページ中", { timeout: 60000 });
+  await expect(comparison.getByRole("navigation", { name: "比較ページ" }).getByRole("button")).toHaveCount(3);
+  await expect(comparison.getByLabel("差分", { exact: true })).toBeVisible();
+  await expect.poll(() => comparison.getByLabel("差分", { exact: true }).evaluate(canvas => canvas.width)).toBeGreaterThan(0);
+  const comparisonReport = path.join(process.env.KIKKI_SMOKE_DIR, "comparison-report.json");
+  await fs.rm(comparisonReport, { force: true });
+  const reportPicker = pickNativeFile(comparisonReport);
+  await comparison.getByRole("button", { name: "比較レポートを保存", exact: true }).click();
+  await reportPicker;
+  await expect.poll(() => fs.stat(comparisonReport).then(stat => stat.size).catch(() => 0), { timeout: 30000 }).toBeGreaterThan(0);
+  const report = JSON.parse(await fs.readFile(comparisonReport, "utf8"));
+  if (report.format !== "kikki-pdf-visual-comparison" || report.pages.length !== 3 || !report.pages.some(item => item.status === "changed"))
+    throw Error("Native PDF comparison report did not contain the expected three-page difference");
+  await comparison.getByTitle("閉じる").click();
+  await expect(comparison).toHaveCount(0);
+  if (await page.locator(".unsaved-dot").count() !== dirtyBeforeComparison)
+    throw Error("Opening and closing PDF comparison changed document dirty state");
+
+  await page.getByRole("button", { name: "注釈", exact: true }).click();
+  await page.getByRole("button", { name: "付箋", exact: true }).click();
+  const notePage = await page.locator(".viewer-scroll .page-view").first().boundingBox();
+  if (!notePage) throw Error("Missing page for comment CSV smoke test");
+  await page.mouse.click(notePage.x + 240, notePage.y + 310);
+  await page.getByLabel("テキスト内容", { exact: true }).fill("Native CSV note");
+  await page.getByRole("button", { name: "コメント", exact: true }).click();
+  const comments = page.locator(".comment-card");
+  await expect(comments.filter({ hasText: "Native CSV note" })).toHaveCount(1);
+  await comments.filter({ hasText: "Native CSV note" }).click();
+  await page.getByRole("textbox", { name: "コメントの作成者", exact: true }).fill("Smoke Reviewer");
+  await page.getByLabel("コメントのレビュー状態", { exact: true }).selectOption("Completed");
+  const csvPath = path.join(process.env.KIKKI_SMOKE_DIR, "comments-native.csv");
+  await fs.rm(csvPath, { force: true });
+  const csvPicker = pickNativeFile(csvPath);
+  await page.getByRole("button", { name: "全件をCSV保存", exact: true }).click();
+  await csvPicker;
+  await expect.poll(() => fs.stat(csvPath).then(stat => stat.size).catch(() => 0), { timeout: 30000 }).toBeGreaterThan(0);
+  const csvBytes = await fs.readFile(csvPath);
+  if (csvBytes.subarray(0, 3).toString("hex") !== "efbbbf") throw Error("Native CSV export is missing its UTF-8 BOM");
+  const csv = csvBytes.toString("utf8");
+  if (!csv.includes('"ページ","作成者","レビュー状態","コメント","区分"') ||
+    !csv.includes('"1","Smoke Reviewer","完了","Native CSV note","追加"'))
+    throw Error("Native CSV export did not include the edited note and Japanese columns");
   console.log(
     JSON.stringify({
       native: true,
@@ -847,6 +911,8 @@ async function verifyObjectContext(page, root) {
       localFontPickerAndEmbedding: true,
       directSourceGlyphRemoval: true,
       objectContextDeletion: true,
+      nativePdfComparisonReport: true,
+      nativeCommentCsvExport: true,
       elapsedSeconds: Math.round((Date.now() - started) / 1000),
       errors,
     }),

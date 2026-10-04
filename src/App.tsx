@@ -23,6 +23,7 @@ import { useDocumentSearch } from "./viewer/useDocumentSearch";
 import { PageLabelEditor } from "./pages/PageLabelEditor";
 import { PageLabelNavigation } from "./pages/PageLabelNavigation";
 import { Dialog } from "./components/Dialog";
+import { ComparisonPanel } from "./compare/ComparisonPanel";
 import { FormPanel } from "./forms/FormPanel";
 import { LinkPanel } from "./links/LinkPanel";
 import { Signature } from "./components/Signature";
@@ -304,6 +305,11 @@ export function App() {
         </div>
       )}
       {w.dialog}
+      {w.modal === "compare" && doc && (
+        <Dialog title="PDF比較" wide className="comparison-dialog" onClose={() => w.setModal(null)}>
+          <ComparisonPanel key={doc.id} model={doc} />
+        </Dialog>
+      )}
       {w.modal === "pageLabels" && doc && (
         <Dialog title="ページラベル" onClose={() => w.setModal(null)}>
           <PageLabelEditor model={doc} active={w.active} close={() => w.setModal(null)} />

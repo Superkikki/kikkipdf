@@ -39,6 +39,7 @@ import {
 import { APP_NAME } from "../config";
 import type { Tool } from "../viewer/PageView";
 export type Action =
+  | "compare"
   | "pageLabels"
   | "pageBatch"
   | "splitZip"
@@ -390,6 +391,7 @@ export function Toolbar({
               <div className="tool-group">
                 {[
                   { id: "ocr", label: "OCR", icon: ScanText },
+                  { id: "compare", label: "PDF比較", icon: FileText },
                   { id: "forms", label: "フォーム入力", icon: FormInput },
                   { id: "links", label: "リンク管理", icon: Link2 },
                   { id: "decorate", label: "ページ装飾", icon: Stamp },

@@ -4,10 +4,14 @@ import { documentStore } from "../state/store";
 import { deleteObject, updateObject } from "../commands/document";
 import { editAnnotation } from "./commands";
 import { buildComments, filterComments, readComments, reviewStatuses, type ImportedComment } from "./comments";
+import { commentsCsv } from "./commentCsv";
+import { saveBytes } from "../platform/files";
 
 export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id: string) => void }) {
   const [loaded, setLoaded] = useState<{ sources: DocumentModel["sources"]; comments: ImportedComment[] }>();
   const [error, setError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState("");
   const [query, setQuery] = useState("");
   const [author, setAuthor] = useState("");
@@ -24,7 +28,7 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
     return () => { live = false; };
   }, [sources]);
   useEffect(() => {
-    setSelected(""); setQuery(""); setAuthor(""); setStatus(""); setPageId(""); setOffset(0);
+    setSelected(""); setQuery(""); setAuthor(""); setStatus(""); setPageId(""); setOffset(0); setSaveError("");
   }, [model.id]);
   const comments = buildComments(model, loaded?.sources === sources ? loaded.comments : []);
   const filtered = filterComments(comments, { query, author, status, pageId });
@@ -36,6 +40,16 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
     documentStore.execute(current.added ? updateObject(current.pageId, current.id, patch) : editAnnotation(current.pageId, current.id, patch));
   }
   function resetList() { setSelected(""); setOffset(0); }
+  async function saveComments(filteredOnly: boolean) {
+    setSaveError(""); setSaving(true);
+    try {
+      const rows = filteredOnly ? filtered : comments;
+      await saveBytes(commentsCsv(rows), `${model.name.replace(/\.(pdf|kpdf)$/i, "")}-コメント${filteredOnly ? "-絞り込み" : ""}.csv`);
+    } catch (reason) {
+      setSaveError(reason instanceof Error ? reason.message : "コメント一覧を保存できませんでした。");
+    } finally { setSaving(false); }
+  }
+  const cannotExport = loaded?.sources !== sources || !!error || saving;
   return <>
     <div className="comment-filters">
       <label>検索<input aria-label="コメントを検索" type="search" value={query}
@@ -60,6 +74,11 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
         setQuery(""); setAuthor(""); setStatus(""); setPageId(""); resetList();
       }}>絞り込みを解除</button>}
     </div>
+    <div className="comment-export">
+      <button disabled={cannotExport || !comments.length} onClick={() => void saveComments(false)}>全件をCSV保存</button>
+      <button disabled={cannotExport || !filtered.length} onClick={() => void saveComments(true)}>絞り込み結果をCSV保存</button>
+    </div>
+    {saveError && <p className="warning" role="alert">{saveError}</p>}
     {loaded?.sources !== sources && !error && <p className="empty-panel" role="status">コメントを読み込み中…</p>}
     {filtered.slice(start, start + 100).map((comment) => <button
       className={`comment-card ${selected === comment.key ? "active" : ""}`} key={comment.key}

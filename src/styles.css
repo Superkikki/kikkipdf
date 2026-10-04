@@ -482,6 +482,8 @@ kbd {
 .layer-heading { font-weight: 600; margin: 8px 0; overflow-wrap: anywhere; }
 .comment-filters { padding: 12px; display: grid; gap: 8px; font-size: 12px; }
 .comment-filters label { gap: 4px; }
+.comment-export { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0; }
+.comment-export button { font-size: 11px; border-color: var(--border); }
 .comment-filters select, .comment-editor select { min-width: 0; width: 100%; }
 .comment-filters p { margin: 0; color: var(--muted); }
 .comment-state { display: block; margin-top: 4px; color: var(--accent); }
@@ -1755,3 +1757,31 @@ progress {
 .bookmark-toggle, .bookmark-toggle-spacer { width: 24px; flex: 0 0 24px; }
 .bookmark-toggle { padding: 4px; border: 0; }
 .bookmark-search { margin-top: 12px; }
+.dialog.comparison-dialog {
+  width: 1120px;
+  max-width: 95vw;
+  max-height: 92vh;
+}
+.comparison-dialog .dialog-body { max-height: 78vh; }
+.comparison-panel > p:first-child { margin-top: 0; }
+.comparison-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.comparison-controls > span { max-width: 260px; overflow-wrap: anywhere; }
+.comparison-controls label { display: flex; flex-direction: row; align-items: center; gap: 5px; margin-bottom: 0; font-size: 12px; }
+.comparison-hint { font-size: 12px; color: var(--muted, #687080); line-height: 1.6; }
+.comparison-error { color: #c32846; }
+.comparison-layout { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 14px; }
+.comparison-layout nav { display: flex; flex-direction: column; gap: 5px; max-height: 440px; overflow: auto; }
+.comparison-layout nav button { justify-content: flex-start; text-align: left; white-space: normal; overflow-wrap: anywhere; flex-shrink: 0; padding: 9px; line-height: 1.5; }
+.comparison-layout nav button[aria-pressed="true"] { background: var(--tint); border-color: var(--accent); }
+.comparison-preview { min-width: 0; }
+.comparison-preview > p:first-child { margin-top: 0; }
+.comparison-images { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.comparison-images figure { margin: 0; min-width: 0; }
+.comparison-images figcaption { font-size: 12px; margin-bottom: 6px; }
+.comparison-images canvas { width: 100%; height: auto; display: block; border: 1px solid #d4d7e1; background: white; }
+@media (max-width: 750px) {
+  .comparison-layout { grid-template-columns: 1fr; }
+  .comparison-layout nav { flex-direction: row; max-height: 100px; flex-wrap: wrap; }
+  .comparison-images { grid-template-columns: 1fr; }
+  .comparison-images canvas { max-width: 380px; }
+}
