@@ -80,6 +80,8 @@ test("direct edit removes source glyphs without covering backgrounds, preserving
     "既存テキストを直接編集",
   );
   await expect(original(page)).toHaveCount(0);
+  // Leave the inline input before exercising document Undo, rather than typing Undo.
+  await page.locator(".page-caption").click();
   await page.keyboard.press("Control+z");
   await expect(original(page)).toHaveCount(1);
   await page.keyboard.press("Control+y");
@@ -371,3 +373,51 @@ test("edits only the selected shared Form invocation, preserving backgrounds, ne
   expect(secondInspection.runs.some(r => r.text === "Editable original")).toBe(false);
   expect(secondInspection.runs.filter(r => ["Form changed", "Other form changed"].includes(r.text))).toHaveLength(2);
 });
+
+for (const sample of [
+  { name: "Japanese glyph name", base: StandardFonts.Helvetica, code: "80", encoding: { Differences: [128, "uni65E5"] }, text: "日", width: 1000 },
+  { name: "accented custom encoding", base: StandardFonts.Helvetica, code: "80", encoding: { BaseEncoding: "WinAnsiEncoding", Differences: [128, "Aacute"] }, text: "Á" },
+  { name: "StandardEncoding ligature", base: StandardFonts.Helvetica, code: "AE", encoding: "StandardEncoding", text: "ﬁ" },
+  { name: "Symbol glyph", base: StandardFonts.Symbol, code: "41", encoding: undefined, text: "Α" },
+  { name: "Dingbats glyph", base: StandardFonts.ZapfDingbats, code: "21", encoding: undefined, text: "✁", extractedText: "!" },
+]) {
+  test(`one click edits ${sample.name} without ToUnicode and preserves its neighbour on save`, async ({ page }) => {
+    const pdf = await PDFDocument.create();
+    const sheet = pdf.addPage([420, 595]);
+    const font = await pdf.embedFont(sample.base);
+    const neighbourFont = await pdf.embedFont(StandardFonts.TimesRoman);
+    await pdf.flush();
+    const dict = pdf.context.lookup(font.ref, PDFDict);
+    if (sample.encoding) dict.set(PDFName.of("Encoding"), pdf.context.obj(sample.encoding));
+    else dict.delete(PDFName.of("Encoding"));
+    if ("width" in sample) {
+      dict.set(PDFName.of("FirstChar"), pdf.context.obj(128));
+      dict.set(PDFName.of("LastChar"), pdf.context.obj(128));
+      dict.set(PDFName.of("Widths"), pdf.context.obj([sample.width]));
+    }
+    sheet.node.set(PDFName.of("Resources"), pdf.context.obj({ Font: { F1: font.ref, F2: neighbourFont.ref } }));
+    sheet.node.set(PDFName.of("Contents"), pdf.context.register(pdf.context.flateStream(
+      `BT /F1 20 Tf 1 0 0 1 40 520 Tm <${sample.code}> Tj /F2 20 Tf ( Neighbour) Tj ET`,
+    )));
+    const bytes = await pdf.save();
+    const before = await inspectDirectText(bytes, 0);
+    expect(before.runs.map(r => r.text)).toEqual([sample.text, " Neighbour"]);
+    await page.goto("/");
+    await open(page, Buffer.from(bytes));
+    const span = page.locator(".viewer-scroll .textLayer span").filter({ hasText: ("extractedText" in sample ? sample.extractedText! : sample.text).normalize("NFKC") }).first();
+    await expect(span).toBeVisible();
+    await span.click();
+    const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
+    await expect(input).toBeFocused();
+    if ("extractedText" in sample) await expect(input).toHaveValue(sample.text);
+    await input.fill("Changed");
+    await input.press("Enter");
+    const download = page.waitForEvent("download");
+    await page.keyboard.press("Control+s");
+    const output = await readFile((await (await download).path())!);
+    const after = await inspectDirectText(output, 0);
+    expect(after.runs.some(r => r.text === "Changed")).toBe(true);
+    expect(after.runs.some(r => r.text.includes(sample.text))).toBe(false);
+    expect(after.runs.find(r => r.text === " Neighbour")!.x).toBeCloseTo(before.runs[1].x, 7);
+  });
+}

@@ -462,10 +462,37 @@ describe("verified simple font encodings", () => {
     expect(result.runs[1].x).toBe(50);
   });
 
+  it("edits Japanese glyph names without ToUnicode and preserves neighbouring text", async () => {
+    const d = await encodedFixture({
+      type: "TrueType",
+      encoding: { Differences: [128, "uni65E5", "uni672C"] }, widths: [1000, 750],
+    });
+    const result = await inspect(d);
+    expect(result.runs.map(r => r.text)).toEqual(["日", "本"]);
+    const output = await inspectDirectText(await exportPdf(await edit(d, "日")), 0);
+    expect(output.runs.find(r => r.text === "本")!.x).toBeCloseTo(result.runs[1].x, 7);
+    expect(output.runs.some(r => r.text === "日")).toBe(false);
+    expect(output.runs.some(r => r.text === "Replaced")).toBe(true);
+  });
+
+  it("uses standard font glyph metrics for ligatures and custom accented encodings", async () => {
+    for (const options of [
+      { encoding: "StandardEncoding", commands: "BT /F1 20 Tf 1 0 0 1 40 300 Tm <AE> Tj (Z) Tj ET", text: "ﬁ" },
+      { encoding: { Differences: [128, "Aacute"] }, commands: "BT /F1 20 Tf 1 0 0 1 40 300 Tm <80> Tj (Z) Tj ET", text: "Á" },
+    ]) {
+      const d = await encodedFixture(options);
+      const result = await inspect(d);
+      expect(result.runs.map(r => r.text)).toEqual([options.text, "Z"]);
+      const output = await inspectDirectText(await exportPdf(await edit(d, options.text)), 0);
+      expect(output.runs.find(r => r.text === "Z")!.x).toBeCloseTo(result.runs[1].x, 7);
+      expect(output.runs.some(r => r.text === options.text)).toBe(false);
+    }
+  });
+
   it("rejects unknown or ambiguous Differences instead of assuming WinAnsi", async () => {
     for (const params of [
-      { encoding: { Differences: [128, "A", "B"] }, widths: [600, 600] },
-      { encoding: { Differences: [128, "A", "B"] }, unicode: "2 beginbfchar <80> <0041> <81> <0042> endbfchar" },
+      { encoding: { Differences: [128, "UnknownGlyph", "B"] }, widths: [600, 600] },
+      { encoding: "UnknownEncoding", widths: [600, 600] },
       { encoding: { Differences: ["A"] }, unicode: "2 beginbfchar <80> <0041> <81> <0042> endbfchar", widths: [600, 600] },
       { encoding: { Differences: [256, "A"] }, unicode: "2 beginbfchar <80> <0041> <81> <0042> endbfchar", widths: [600, 600] },
       { encoding: { Differences: [128, "A", 128, "B"] }, unicode: "2 beginbfchar <80> <0041> <81> <0042> endbfchar", widths: [600, 600] },

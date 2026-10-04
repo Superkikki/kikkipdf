@@ -19,11 +19,11 @@ export function directTextObject(
         run.baseline >= box.y - run.fontSize * 0.3 && run.baseline <= box.y + box.height + run.fontSize * 0.3;
     if (!matches) continue;
     const group = [run];
-    let joined = normalized(run.text);
+    let joined = normalized(run.extractedText ?? run.text), actual = normalized(run.text);
     for (
       let j = i + 1;
-      joined !== value &&
-      value.startsWith(joined) &&
+      joined !== value && actual !== value &&
+      (value.startsWith(joined) || value.startsWith(actual)) &&
       j < inspection.runs.length;
       j++
     ) {
@@ -43,9 +43,10 @@ export function directTextObject(
       )
         break;
       group.push(next);
-      joined += normalized(next.text);
+      joined += normalized(next.extractedText ?? next.text);
+      actual += normalized(next.text);
     }
-    if (joined === value) candidates.push(group);
+    if (joined === value || actual === value) candidates.push(group);
   }
   if (candidates.length !== 1 || !page.sourceId)
     throw Error(
@@ -65,7 +66,7 @@ export function directTextObject(
     ...(run.writingMode ? { writingMode: run.writingMode } : {}),
     width: run.writingMode === "vertical" ? run.fontSize : Math.max(1, box.width),
     height: run.writingMode === "vertical" ? Math.max(run.fontSize, (group.at(-1)!.flowEnd ?? 0) - run.flowTop!) : run.height,
-    text: selectedText,
+    text: group.some(r => r.extractedText !== undefined) ? group.map(r => r.text).join("") : selectedText,
     fontSize: run.fontSize,
     font: run.font,
     bold: run.writingMode === "vertical" ? false : run.bold,

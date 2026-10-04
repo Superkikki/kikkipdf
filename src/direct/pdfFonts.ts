@@ -1,7 +1,6 @@
 import {
   PDFArray,
   PDFDict,
-  PDFDocument,
   PDFName,
   PDFNumber,
   PDFRawStream,
@@ -9,6 +8,7 @@ import {
   decodePDFRawStream,
 } from "pdf-lib";
 import { unicodeMap } from "./cmap";
+import { glyphUnicode, fontEncoding, standardWidths } from "./simpleFonts";
 const key = (name: string) => PDFName.of(name);
 export function boundedDecode(
   stream: PDFRawStream,
@@ -30,7 +30,7 @@ export interface SourceFont {
   vertical?: boolean;
   glyphs(
     bytes: Uint8Array,
-  ): { code: number; width: number; text: string; wordSpace: boolean; vmetric?: [number, number, number] }[];
+  ): { code: number; width: number; text: string; extractedText?: string; wordSpace: boolean; vmetric?: [number, number, number] }[];
 }
 /** Read the ORIGINAL font widths, never substitute them when retaining text advance. */
 export async function sourceFonts(
@@ -38,8 +38,7 @@ export async function sourceFonts(
 ): Promise<Map<string, SourceFont>> {
   const entries = resources?.lookupMaybe(key("Font"), PDFDict)?.entries() ?? [];
   if (entries.length > 4096) throw Error("ページのフォント数が多すぎます。");
-  const result = new Map<string, SourceFont>(),
-    metrics = await PDFDocument.create();
+  const result = new Map<string, SourceFont>();
   for (const [resourceName, ref] of entries) {
     try {
       const dict = resources!.context.lookup(ref, PDFDict);
@@ -168,11 +167,14 @@ export async function sourceFonts(
         const differences = encoding instanceof PDFDict
           ? encoding.lookup(key("Differences"))
           : undefined;
-        // Custom encodings need both authoritative Unicode and original widths.
-        // A glyph name or BaseFont name alone is never enough to infer either.
-        const custom = !!differences || !!encodingName &&
-          !["WinAnsiEncoding", "StandardEncoding", "MacRomanEncoding"].includes(encodingName);
-        if (custom && (!map || !widths)) continue;
+        const builtin = type === "Type1" && !dict.has(key("FontDescriptor")) &&
+          Object.values(StandardFonts).includes(name as StandardFonts)
+          ? standardWidths(name) : undefined;
+        const base = fontEncoding(encodingName ?? (builtin
+          ? name === "Symbol" ? "SymbolSetEncoding" : name === "ZapfDingbats"
+            ? "ZapfDingbatsEncoding" : "StandardEncoding" : ""));
+        if (encodingName && !base && !map) continue;
+        const glyphNames = base ? [...base] : Array<string>(256).fill("");
         if (differences) {
           if (!(differences instanceof PDFArray) || differences.size() > 512)
             continue;
@@ -185,7 +187,8 @@ export async function sourceFonts(
                 throw Error("独自エンコーディングの文字コードが不正です。");
             } else if (entry instanceof PDFName && code !== undefined && code <= 255) {
               if (used.has(code)) throw Error("独自エンコーディングの文字コードが重複しています。");
-              used.add(code++);
+              used.add(code);
+              glyphNames[code++] = entry.decodeText();
             } else throw Error("独自エンコーディングの形式が不正です。");
           }
         }
@@ -196,46 +199,29 @@ export async function sourceFonts(
           (widths && first + widths.size() > 256)
         )
           continue;
-        const builtin =
-          type === "Type1" &&
-          !dict.has(key("FontDescriptor")) &&
-          Object.values(StandardFonts).includes(name as StandardFonts) &&
-          !["Symbol", "ZapfDingbats"].includes(name)
-            ? await metrics.embedFont(name as StandardFonts)
-            : undefined;
         if (!widths && !builtin) continue;
-        const requiresUnicode = custom || !encodingName && !builtin;
-        if (requiresUnicode && !map) continue;
-        const decoder = new TextDecoder(
-          encodingName === "MacRomanEncoding" ? "macintosh" : "windows-1252",
-        );
+        if (!base && !differences && !map) continue;
         result.set(resourceName.decodeText(), {
           name,
           glyphs(bytes) {
             return Array.from(bytes, (code) => {
-              if (requiresUnicode && !map?.has(code))
-                throw Error("独自エンコーディングの文字に対応するUnicodeがありません。");
-              if (
-                !custom &&
-                !["WinAnsiEncoding", "MacRomanEncoding"].includes(encodingName ?? "") &&
-                code > 126
-                && (!map?.has(code) || !widths)
-              )
-                throw Error("標準エンコーディングの非ASCII文字は未対応です。");
-              const standard = !custom &&
-                (encodingName === "StandardEncoding" || !encodingName);
-              const glyphText = standard && (code === 39 || code === 96)
-                ? code === 39 ? "\u2019" : "\u2018"
-                : decoder.decode(new Uint8Array([code]));
-              const text = map?.get(code) ?? glyphText;
+              const glyphName = glyphNames[code];
+              const text = map ? map.get(code) : glyphUnicode(glyphName);
+              if (text === undefined || !text)
+                throw Error("文字コードに対応するUnicodeを検証できません。");
               if (widths && (code < first || code - first >= widths.size()))
                 throw Error("文字コードに対応する幅情報がありません。");
               const width = widths
                 ? widths.lookup(code - first, PDFNumber).asNumber()
-                : builtin!.widthOfTextAtSize(glyphText, 1000);
+                : builtin && Object.hasOwn(builtin, glyphName) ? builtin[glyphName] : NaN;
               if (!Number.isFinite(width) || width < 0 || width > 100000)
                 throw Error("文字幅が不正です。");
-              return { code, text, width, wordSpace: code === 32 };
+              return { code, text, width, wordSpace: code === 32,
+                // PDF.js falls back to the byte value for unnamed Dingbats
+                // Unicode extraction, even though the rendered glyph is known.
+                ...(!map && name === "ZapfDingbats" && /^a[0-9]+$/.test(glyphName)
+                  ? { extractedText: String.fromCharCode(code) } : {}),
+              };
             });
           },
         });

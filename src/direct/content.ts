@@ -399,7 +399,7 @@ async function analyzeContent(
         const verticalBoxes: { x: number; y: number; width: number; height: number }[] = [];
         let firstVerticalPen: number | undefined;
         let advance = 0,
-          text = "",
+          text = "", extractedText = "",
           verified = !!font;
         try {
           for (const item of items) {
@@ -408,6 +408,7 @@ async function analyzeContent(
             else if (item instanceof Uint8Array && font)
               for (const glyph of font.glyphs(item)) {
                 text += glyph.text;
+                extractedText += glyph.extractedText ?? glyph.text;
                 if (vertical) {
                   if (!glyph.vmetric) throw Error("縦書きの原点情報がありません。");
                   const [dy, vx, vy] = glyph.vmetric;
@@ -466,6 +467,7 @@ async function analyzeContent(
               ...(formPath.length ? { formPath } : {}),
             },
             text,
+            ...(extractedText !== text ? { extractedText } : {}),
             ...box,
             ...(vertical ? { writingMode: "vertical" as const, flowX: m[4] - base.x,
               flowTop: base.y + base.height - (m[5] + ((firstVerticalPen ?? 0) + state.rise) * m[3]),

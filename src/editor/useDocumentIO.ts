@@ -8,6 +8,8 @@ import { importPdf, releasePdfs } from "../viewer/pdf";
 import { exportDocument, importProject } from "../export/client";
 import type { Ask, Work, Progress } from "./types";
 
+import { flushInlineText } from "./flushInlineText";
+
 interface DocumentIOOptions {
   ask: Ask;
   work: Work;
@@ -21,6 +23,7 @@ interface DocumentIOOptions {
 export function useDocumentIO(options: DocumentIOOptions) {
   const { ask, work, progress, report, setActive, setSelected, setRecent, setStatus } = options;
   async function mayDiscard() {
+    if (!flushInlineText()) return false;
     if (!documentStore.history?.dirty) return true;
     return !!(await ask({
       title: "未保存の変更があります",
@@ -64,6 +67,7 @@ export function useDocumentIO(options: DocumentIOOptions) {
     }
   }
   async function openFiles(files?: LocalFile[], merge = false) {
+    if (!flushInlineText()) return;
     if (!merge && !(await mayDiscard())) return;
     const picked = files ?? (await pickFiles("pdf", merge));
     if (!picked.length) return;
@@ -84,6 +88,7 @@ export function useDocumentIO(options: DocumentIOOptions) {
     });
   }
   async function save(as = false) {
+    if (!flushInlineText()) return false;
     const h = documentStore.history;
     if (!h) return false;
     const snapshot = h.current;

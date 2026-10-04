@@ -37,6 +37,8 @@ export interface SourceTextReference extends TextOperationReference {
 export interface DirectTextRun extends Box {
   reference: TextOperationReference;
   text: string;
+  /** Verified fallback used by PDF.js text extraction for legacy glyphs. */
+  extractedText?: string;
   fontSize: number;
   baseline: number;
   writingMode?: "vertical";

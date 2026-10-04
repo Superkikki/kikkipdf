@@ -267,7 +267,9 @@ test("recovers unsaved changes after a page reload", async ({ page }) => {
   const b = await page.locator(".viewer-scroll .page-view").boundingBox();
   if (!b) throw Error("Missing page");
   await page.mouse.click(b.x + 80, b.y + 100);
-  await page.getByLabel("テキスト内容").fill("復旧する内容");
+  const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
+  await input.fill("復旧する内容");
+  await input.press("Enter");
   await page.waitForTimeout(16000);
   await page.reload();
   await page

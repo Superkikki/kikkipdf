@@ -19,6 +19,7 @@ import { useWorkspaceActions } from "./useWorkspaceActions";
 import { useStartupDocuments } from "./useStartupDocuments";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useDesktopLifecycle } from "./useDesktopLifecycle";
+import { flushInlineText } from "./flushInlineText";
 export function useWorkspace() {
   const clipboard = useRef<ObjectClipboard | null>(null);
   const state = useDocument();
@@ -52,6 +53,7 @@ export function useWorkspace() {
     if (page && page.id !== active) setActive(page.id);
   }, [page, active]);
   const jump = useCallback((id: string) => {
+    if (!flushInlineText()) return;
     setBookmarkNavigation(null);
     setActive(id);
     setSelected(null);
@@ -60,6 +62,7 @@ export function useWorkspace() {
       ?.scrollIntoView({ behavior: "instant", block: "start" });
   }, []);
   const jumpBookmark = useCallback((id: string, destination?: BookmarkDestination) => {
+    if (!flushInlineText()) return;
     if (!doc || !doc.pages.some((p) => p.id === id)) return;
     if (!destination) { jump(id); return; }
     setActive(id);

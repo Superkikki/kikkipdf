@@ -17,6 +17,8 @@ import type { Action } from "../components/Toolbar";
 import type { useDocumentIO } from "./useDocumentIO";
 import type { Ask, Work, Progress, WorkspaceModal } from "./types";
 
+import { flushInlineText } from "./flushInlineText";
+
 interface WorkspaceActionsOptions extends ReturnType<typeof useDocumentIO> {
   doc: DocumentModel | null;
   page: PageModel | undefined;
@@ -32,7 +34,7 @@ interface WorkspaceActionsOptions extends ReturnType<typeof useDocumentIO> {
   setModal: (modal: WorkspaceModal) => void;
 }
 export function useWorkspaceActions(options: WorkspaceActionsOptions) {
-  const { doc, page, ask, work, progress, addImage, report, setError, setStatus,
+  const { doc, ask, work, progress, addImage, report, setError, setStatus,
     setActive, setSelected, setModal, openFiles, save, mayDiscard } = options;
   async function range(title: string) {
     if (!doc) return null;
@@ -45,6 +47,10 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
     return result ? parseRange(result.range, doc.pages.length) : null;
   }
   async function dispatch(a: Action) {
+    if (!flushInlineText()) return;
+    // The synchronous commit can replace the model before React rerenders.
+    const doc = documentStore.document;
+    const page = doc?.pages.find(p => p.id === options.page?.id);
     setError("");
     try {
       if (a === "open") {

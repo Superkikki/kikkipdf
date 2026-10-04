@@ -762,10 +762,79 @@ kbd {
 .textLayer ::selection {
   background: #0aafaa50;
 }
+.tool-select .textLayer span:not(.markedContent):hover,
 .tool-editText .textLayer span:hover,
 .tool-appearanceText .textLayer span:hover {
   outline: 1px dashed #078c7f;
   background: #078c7f10;
+}
+.object-layer > g[role="button"]:hover > rect {
+  stroke: #078c7f;
+  stroke-width: 1;
+  stroke-dasharray: 4 2;
+}
+.inline-text-editor {
+  position: absolute;
+  z-index: 6;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 4px;
+  border: 0;
+  border-radius: 2px;
+  outline: 1.5px solid #078c7f;
+  outline-offset: 0;
+  background: #fff;
+  box-shadow: 0 0 0 3px #078c7f20;
+  resize: none;
+  overflow: auto;
+  caret-color: #078c7f;
+  user-select: text;
+  touch-action: auto;
+  tab-size: 4;
+}
+.inline-text-editor:focus {
+  border: 0;
+  outline: 1.5px solid #078c7f;
+}
+.inline-text-toolbar {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100vw - 16px);
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 3px 12px #0002;
+  font-size: 11px;
+}
+.inline-text-toolbar span {
+  margin-right: 8px;
+}
+.inline-text-toolbar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 5px;
+}
+.inline-text-toolbar button:first-of-type {
+  color: var(--accent);
+}
+.inline-text-toolbar p {
+  flex-basis: 100%;
+  margin: 3px 0 0;
+  color: #d34848;
+}
+.inline-font-hint {
+  color: var(--accent);
 }
 .properties {
   width: 248px;

@@ -157,6 +157,72 @@ async function verifyObjectContext(page, root) {
     console.log(JSON.stringify({ native: true, bookmarkSearch: true, externalBookmarkUrl: true, bookmarkTextStyle: true, preciseBookmarkDestination: true, captureBookmarkLocation: true, clippedBookmarkDestination: true, preservedFolding: true, bulkExpandCollapse: true, undoRedo: true, nativeSave: true, errors }));
     await browser.close(); return;
   }
+  if (process.env.KIKKI_SMOKE_INLINE_ONLY === "1") {
+    const source = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Inline original text$/ });
+    const cancelledSource = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Cancel this edit$/ });
+    const neighbour = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Keep adjacent text$/ });
+    const editor = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
+    const inlineInput = page.locator(".inline-text-editor");
+    await expect(source).toBeVisible();
+    await expect(cancelledSource).toBeVisible();
+    await expect(neighbour).toBeVisible();
+
+    await cancelledSource.click();
+    await expect(inlineInput).toBeVisible();
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveValue("Cancel this edit");
+    await editor.fill("取消される日本語");
+    await editor.press("Escape");
+    await expect(inlineInput).toHaveCount(0);
+    await expect(cancelledSource).toBeVisible();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+
+    const neighbourBefore = await neighbour.boundingBox();
+    await source.click();
+    await expect(inlineInput).toBeVisible();
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveValue("Inline original text");
+    await expect(inlineInput).toHaveAttribute("aria-label", "ページ上のテキスト編集");
+    await editor.fill("クリック編集した日本語");
+    await expect(page.locator(".inline-font-hint")).toBeVisible();
+    await editor.press("Enter");
+    await expect(inlineInput).toHaveCount(0);
+    await expect(page.locator(".viewer-scroll .editable-text[data-layout-ready=true]")).toContainText("クリック編集した日本語");
+    await expect(source).toHaveCount(0);
+    const neighbourAfter = await neighbour.boundingBox();
+    if (Math.abs(neighbourAfter.x - neighbourBefore.x) > 0.2 || Math.abs(neighbourAfter.y - neighbourBefore.y) > 0.2)
+      throw Error("Inline source replacement moved adjacent text");
+
+    await page.getByRole("button", { name: "テキスト", exact: true }).click();
+    const sheet = await page.locator(".viewer-scroll .page-view").first().boundingBox();
+    await page.mouse.click(sheet.x + 80, sheet.y + 250);
+    await expect(inlineInput).toBeVisible();
+    await expect(editor).toBeFocused();
+    await editor.fill("追加文字の日本語編集");
+    await expect(editor).toHaveAttribute("data-layout-ready", "true");
+    await editor.press("Enter");
+    await expect(inlineInput).toHaveCount(0);
+    await expect(page.locator(".viewer-scroll .editable-text[data-layout-ready=true]").filter({ hasText: "追加文字の日本語編集" })).toBeVisible();
+
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const bytes = new Uint8Array(await fs.readFile(path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf")));
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const loadingTask = pdfjs.getDocument({ data: bytes, useSystemFonts: true, useWorkerFetch: false });
+    const document = await loadingTask.promise;
+    const extracted = (await (await document.getPage(1)).getTextContent()).items
+      .map(item => "str" in item ? item.str : "").join("\n");
+    await loadingTask.destroy();
+    for (const expected of ["クリック編集した日本語", "Keep adjacent text", "Cancel this edit", "追加文字の日本語編集"])
+      if (!extracted.includes(expected)) throw Error(`Saved PDF text extraction missing: ${expected}`);
+    if (extracted.includes("Inline original text") || extracted.includes("取消される日本語"))
+      throw Error("Original or cancelled inline text survived native save");
+    await page.screenshot({ path: path.join(process.env.KIKKI_SMOKE_DIR, "inline-saved.png") });
+    if (errors.length) throw Error(JSON.stringify(errors));
+    console.log(JSON.stringify({ native: true, inlineOriginalEdit: true, japaneseInput: true, escapeCancel: true,
+      adjacentTextPreserved: true, inlineAddedText: true, pdfTextExtraction: true, nativeSave: true, errors }));
+    await browser.close(); return;
+  }
   if (process.env.KIKKI_SMOKE_CHOICE_ONLY === "1") {
     const direct = page.locator(".viewer-scroll .form-page-overlay");
     await expect(direct.getByLabel("ColorCode", { exact: true })).toHaveValue(

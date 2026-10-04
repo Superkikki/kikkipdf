@@ -2,6 +2,10 @@
 
 Kikki PDF includes the following open-source components. Application source licensing is not granted by these third-party notices.
 
+## Generated font tables
+
+`src/direct/fontTables.ts` contains encoding and glyph-name tables derived from PDF.js (Apache-2.0), and standard font widths derived from @pdf-lib/standard-fonts (MIT). Regenerate with `node scripts/font-encodings.mjs`. License texts are in `LICENSES/npm/pdfjs-dist/LICENSE` and `LICENSES/npm/@pdf-lib__standard-fonts/LICENSE.md`.
+
 ## JavaScript runtime dependencies
 
 | Package | Version | License |

@@ -15,6 +15,16 @@ const { writeFile, readFile } = require("node:fs/promises");
     leaf.set(PDFName.of("Parent"), branchRef); other.set(PDFName.of("Parent"), rootRef); other.set(PDFName.of("Prev"), branchRef);
     pdf.catalog.set(PDFName.of("Outlines"), outlineRef); await writeFile(process.argv[2], await pdf.save()); return;
   }
+  if (process.argv[3] === "inline") {
+    const pdf = await PDFDocument.create();
+    const page = pdf.addPage([420, 595]);
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    page.drawText("Inline original text", { x: 40, y: 520, size: 18, font });
+    page.drawText("Cancel this edit", { x: 40, y: 480, size: 18, font });
+    page.drawText("Keep adjacent text", { x: 40, y: 440, size: 18, font });
+    await writeFile(process.argv[2], await pdf.save());
+    return;
+  }
   if (process.argv[3] === "choices") {
     const pdf = await PDFDocument.create(),
       page = pdf.addPage([420, 595]);

@@ -10,6 +10,7 @@ import { patchObject } from "../commands/objects";
 import { updateObject } from "../commands/document";
 import { TextShape } from "../text/TextShape";
 import { ObjectContextMenu } from "./ObjectContextMenu";
+import { isEditableText, textCaretAtPoint } from "./inlineText";
 function AssetImage({
   object,
   model,
@@ -164,6 +165,9 @@ export function Overlay({
   onSelect,
   interactive,
   contextEnabled = false,
+  textInteractive = false,
+  editingId,
+  onEditText,
 }: {
   page: PageModel;
   model: DocumentModel;
@@ -171,6 +175,9 @@ export function Overlay({
   onSelect: (id: string) => void;
   interactive: boolean;
   contextEnabled?: boolean;
+  textInteractive?: boolean;
+  editingId?: string;
+  onEditText?: (object: EditObject, caret?: number) => void;
 }) {
   const [preview, setPreview] = useState<EditObject | null>(null);
   const [context, setContext] = useState<{
@@ -182,7 +189,7 @@ export function Overlay({
   useEffect(() => {
     closeContext();
   }, [page.objects, contextEnabled, closeContext]);
-  const drag = useRef<{ o: EditObject; point: Point; resize: boolean } | null>(
+  const drag = useRef<{ o: EditObject; point: Point; screen: Point; resize: boolean; moved: boolean } | null>(
     null,
   );
   const svg = useRef<SVGSVGElement>(null);
@@ -241,18 +248,20 @@ export function Overlay({
       e.stopPropagation();
       return;
     }
-    if (!interactive || e.button !== 0) return;
+    if ((!interactive && !(textInteractive && isEditableText(o))) || e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     window.getSelection()?.removeAllRanges();
     e.currentTarget.focus({ preventScroll: true });
     onSelect(o.id);
-    drag.current = { o, point: point(e), resize };
+    drag.current = { o, point: point(e), screen: { x: e.clientX, y: e.clientY }, resize, moved: false };
     e.currentTarget.setPointerCapture(e.pointerId);
   }
   function move(e: React.PointerEvent) {
     const d = drag.current;
     if (!d) return;
+    if (!d.moved && Math.hypot(e.clientX - d.screen.x, e.clientY - d.screen.y) < 4) return;
+    d.moved = true;
     const p = point(e),
       dx = p.x - d.point.x,
       dy = p.y - d.point.y;
@@ -270,11 +279,18 @@ export function Overlay({
       }),
     );
   }
-  function end() {
+  function end(e: React.PointerEvent) {
+    const d = drag.current;
     if (preview)
       documentStore.execute(updateObject(page.id, preview.id, preview));
     drag.current = null;
     setPreview(null);
+    if (d && !d.moved && !d.resize && textInteractive && isEditableText(d.o)) {
+      const shape = svg.current?.querySelector(`[data-object-id="${CSS.escape(d.o.id)}"] .editable-text`);
+      const caret = shape ? textCaretAtPoint(shape, d.o.text ?? "", { x: e.clientX, y: e.clientY },
+        page.rotation + d.o.rotation, d.o.writingMode === "vertical") : undefined;
+      onEditText?.(d.o, caret);
+    }
   }
   return (
     <>
@@ -286,7 +302,7 @@ export function Overlay({
         viewBox={`0 0 ${page.width} ${page.height}`}
         onPointerMove={move}
         onPointerUp={(e) => {
-          if (e.button === 0) end();
+          if (e.button === 0) end(e);
         }}
         onPointerCancel={() => {
           drag.current = null;
@@ -302,13 +318,23 @@ export function Overlay({
               <g
                 key={o.id}
                 data-object-id={o.id}
-                tabIndex={contextEnabled ? -1 : undefined}
-                opacity={o.kind === "ocr" ? 1 : o.opacity}
+                tabIndex={textInteractive && isEditableText(o) ? 0 : contextEnabled ? -1 : undefined}
+                role={textInteractive && isEditableText(o) ? "button" : undefined}
+                aria-label={textInteractive && isEditableText(o) ? `文字を編集: ${o.text || "空のテキスト"}` : undefined}
+                opacity={editingId === o.id ? 0 : o.kind === "ocr" ? 1 : o.opacity}
                 style={{
-                  pointerEvents: interactive ? "all" : "none",
-                  cursor: interactive ? "move" : "default",
+                  pointerEvents: interactive || (textInteractive && isEditableText(o)) ? "all" : "none",
+                  cursor: textInteractive && isEditableText(o) ? "text" : interactive ? "move" : "default",
                 }}
                 onPointerDown={(e) => start(e, o)}
+                onClick={e => e.stopPropagation()}
+                onKeyDown={e => {
+                  if (textInteractive && isEditableText(o) && (e.key === "Enter" || e.key === "F2" || e.key === " ")) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onEditText?.(o);
+                  }
+                }}
                 onContextMenu={(e) => {
                   if (!contextEnabled) return;
                   e.preventDefault();

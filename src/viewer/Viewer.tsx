@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { DocumentModel } from "../state/model";
 import { pageSize } from "../state/model";
 import { PageView, type Tool } from "./PageView";
@@ -31,7 +31,7 @@ export function Viewer({
   zoom: ZoomMode;
   tool: Tool;
   selected: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string | null) => void;
   onError: (s: string) => void;
   onScale: (scale: number) => void;
   onZoom: (zoom: ZoomMode) => void;
@@ -40,6 +40,11 @@ export function Viewer({
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [space, setSpace] = useState({ width: 800, height: 700 });
+  const [editingPage, setEditingPage] = useState<string | null>(null);
+  const pageEditing = useCallback((pageId: string, editing: boolean) => {
+    setEditingPage(current => editing ? pageId : current === pageId ? null : current);
+  }, []);
+  useEffect(() => setEditingPage(null), [model.id]);
   const { anchorZoom, settleNavigation } = useViewerPosition(root, model, active, onActive, zoom, space);
   const activePage = model.pages.find((p) => p.id === active) ?? model.pages[0];
   const activeScale = pageScale(pageSize(activePage), space, zoom);
@@ -198,6 +203,9 @@ export function Viewer({
               currentSearchId={search.currentId}
               model={model}
               page={p}
+              active={active === p.id}
+              keepVisible={editingPage === p.id}
+              onEditingChange={pageEditing}
               scale={scale}
               tool={tool}
               selected={selected}

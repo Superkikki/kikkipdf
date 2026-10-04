@@ -13,6 +13,7 @@ import {
   Images,
 } from "lucide-react";
 import { useWorkspace } from "./editor/useWorkspace";
+import { flushInlineText } from "./editor/flushInlineText";
 import { ZoomControls } from "./components/ZoomControls";
 import { PageNavigation } from "./components/PageNavigation";
 import { Toolbar } from "./components/Toolbar";
@@ -45,6 +46,7 @@ export function App() {
   const onActive = useCallback(
     (id: string) => {
       if (id !== active) {
+        if (!flushInlineText()) return;
         setActive(id);
         setSelected(null);
       }

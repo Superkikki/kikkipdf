@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { TextLayer, type RenderTask } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type {
   DocumentModel,
+  EditObject,
   ObjectKind,
   PageModel,
   Point,
@@ -16,7 +17,7 @@ import { screenToPage } from "./coordinates";
 import { acquirePagePdf } from "./pdf";
 import { Overlay } from "../editor/Overlay";
 import { documentStore } from "../state/store";
-import { addObject } from "../commands/document";
+import { addObject, updateObject } from "../commands/document";
 import { appearanceTextEngine } from "../editor/textEngine";
 import { inspectExistingText } from "../export/client";
 import { directTextObject } from "../direct/editor";
@@ -25,6 +26,8 @@ import { ExistingImageOverlay } from "../direct/ExistingImageOverlay";
 import { SearchHighlights } from "./SearchHighlights";
 import type { SearchHit } from "./search";
 import { layerConfig } from "../layers/model";
+import { InlineTextEditor } from "../editor/InlineTextEditor";
+import { textCaretAtPoint } from "../editor/inlineText";
 const noSearchHits: SearchHit[] = [];
 export type Tool = "select" | "editText" | "editImage" | "appearanceText" | ObjectKind;
 export function PageView({
@@ -40,6 +43,9 @@ export function PageView({
   formEdit,
   searchHits = noSearchHits,
   currentSearchId,
+  active = true,
+  keepVisible = false,
+  onEditingChange,
 }: {
   searchHits?: SearchHit[];
   currentSearchId?: string;
@@ -49,10 +55,13 @@ export function PageView({
   thumbnail?: boolean;
   tool?: Tool;
   selected?: string | null;
-  onSelect?: (id: string) => void;
+  onSelect?: (id: string | null) => void;
   onActive?: () => void;
   onError?: (s: string) => void;
   formEdit?: FormEditSelection;
+  active?: boolean;
+  keepVisible?: boolean;
+  onEditingChange?: (pageId: string, editing: boolean) => void;
 }) {
   const host = useRef<HTMLDivElement>(null),
     canvas = useRef<HTMLCanvasElement>(null),
@@ -64,17 +73,33 @@ export function PageView({
     [inspecting, setInspecting] = useState(false);
   const drawing = useRef<{ start: Point; points: Point[] } | null>(null);
   const [draft, setDraft] = useState<{ a: Point; b: Point } | null>(null);
+  const [editing, setEditing] = useState<{
+    id: string;
+    caret?: number;
+    selectAll?: boolean;
+    createdToken?: number;
+  } | null>(null);
+  const clickStart = useRef<Point | null>(null);
+  const editingObject = page.objects.find(o => o.id === editing?.id);
+  useEffect(() => {
+    onEditingChange?.(page.id, !!editing);
+  }, [editing, page.id, onEditingChange]);
   const source = page.sourceId ? model.sources[page.sourceId] : undefined;
   const directKey = JSON.stringify({ text: directReferences(page), images: directImageEdits(page) });
   const currentImages = useRef(model.images);
   currentImages.current = model.images;
   const currentPage = useRef(page);
   currentPage.current = page;
+  const currentActive = useRef(active);
+  currentActive.current = active;
   const inspection = useRef<AbortController | null>(null);
   useEffect(() => {
     setInspecting(false);
     return () => inspection.current?.abort();
-  }, [tool, model.id, page.id]);
+  }, [tool, model.id, page.id, active]);
+  useEffect(() => {
+    if (editing && (selected !== editing.id || !editingObject)) setEditing(null);
+  }, [selected, editing, editingObject]);
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -198,6 +223,7 @@ export function PageView({
 
   function down(e: React.PointerEvent) {
     if (e.button !== 0) return;
+    clickStart.current = { x: e.clientX, y: e.clientY };
     onActive();
     if (
       thumbnail ||
@@ -250,11 +276,16 @@ export function PageView({
     }
     documentStore.execute(addObject(page.id, o));
     onSelect(o.id);
+    if (tool === "text") setEditing({ id: o.id, selectAll: true, createdToken: documentStore.history?.current.token });
   }
   async function existing(e: React.MouseEvent) {
-    if ((tool !== "editText" && tool !== "appearanceText") || !source) return;
-    const target = e.target as HTMLElement;
-    if (!target.closest(".textLayer span")) return;
+    if (thumbnail || e.button !== 0 || e.detail > 1 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey ||
+      (tool !== "select" && tool !== "editText" && tool !== "appearanceText") || !source) return;
+    const target = (e.target as HTMLElement).closest<HTMLElement>(".textLayer span:not(.markedContent)");
+    if (!target || !target.textContent?.trim()) return;
+    if (clickStart.current && Math.hypot(e.clientX - clickStart.current.x, e.clientY - clickStart.current.y) > 4) return;
+    if (tool === "select" && window.getSelection()?.toString()) return;
+    const click = { x: e.clientX, y: e.clientY };
     const textValue = target.textContent ?? "";
     const rect = target.getBoundingClientRect();
     const points = [
@@ -276,7 +307,7 @@ export function PageView({
     let request: AbortController | undefined;
     try {
       let o;
-      if (tool === "editText") {
+      if (tool !== "appearanceText") {
         inspection.current?.abort();
         const controller = new AbortController();
         request = controller;
@@ -289,6 +320,7 @@ export function PageView({
         );
         if (
           controller.signal.aborted ||
+          !currentActive.current ||
           documentStore.document?.id !== model.id ||
           !documentStore.document.pages.some((p) => p.id === page.id)
         )
@@ -303,8 +335,11 @@ export function PageView({
           box,
           Math.max(8, box.height * 0.85),
         );
+      const caret = textCaretAtPoint(target, textValue, click, page.rotation, o.writingMode === "vertical");
       documentStore.execute(addObject(page.id, o));
       onSelect(o.id);
+      window.getSelection()?.removeAllRanges();
+      setEditing({ id: o.id, caret, createdToken: documentStore.history?.current.token });
     } catch (e) {
       if (!(e instanceof DOMException && e.name === "AbortError"))
         onError?.(
@@ -321,6 +356,13 @@ export function PageView({
       }
     }
   }
+  function editText(o: EditObject, caret?: number) {
+    inspection.current?.abort();
+    setInspecting(false);
+    onActive();
+    onSelect(o.id);
+    setEditing({ id: o.id, caret });
+  }
   return (
     <div
       ref={host}
@@ -334,7 +376,7 @@ export function PageView({
           文字描画命令を解析中…
         </div>
       )}
-      {visible ? (
+      {visible || !!editing || keepVisible ? (
         <div
           style={{
             transform: `scale(${scale})`,
@@ -369,7 +411,7 @@ export function PageView({
                 drawing.current = null;
                 setDraft(null);
               }}
-              onDoubleClick={(e) => {
+              onClick={(e) => {
                 void existing(e);
               }}
             >
@@ -413,10 +455,15 @@ export function PageView({
                 page={page}
                 selected={selected}
                 onSelect={(id) => {
+                  inspection.current?.abort();
+                  setInspecting(false);
                   onActive();
                   onSelect(id);
                 }}
                 interactive={!thumbnail && tool === "select"}
+                textInteractive={!thumbnail && ["select", "text", "editText", "appearanceText"].includes(tool)}
+                editingId={editing?.id}
+                onEditText={editText}
                 contextEnabled={!thumbnail}
               />
               {!thumbnail && <SearchHighlights page={page} hits={searchHits}
@@ -438,6 +485,28 @@ export function PageView({
                   />
                 </svg>
               )}
+              {!thumbnail && editing && editingObject && <InlineTextEditor
+                key={editing.id}
+                object={editingObject}
+                asset={editingObject.fontId ? model.fonts?.[editingObject.fontId] : undefined}
+                scale={scale}
+                caret={editing.caret}
+                selectAll={editing.selectAll}
+                onCommit={patch => {
+                  const live = documentStore.document;
+                  if (Object.keys(patch).length && live?.id === model.id &&
+                    live.pages.find(p => p.id === page.id)?.objects.find(o => o.id === editing.id) === editingObject)
+                    documentStore.execute(updateObject(page.id, editing.id, patch));
+                  setEditing(null);
+                }}
+                onCancel={() => {
+                  if (documentStore.document?.id === model.id && editing.createdToken !== undefined && documentStore.history?.current.token === editing.createdToken) {
+                    documentStore.undo();
+                    onSelect(null);
+                  }
+                  setEditing(null);
+                }}
+              />}
             </div>
           </div>
         </div>

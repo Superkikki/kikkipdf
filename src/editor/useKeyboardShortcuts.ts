@@ -24,6 +24,7 @@ export function useKeyboardShortcuts(options: KeyboardOptions) {
   latest.current = options;
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
       const shortcuts = latest.current;
       const { busyRef, clipboard, setSelected, setTool, setStatus } = shortcuts;
       const input =
