@@ -27,6 +27,7 @@ import { SearchHighlights } from "./SearchHighlights";
 import type { SearchHit } from "./search";
 import { layerConfig } from "../layers/model";
 import { InlineTextEditor } from "../editor/InlineTextEditor";
+import { ImportedMarkupOverlay } from "../annotations/ImportedMarkupOverlay";
 import { textCaretAtPoint } from "../editor/inlineText";
 const noSearchHits: SearchHit[] = [];
 export type Tool = "select" | "editText" | "editImage" | "appearanceText" | ObjectKind;
@@ -450,6 +451,7 @@ export function PageView({
               )}
               {!thumbnail && visible && tool === "editImage" &&
                 <ExistingImageOverlay model={model} page={page} onSelect={onSelect} onError={onError} />}
+              <ImportedMarkupOverlay page={page} />
               <Overlay
                 model={model}
                 page={page}

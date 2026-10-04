@@ -6,14 +6,17 @@ import { editAnnotation } from "./commands";
 import { buildComments, filterComments, readComments, commentTypes, reviewStatuses, type ImportedComment } from "./comments";
 import { commentsCsv } from "./commentCsv";
 import { commentsXfdf } from "./commentXfdf";
+import { parseXfdf } from "./importXfdf";
+import { addImportedMarkups, removeImportedMarkup, updateImportedMarkup } from "./importedMarkup";
 import { flushInlineText } from "../editor/flushInlineText";
-import { saveBytes } from "../platform/files";
+import { pickFiles, saveBytes } from "../platform/files";
 
 export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id: string) => void }) {
   const [loaded, setLoaded] = useState<{ sources: DocumentModel["sources"]; comments: ImportedComment[] }>();
   const [error, setError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [importStatus, setImportStatus] = useState("");
   const [selected, setSelected] = useState("");
   const [query, setQuery] = useState("");
   const [author, setAuthor] = useState("");
@@ -31,7 +34,7 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
     return () => { live = false; };
   }, [sources]);
   useEffect(() => {
-    setSelected(""); setQuery(""); setAuthor(""); setStatus(""); setPageId(""); setSubtype(""); setOffset(0); setSaveError("");
+    setSelected(""); setQuery(""); setAuthor(""); setStatus(""); setPageId(""); setSubtype(""); setOffset(0); setSaveError(""); setImportStatus("");
   }, [model.id]);
   const comments = buildComments(model, loaded?.sources === sources ? loaded.comments : []);
   const filtered = filterComments(comments, { query, author, status, pageId, subtype });
@@ -40,9 +43,28 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
   const authors = [...new Set(comments.map((comment) => comment.author).filter(Boolean))].sort();
   function update(patch: AnnotationEdit) {
     if (!current) return;
-    documentStore.execute(current.added ? updateObject(current.pageId, current.id, patch) : editAnnotation(current.pageId, current.id, patch));
+    documentStore.execute(current.importedMarkup ? updateImportedMarkup(current.pageId, current.id, patch)
+      : current.added ? updateObject(current.pageId, current.id, patch) : editAnnotation(current.pageId, current.id, patch));
   }
   function resetList() { setSelected(""); setOffset(0); }
+  async function importComments() {
+    if (!flushInlineText()) return;
+    setSaveError(""); setImportStatus(""); setSaving(true);
+    try {
+      const [file] = await pickFiles("xfdf");
+      if (!file) return;
+      if (!flushInlineText()) return;
+      const snapshot = documentStore.document;
+      if (!snapshot || snapshot.id !== model.id) throw Error("文書が切り替わりました。読み込み先のPDFで再度実行してください。");
+      const result = await parseXfdf(file.bytes, snapshot);
+      if (documentStore.document !== snapshot) throw Error("読み込み中に文書が変更されました。再度実行してください。");
+      documentStore.execute(addImportedMarkups(result.entries));
+      resetList();
+      setImportStatus(`${result.entries.length}件の注釈を読み込みました。Undoで戻せます。`);
+    } catch (reason) {
+      setSaveError(reason instanceof Error ? reason.message : "XFDFを読み込めませんでした。");
+    } finally { setSaving(false); }
+  }
   async function saveComments(filteredOnly: boolean, format: "csv" | "xfdf" = "csv") {
     if (!flushInlineText()) return;
     setSaveError(""); setSaving(true);
@@ -90,6 +112,10 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
       }}>絞り込みを解除</button>}
     </div>
     <div className="comment-export">
+      <button disabled={saving} onClick={() => void importComments()}>XFDFを読み込む</button>
+    </div>
+    {importStatus && <p role="status">{importStatus}</p>}
+    <div className="comment-export">
       <button disabled={cannotExport || !comments.length} onClick={() => void saveComments(false)}>全件をCSV保存</button>
       <button disabled={cannotExport || !filtered.length} onClick={() => void saveComments(true)}>絞り込み結果をCSV保存</button>
     </div>
@@ -122,7 +148,8 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
         {Object.entries(reviewStatuses).map(([value, name]) => <option key={value} value={value}>{name}</option>)}
       </select></label>}
       <button className="danger" onClick={() => {
-        documentStore.execute(current.added ? deleteObject(current.pageId, current.id) : editAnnotation(current.pageId, current.id, { deleted: true }));
+        documentStore.execute(current.importedMarkup ? removeImportedMarkup(current.pageId, current.id)
+          : current.added ? deleteObject(current.pageId, current.id) : editAnnotation(current.pageId, current.id, { deleted: true }));
         setSelected("");
       }}>コメントを削除</button>
     </div>}

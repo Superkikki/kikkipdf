@@ -1,0 +1,2 @@
+f839f1ba79bdc0cade80de6c85884aa0143f2f9b9f1b1455e5701ecd85eea45f  Kikki PDF_0.16.0_x64-setup.exe
+abf14c2f66b1cb9f695702b713f87335815905f0aef6a31f11f087f214d384ea  Kikki PDF_0.16.0_x64-setup.zip

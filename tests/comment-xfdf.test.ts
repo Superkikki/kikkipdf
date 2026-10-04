@@ -40,6 +40,7 @@ describe("commentsXfdf", () => {
       .map((kind) => newObject(kind as "note", 15, 25));
     Object.assign(note, { width: 24, height: 40, text: "Note", author: "A" });
     for (const object of [highlight, underline, strike, ink]) Object.assign(object, { width: 80, height: 30, text: object.kind, author: "Editor" });
+    underline.strokeWidth = 7;
     ink.points = [{ x: 4, y: 5 }, { x: 25, y: 17 }];
     model.pages[0].objects = [note, highlight, underline, strike, ink];
     const rows = model.pages[0].objects.map((o) => ({ ...row(o.id, model.pages[0].id, 0), text: o.text ?? "", author: o.author ?? "" }));
@@ -65,6 +66,7 @@ describe("commentsXfdf", () => {
       expect(element).toBeDefined();
       expect(attr(element!, "rect").split(",").map(Number)).toEqual(pdfNumbers(dict, "Rect"));
       expect(attr(element!, "coords").split(",").map(Number)).toEqual(pdfNumbers(dict, "QuadPoints"));
+      expect(Number(attr(element!, "width"))).toBe(dict.lookup(PDFName.of("BS"), PDFDict).lookup(PDFName.of("W"), PDFNumber).asNumber());
     }
     const inkTag = xfdf.match(/<ink\b[^>]*>[\s\S]*?<inklist>[\s\S]*?<\/inklist>[\s\S]*?<\/ink>/)?.[0];
     expect(inkTag).toBeDefined();

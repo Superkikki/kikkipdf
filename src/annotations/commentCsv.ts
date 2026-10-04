@@ -15,7 +15,7 @@ export function commentsCsv(rows: readonly CommentRow[]): Uint8Array {
     ...rows.map(row => [
       String(row.pageIndex + 1), row.author,
       row.reviewable ? reviewStatuses[row.reviewStatus] : "対象外",
-      row.text, row.added ? "追加" : "既存",
+      row.text, row.importedMarkup ? "読み込み" : row.added ? "追加" : "既存",
     ]),
   ];
   return new TextEncoder().encode(`\uFEFF${records.map(row => row.map(cell).join(",")).join("\r\n")}\r\n`);

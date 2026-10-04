@@ -1026,6 +1026,53 @@ async function verifyObjectContext(page, root) {
   const filteredJapanese = filteredXfdf.annotations[0];
   if (filteredJapanese.type !== "text" || filteredJapanese.title !== "日本語レビュー" || filteredJapanese.contents !== xfdfComment)
     throw Error("Filtered XFDF did not preserve the selected annotation contents and author");
+
+  const importXfdfPicker = pickNativeFile(filteredXfdfPath);
+  await page.getByRole("button", { name: "XFDFを読み込む", exact: true }).click();
+  await importXfdfPicker;
+  await expect(comments.filter({ hasText: xfdfComment })).toHaveCount(2);
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await expect(comments.filter({ hasText: xfdfComment })).toHaveCount(1);
+  await page.getByRole("button", { name: /^やり直す/ }).click();
+  await expect(comments.filter({ hasText: xfdfComment })).toHaveCount(2);
+
+  await page.getByLabel("コメントを検索", { exact: true }).fill("");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+  const importedPdf = await PDFDocument.load(await fs.readFile(path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf")));
+  const importedAnnots = importedPdf.getPage(0).node.Annots();
+  if (!importedAnnots) throw Error("XFDF import did not produce PDF annotations");
+  const annotationText = value => value instanceof PDFHexString || value instanceof PDFString
+    ? value.decodeText() : "";
+  const duplicateNotes = Array.from({ length: importedAnnots.size() }, (_, index) => importedAnnots.lookup(index, PDFDict))
+    .filter(annotation => {
+      const contents = annotation.lookup(PDFName.of("Contents"));
+      return annotationText(contents) === xfdfComment;
+    });
+  if (duplicateNotes.length !== 2)
+    throw Error("Saving imported XFDF did not preserve both same-content annotations");
+  const importedNames = duplicateNotes.map(annotation => annotation.lookup(PDFName.of("NM")))
+    .filter(name => name !== undefined).map(name => name.toString());
+  if (importedNames.length !== duplicateNotes.length || new Set(importedNames).size !== duplicateNotes.length)
+    throw Error("Imported XFDF annotation name is missing or collides with the existing note");
+  const duplicateAuthors = duplicateNotes.map(annotation => annotation.lookup(PDFName.of("T")))
+    .map(annotationText).filter(Boolean);
+  if (duplicateAuthors.length !== 2 || duplicateAuthors.some(author => author !== "日本語レビュー"))
+    throw Error("Saving imported XFDF did not preserve both annotation authors");
+
+  const projectPath = path.join(process.env.KIKKI_SMOKE_DIR, "comments-native-import.kpdf");
+  await fs.rm(projectPath, { force: true });
+  await page.locator("summary").filter({ hasText: "ファイル" }).click();
+  const projectSavePicker = pickNativeFile(projectPath);
+  await page.getByRole("button", { name: "編集プロジェクトを保存", exact: true }).click();
+  await projectSavePicker;
+  await expect.poll(() => fs.stat(projectPath).then(stat => stat.size).catch(() => 0), { timeout: 30000 }).toBeGreaterThan(0);
+  await page.locator("summary").filter({ hasText: "ファイル" }).click();
+  const projectOpenPicker = pickNativeFile(projectPath);
+  await page.getByRole("button", { name: "編集プロジェクトを開く", exact: true }).click();
+  await projectOpenPicker;
+  await page.getByRole("button", { name: "コメント", exact: true }).click();
+  await expect(comments.filter({ hasText: xfdfComment })).toHaveCount(2);
   console.log(
     JSON.stringify({
       native: true,
@@ -1051,6 +1098,10 @@ async function verifyObjectContext(page, root) {
       nativeCommentCsvExport: true,
       nativeCommentXfdfExport: true,
       filteredCommentXfdfExport: true,
+      nativeCommentXfdfImport: true,
+      xfdfImportUndoRedo: true,
+      importedXfdfPdfSave: true,
+      importedXfdfProjectRoundTrip: true,
       elapsedSeconds: Math.round((Date.now() - started) / 1000),
       errors,
     }),

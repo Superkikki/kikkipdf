@@ -1,6 +1,18 @@
 # 検証記録
 
-対象: 0.15.0、0.14.0、0.13.0、0.12.0と過去版（Windows実機検証も含む）。実施日: 2026-09-15〜10-05。検証に使ったPDF・画像・フォームはテストコードで生成したものです。
+対象: 0.16.0、0.15.0、0.14.0、0.13.0、0.12.0と過去版（Windows実機検証も含む）。実施日: 2026-09-15〜10-05。検証に使ったPDF・画像・フォームはテストコードで生成したものです。
+
+## 0.16.0のXFDFコメント読み込みの検証（2026-10-05）
+
+- `npm run check`でESLint・単体テスト206件（32ファイル）・TypeScript・production buildが成功。線幅の再出力修正後も単体テスト全206件とPlaywright全102件が成功（4 workers、1.9分）。追加・更新ファイルのESLintと最終WindowsビルドのTypeScriptも成功。
+- 新規Playwright 3件で、5種類の注釈表示、日本語・XML特殊文字、複数QuadPoints・複数経路と単点Ink、CropBox原点と90／270度回転を含む座標保持、一括Undo／Redo、本文・作成者の編集と削除Undoを確認。PDF・編集プロジェクト保存と再オープンを検証。
+- 未対応種類・不正名前空間・ページ範囲外・同一入力内の名前重複・不正QuadPoints／InkList・DTD／外部エンティティを含む入力の全件中止を確認。ファイル8MB超、5000注釈超、入力全体10万座標点超でも部分追加・Undo履歴・未保存マークが発生しないことを確認。既存注釈と同名の再読み込みは独立したIDで追加し、UTF-16LE／BEのBOM付き入力を検証。
+- 単体テストで、追加Commandの原子性、Immutableな編集・削除、旧version 1プロジェクト互換、不正schemaとページの総座標予算、ページ複製時のID再発行、元PDFバイト列の保持を確認。PDFのRect／QuadPoints／InkList／AP、作成者・レビュー状態・日時・件名・フラグ・透明色を検査。
+- XFDF再出力の単体テストで、元PDFなしの空白ページと元CropBox原点、複数QuadPoints／InkList、透明色、線幅（0ptのhairlineを含む）、日時・件名・アイコン・フラグと注釈IDの保持を確認。SVGの注釈範囲クリップ、透明／非表示注釈の除外、単点Inkの描画も検証。
+- 最終Windows配布ビルドのWebView2でフルnative smokeが成功（149秒、JavaScriptエラー0件）。ネイティブ選択したXFDFを読み込み、注釈の件数・Undo／Redo、PDF保存で同内容2注釈の作成者と一意なNM、`.kpdf`保存・再オープンを検査。既存のCSV／XFDF書き出し・OCR・暗号化・フォーム・しおり・添付・リンク・PDF比較も通過。
+- Windows MSVC releaseビルド・NSIS生成が成功。アプリと最終配布インストーラーのFileVersion／ProductVersionが0.16.0で一致。生成物と配布用コピー・ZIP内容のバイト一致、ZIP整合性、SHA-256を確認。初回ビルドは同時実行した検証ビルドのdist更新と競合してアセット読み込みに失敗し、検証ビルド終了後の逐次実行で解消。
+- 配布物は`artifacts/windows/Kikki PDF_0.16.0_x64-setup.exe`（23,082,327 bytes）、同名ZIP（23,042,770 bytes）、`SHA256SUMS-0.16.0.txt`。未署名で、新規Windows環境でのインストール／アンインストールは未検証。
+- 対応範囲はText／Highlight／Underline／StrikeOut／Inkの追加読み込み。FreeText／Stamp等、返信・popup・リッチテキスト・非空のフォーム値・独自外観は含まれない。Acrobat等の他製品で生成したXFDFとの実機相互運用は未検証。
 
 ## 0.15.0のコメントXFDF・追加マークアップの検証（2026-10-05）
 

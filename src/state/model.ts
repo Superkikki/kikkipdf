@@ -41,6 +41,25 @@ export interface Box extends Point {
   width: number;
   height: number;
 }
+/** XFDF geometry relative to the original CropBox, before editing crop/rotation. */
+export interface ImportedMarkup extends Box {
+  id: string;
+  subtype: "Text" | "Highlight" | "Underline" | "StrikeOut" | "Ink";
+  name?: string;
+  text: string;
+  author: string;
+  reviewStatus: ReviewStatus;
+  color: string | null;
+  opacity: number;
+  strokeWidth: number;
+  quadPoints?: Point[];
+  gestures?: Point[][];
+  icon?: string;
+  date?: string;
+  creationDate?: string;
+  subject?: string;
+  flags?: number;
+}
 export interface EditObject extends Box {
   id: string;
   kind: ObjectKind;
@@ -81,6 +100,7 @@ export interface PageModel {
   rotation: number;
   objects: EditObject[];
   annotationEdits?: Record<string, AnnotationEdit>;
+  importedMarkups?: ImportedMarkup[];
   /** Widget identities refer to the immutable source PDF, scoped to this page. */
   formWidgetEdits?: Record<string, Box>;
   crop?: Box;

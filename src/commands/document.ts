@@ -106,6 +106,12 @@ export function duplicatePage(id: string): Command {
       ...d.pages[i],
       id: uid(),
       objects: d.pages[i].objects.map((o) => ({ ...o, id: uid() })),
+      ...(d.pages[i].importedMarkups ? {
+        importedMarkups: d.pages[i].importedMarkups.map(markup => {
+          const id = uid();
+          return { ...markup, id };
+        }),
+      } : {}),
     };
     return {
       ...d,

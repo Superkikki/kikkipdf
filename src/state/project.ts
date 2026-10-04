@@ -12,6 +12,7 @@ import { checkFontBudget, MAX_FONT_BYTES } from "../fonts/budget";
 import { directReferences, directImageEdits } from "../direct/model";
 import { bookmarkDestinationSchema } from "../pages/bookmarkDestination";
 import { validPageLabel, MAX_PAGE_LABEL_LENGTH } from "../pages/labels";
+import { importedMarkupsSchema } from "../annotations/importedMarkup";
 
 const id = z
   .string()
@@ -196,6 +197,7 @@ const schema = z.object({
             z.literal(270),
           ]),
           objects: z.array(object).max(100000),
+          importedMarkups: importedMarkupsSchema.optional(),
           annotationEdits: z
             .record(
               z.string(),

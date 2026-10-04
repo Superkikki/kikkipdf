@@ -1,4 +1,5 @@
 import { writeMarkup } from "../annotations/pdfMarkup";
+import { writeImportedMarkup } from "../annotations/pdfImportedMarkup";
 import { writeCommentMetadata } from "../annotations/commentMetadata";
 import { AttachmentWriter } from "../attachments/pdfAttachments";
 import { writeLinks } from "../links/pdfLinks";
@@ -152,6 +153,8 @@ export async function exportPdf(
     page.setRotation(degrees(p.rotation));
     const px = (x: number) => base.x + x,
       py = (y: number) => base.y + p.height - y;
+    for (const markup of p.importedMarkups ?? [])
+      writeImportedMarkup(output, page, markup, p.height, { x: base.x, y: base.y });
     for (const o of p.objects) {
       if (
         o.kind === "redaction" ||
@@ -274,6 +277,7 @@ export async function exportPdf(
           Subtype: "Text",
           Rect: [x, y, x + 24, y + 24],
           Contents: PDFHexString.fromText(o.text ?? ""),
+          NM: PDFHexString.fromText(o.id),
           Name: "Comment",
           C: [1, 0.8, 0.2],
           F: 4,

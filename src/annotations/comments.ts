@@ -17,6 +17,7 @@ export interface ImportedComment {
 export interface CommentRow {
   id: string; key: string; pageId: string; pageIndex: number; text: string; author: string;
   reviewStatus: ReviewStatus; reviewable: boolean; subtype?: string; added: boolean; editable: boolean;
+  importedMarkup?: boolean;
 }
 const markup = new Set(["Text", "Highlight", "Underline", "StrikeOut", "Squiggly", "Ink", "FreeText", "Stamp", "Caret", "Circle", "Square", "Polygon", "PolyLine"]);
 const cache = new WeakMap<Uint8Array, Promise<Omit<ImportedComment, "sourceId">[]>>();
@@ -63,6 +64,11 @@ export function buildComments(model: DocumentModel, imported: ImportedComment[])
         author: page.annotationEdits?.[comment.id]?.author ?? comment.author,
         reviewStatus: page.annotationEdits?.[comment.id]?.reviewStatus ?? comment.reviewStatus,
         subtype: comment.subtype, reviewable: comment.reviewable, added: false, editable: /^\d+R\d*$/.test(comment.id) })),
+    ...(page.importedMarkups ?? []).map(markup => ({
+      id: markup.id, key: `${page.id}:xfdf:${markup.id}`, pageId: page.id, pageIndex,
+      text: markup.text, author: markup.author, reviewStatus: markup.reviewStatus, subtype: markup.subtype,
+      reviewable: markup.subtype === "Text", added: false, editable: true, importedMarkup: true,
+    })),
     ...page.objects.filter((object) => ["note", "highlight", "underline", "strike", "ink"].includes(object.kind)).map((object) => ({
       id: object.id, key: object.id, pageId: page.id, pageIndex, text: object.text ?? "", author: object.author ?? "",
       reviewStatus: object.reviewStatus ?? "None", subtype: object.kind === "note" ? "Text" : object.kind === "highlight" ? "Highlight" : object.kind === "underline" ? "Underline" : object.kind === "strike" ? "StrikeOut" : "Ink",
