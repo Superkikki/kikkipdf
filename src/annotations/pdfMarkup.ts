@@ -69,6 +69,7 @@ export function writeMarkup(
     BS: { W: o.strokeWidth, S: "S" },
     NM: PDFHexString.fromText(o.id),
     Contents: PDFHexString.fromText(o.text ?? ""),
+    T: PDFHexString.fromText(o.author ?? ""),
     P: page.ref,
     AP: { N: appearance },
     ...(o.kind === "ink"

@@ -956,6 +956,76 @@ async function verifyObjectContext(page, root) {
   if (!csv.includes('"ページ","作成者","レビュー状態","コメント","区分"') ||
     !csv.includes('"1","Smoke Reviewer","完了","Native CSV note","追加"'))
     throw Error("Native CSV export did not include the edited note and Japanese columns");
+
+  const xfdfComment = "日本語XFDF注釈 & <確認>";
+  await comments.filter({ hasText: "Native CSV note" }).click();
+  await page.getByLabel("コメント内容", { exact: true }).fill(xfdfComment);
+  await page.getByRole("textbox", { name: "コメントの作成者", exact: true }).fill("日本語レビュー");
+  await expect(comments.filter({ hasText: xfdfComment })).toHaveCount(1);
+
+  // A second comment makes the filtered XFDF export prove that it excludes rows.
+  await page.getByRole("button", { name: "注釈", exact: true }).click();
+  await page.getByRole("button", { name: "付箋", exact: true }).click();
+  const secondNotePage = await page.locator(".viewer-scroll .page-view").first().boundingBox();
+  if (!secondNotePage) throw Error("Missing page for filtered XFDF smoke test");
+  await page.mouse.click(secondNotePage.x + 300, secondNotePage.y + 360);
+  await page.getByLabel("テキスト内容", { exact: true }).fill("XFDF filter exclusion");
+  await page.getByRole("button", { name: "コメント", exact: true }).click();
+  await expect(comments.filter({ hasText: "XFDF filter exclusion" })).toHaveCount(1);
+
+  const inspectXfdf = async filePath => {
+    const xml = await fs.readFile(filePath, "utf8");
+    return page.evaluate(source => {
+      const parsed = new DOMParser().parseFromString(source, "application/xml");
+      if (parsed.querySelector("parsererror")) throw Error("XFDF is not valid XML");
+      const root = parsed.documentElement;
+      const ns = "http://ns.adobe.com/xfdf/";
+      const annots = parsed.getElementsByTagNameNS(ns, "annots")[0];
+      if (!annots) throw Error("XFDF annotations element or namespace is missing");
+      return {
+        root: root.localName,
+        namespace: root.namespaceURI,
+        annotations: Array.from(annots.children).map(annotation => ({
+          type: annotation.localName,
+          namespace: annotation.namespaceURI,
+          title: annotation.getAttribute("title"),
+          contents: Array.from(annotation.getElementsByTagNameNS(ns, "contents"))
+            .map(element => element.textContent ?? "").join(""),
+        })),
+      };
+    }, xml);
+  };
+
+  const allXfdfPath = path.join(process.env.KIKKI_SMOKE_DIR, "comments-native-all.xfdf");
+  await fs.rm(allXfdfPath, { force: true });
+  const allXfdfPicker = pickNativeFile(allXfdfPath);
+  await page.getByRole("button", { name: "全件をXFDF保存", exact: true }).click();
+  await allXfdfPicker;
+  await expect.poll(() => fs.stat(allXfdfPath).then(stat => stat.size).catch(() => 0), { timeout: 30000 }).toBeGreaterThan(0);
+  const allXfdf = await inspectXfdf(allXfdfPath);
+  if (allXfdf.root !== "xfdf" || allXfdf.namespace !== "http://ns.adobe.com/xfdf/" || allXfdf.annotations.length < 2)
+    throw Error("All-comments XFDF root, namespace, or annotation count changed");
+  const exportedJapanese = allXfdf.annotations.filter(annotation =>
+    annotation.type === "text" && annotation.title === "日本語レビュー" && annotation.contents === xfdfComment,
+  );
+  if (exportedJapanese.length !== 1)
+    throw Error("All-comments XFDF did not preserve the Japanese text annotation and author");
+
+  await page.getByLabel("コメントを検索", { exact: true }).fill("日本語XFDF");
+  await expect(comments).toHaveCount(1);
+  await expect(comments.first()).toContainText(xfdfComment);
+  const filteredXfdfPath = path.join(process.env.KIKKI_SMOKE_DIR, "comments-native-filtered.xfdf");
+  await fs.rm(filteredXfdfPath, { force: true });
+  const filteredXfdfPicker = pickNativeFile(filteredXfdfPath);
+  await page.getByRole("button", { name: "絞り込み結果をXFDF保存", exact: true }).click();
+  await filteredXfdfPicker;
+  await expect.poll(() => fs.stat(filteredXfdfPath).then(stat => stat.size).catch(() => 0), { timeout: 30000 }).toBeGreaterThan(0);
+  const filteredXfdf = await inspectXfdf(filteredXfdfPath);
+  if (filteredXfdf.root !== "xfdf" || filteredXfdf.namespace !== "http://ns.adobe.com/xfdf/" || filteredXfdf.annotations.length !== 1)
+    throw Error("Filtered XFDF did not contain exactly the matching annotation");
+  const filteredJapanese = filteredXfdf.annotations[0];
+  if (filteredJapanese.type !== "text" || filteredJapanese.title !== "日本語レビュー" || filteredJapanese.contents !== xfdfComment)
+    throw Error("Filtered XFDF did not preserve the selected annotation contents and author");
   console.log(
     JSON.stringify({
       native: true,
@@ -979,6 +1049,8 @@ async function verifyObjectContext(page, root) {
       objectContextDeletion: true,
       nativePdfComparisonReport: true,
       nativeCommentCsvExport: true,
+      nativeCommentXfdfExport: true,
+      filteredCommentXfdfExport: true,
       elapsedSeconds: Math.round((Date.now() - started) / 1000),
       errors,
     }),

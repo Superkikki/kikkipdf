@@ -107,3 +107,29 @@ it("limits review states to Text annotations and preserves unrelated metadata", 
   expect(() => writeCommentMetadata(highlight, { reviewStatus: "Accepted" })).toThrow();
   expect(highlight.get(PDFName.of("State"))).toBeUndefined();
 });
+
+it("lists added markup comments and preserves their edited author and contents in PDF output", async () => {
+  const model = emptyDocument("markup-comments.pdf");
+  model.pages = [blankPage()];
+  model.pages[0].objects = ["highlight", "underline", "strike", "ink"].map((kind, index) => ({
+    ...newObject(kind as "highlight" | "underline" | "strike" | "ink", 40, 60 + index * 30),
+    text: `確認 ${index}`, author: "日本語レビュー",
+    ...(kind === "ink" ? { points: [{ x: 0, y: 0 }, { x: 15, y: 10 }] } : {}),
+  }));
+  const rows = buildComments(model, []);
+  expect(rows).toHaveLength(4);
+  expect(rows.map(row => row.subtype)).toEqual(["Highlight", "Underline", "StrikeOut", "Ink"]);
+  expect(filterComments(rows, { query: "", author: "", status: "", pageId: "", subtype: "xfdf" })).toHaveLength(4);
+  expect(filterComments(rows, { query: "", author: "", status: "", pageId: "", subtype: "Ink" })).toHaveLength(1);
+  expect(rows.every(row => row.added && row.editable && !row.reviewable)).toBe(true);
+  expect(filterComments(rows, { query: "確認", author: "日本語レビュー", status: "", pageId: "" })).toHaveLength(4);
+  const output = await PDFDocument.load(await exportPdf(model));
+  const annotations = output.getPage(0).node.Annots()!;
+  expect(annotations.size()).toBe(4);
+  for (let index = 0; index < annotations.size(); index++) {
+    const annotation = annotations.lookup(index, PDFDict);
+    expect(annotation.lookup(PDFName.of("T"), PDFHexString).decodeText()).toBe("日本語レビュー");
+    expect(annotation.lookup(PDFName.of("Contents"), PDFHexString).decodeText()).toBe(`確認 ${index}`);
+    expect(annotation.has(PDFName.of("State"))).toBe(false);
+  }
+});

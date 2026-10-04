@@ -3,8 +3,10 @@ import type { AnnotationEdit, DocumentModel, ReviewStatus } from "../state/model
 import { documentStore } from "../state/store";
 import { deleteObject, updateObject } from "../commands/document";
 import { editAnnotation } from "./commands";
-import { buildComments, filterComments, readComments, reviewStatuses, type ImportedComment } from "./comments";
+import { buildComments, filterComments, readComments, commentTypes, reviewStatuses, type ImportedComment } from "./comments";
 import { commentsCsv } from "./commentCsv";
+import { commentsXfdf } from "./commentXfdf";
+import { flushInlineText } from "../editor/flushInlineText";
 import { saveBytes } from "../platform/files";
 
 export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id: string) => void }) {
@@ -17,6 +19,7 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
   const [author, setAuthor] = useState("");
   const [status, setStatus] = useState("");
   const [pageId, setPageId] = useState("");
+  const [subtype, setSubtype] = useState("");
   const [offset, setOffset] = useState(0);
   const sources = model.sources;
   useEffect(() => {
@@ -28,10 +31,10 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
     return () => { live = false; };
   }, [sources]);
   useEffect(() => {
-    setSelected(""); setQuery(""); setAuthor(""); setStatus(""); setPageId(""); setOffset(0); setSaveError("");
+    setSelected(""); setQuery(""); setAuthor(""); setStatus(""); setPageId(""); setSubtype(""); setOffset(0); setSaveError("");
   }, [model.id]);
   const comments = buildComments(model, loaded?.sources === sources ? loaded.comments : []);
-  const filtered = filterComments(comments, { query, author, status, pageId });
+  const filtered = filterComments(comments, { query, author, status, pageId, subtype });
   const start = Math.min(offset, Math.max(0, Math.floor((filtered.length - 1) / 100) * 100));
   const current = comments.find((comment) => comment.key === selected);
   const authors = [...new Set(comments.map((comment) => comment.author).filter(Boolean))].sort();
@@ -40,11 +43,16 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
     documentStore.execute(current.added ? updateObject(current.pageId, current.id, patch) : editAnnotation(current.pageId, current.id, patch));
   }
   function resetList() { setSelected(""); setOffset(0); }
-  async function saveComments(filteredOnly: boolean) {
+  async function saveComments(filteredOnly: boolean, format: "csv" | "xfdf" = "csv") {
+    if (!flushInlineText()) return;
     setSaveError(""); setSaving(true);
     try {
-      const rows = filteredOnly ? filtered : comments;
-      await saveBytes(commentsCsv(rows), `${model.name.replace(/\.(pdf|kpdf)$/i, "")}-コメント${filteredOnly ? "-絞り込み" : ""}.csv`);
+      const snapshot = documentStore.document;
+      if (!snapshot || snapshot.id !== model.id || loaded?.sources !== snapshot.sources) return;
+      const all = buildComments(snapshot, loaded.comments);
+      const rows = filteredOnly ? filterComments(all, { query, author, status, pageId, subtype }) : all;
+      const bytes = format === "xfdf" ? await commentsXfdf(snapshot, rows) : commentsCsv(rows);
+      await saveBytes(bytes, `${snapshot.name.replace(/\.(pdf|kpdf)$/i, "")}-コメント${filteredOnly ? "-絞り込み" : ""}.${format}`);
     } catch (reason) {
       setSaveError(reason instanceof Error ? reason.message : "コメント一覧を保存できませんでした。");
     } finally { setSaving(false); }
@@ -69,14 +77,25 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
         <option value="">すべてのページ</option>
         {model.pages.map((page, index) => <option key={page.id} value={page.id}>ページ {index + 1}</option>)}
       </select></label>
+      <label>種類<select aria-label="コメントの種類で絞り込み" value={subtype}
+        onChange={(event) => { setSubtype(event.target.value); resetList(); }}>
+        <option value="">すべての種類</option>
+        <option value="xfdf">XFDF対応の種類</option>
+        {[...new Set(comments.map(comment => comment.subtype).filter((value): value is string => !!value))].sort().map(value =>
+          <option key={value} value={value}>{commentTypes[value] ?? value}</option>)}
+      </select></label>
       <p role="status">{filtered.length} / {comments.length} 件</p>
-      {(query || author || status || pageId) && <button onClick={() => {
-        setQuery(""); setAuthor(""); setStatus(""); setPageId(""); resetList();
+      {(query || author || status || pageId || subtype) && <button onClick={() => {
+        setQuery(""); setAuthor(""); setStatus(""); setPageId(""); setSubtype(""); resetList();
       }}>絞り込みを解除</button>}
     </div>
     <div className="comment-export">
       <button disabled={cannotExport || !comments.length} onClick={() => void saveComments(false)}>全件をCSV保存</button>
       <button disabled={cannotExport || !filtered.length} onClick={() => void saveComments(true)}>絞り込み結果をCSV保存</button>
+    </div>
+    <div className="comment-export">
+      <button disabled={cannotExport || !comments.length} onClick={() => void saveComments(false, "xfdf")}>全件をXFDF保存</button>
+      <button disabled={cannotExport || !filtered.length} onClick={() => void saveComments(true, "xfdf")}>絞り込み結果をXFDF保存</button>
     </div>
     {saveError && <p className="warning" role="alert">{saveError}</p>}
     {loaded?.sources !== sources && !error && <p className="empty-panel" role="status">コメントを読み込み中…</p>}
