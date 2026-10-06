@@ -692,6 +692,20 @@ async function verifyObjectContext(page, root) {
     .getByRole("dialog")
     .getByLabel("NativeOriginal", { exact: true })
     .fill("日本語の既存欄");
+  const formDataPath = path.join(process.env.KIKKI_SMOKE_DIR, "form-values-native.xfdf");
+  await fs.rm(formDataPath, { force: true });
+  const formDataSave = pickNativeFile(formDataPath);
+  await page.getByRole("button", { name: "フォーム値をXFDF保存", exact: true }).click();
+  await formDataSave;
+  await expect.poll(() => fs.stat(formDataPath).then(stat => stat.size).catch(() => 0), { timeout: 30000 }).toBeGreaterThan(0);
+  const exportedFormData = await fs.readFile(formDataPath, "utf8");
+  if (!exportedFormData.includes('name="NativeOriginal"') || !exportedFormData.includes("日本語の既存欄")) throw Error("Native form XFDF export lost edited values");
+  await page.getByRole("button", { name: "入力値を読み込み時に戻す", exact: true }).click();
+  await expect(page.getByRole("dialog").getByLabel("NativeOriginal", { exact: true })).not.toHaveValue("日本語の既存欄");
+  const formDataImport = pickNativeFile(formDataPath);
+  await page.getByRole("button", { name: "フォーム値をXFDF読み込み", exact: true }).click();
+  await formDataImport;
+  await expect(page.getByRole("dialog").getByLabel("NativeOriginal", { exact: true })).toHaveValue("日本語の既存欄");
   await page
     .getByRole("button", { name: "フォームを作成・編集", exact: true })
     .click();
@@ -957,6 +971,13 @@ async function verifyObjectContext(page, root) {
     !csv.includes('"1","Smoke Reviewer","完了","Native CSV note","追加"'))
     throw Error("Native CSV export did not include the edited note and Japanese columns");
 
+  const csvImportPicker = pickNativeFile(csvPath);
+  await page.getByRole("button", { name: "CSVを読み込む", exact: true }).click();
+  await csvImportPicker;
+  await expect(comments.filter({ hasText: "Native CSV note" })).toHaveCount(2);
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await expect(comments.filter({ hasText: "Native CSV note" })).toHaveCount(1);
+
   const xfdfComment = "日本語XFDF注釈 & <確認>";
   await comments.filter({ hasText: "Native CSV note" }).click();
   await page.getByLabel("コメント内容", { exact: true }).fill(xfdfComment);
@@ -1083,6 +1104,8 @@ async function verifyObjectContext(page, root) {
       ocrJapaneseAndEnglish: true,
       nativeEncryptionRoundTrip: true,
       editableJapaneseForm: true,
+      nativeFormXfdfRoundTrip: true,
+      restoredFormValues: true,
       savedBookmarks: true,
       savedAttachments: true,
       savedInternalLink: true,

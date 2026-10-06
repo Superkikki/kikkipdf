@@ -70,6 +70,9 @@ export interface EditObject extends Box {
   text?: string;
   author?: string;
   reviewStatus?: ReviewStatus;
+  textStrokeWidth?: number;
+  textStrokeColor?: string;
+  textOutlineOnly?: boolean;
   fontSize: number;
   font: "sans" | "serif" | "mono" | "japanese" | "custom";
   fontId?: string;
@@ -111,6 +114,7 @@ export interface Source {
   bytes: Uint8Array;
   /** User visibility overrides, scoped to original PDF optional-content refs. */
   layerVisibility?: Record<string, boolean>;
+  layerNames?: Record<string, string>;
 }
 export interface ImageAsset {
   id: string;

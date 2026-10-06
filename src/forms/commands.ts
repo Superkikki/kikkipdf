@@ -74,7 +74,12 @@ export const updateImportedForm = (
       ...patch,
     });
     const importedFormEdits = { ...d.importedFormEdits, [field.key]: edit };
-    const resolved = resolveImportedForm(field, { ...d, importedFormEdits });
+    let formValues = d.formValues;
+    if (field.kind === "radio" && patch.options) {
+      const previous = resolveImportedForm(field, d), index = previous.options.indexOf(String(previous.value));
+      formValues = { ...formValues, [field.key]: index >= 0 ? patch.options[index] : "" };
+    }
+    const resolved = resolveImportedForm(field, { ...d, formValues, importedFormEdits });
     if (
       field.kind === "text" &&
       resolved.maxLength !== undefined &&
@@ -89,8 +94,8 @@ export const updateImportedForm = (
       formValues:
         JSON.stringify(resolved.value) ===
         JSON.stringify(d.formValues[field.key] ?? field.value)
-          ? d.formValues
-          : { ...d.formValues, [field.key]: resolved.value },
+          ? formValues
+          : { ...formValues, [field.key]: resolved.value },
     };
   });
 
@@ -108,8 +113,11 @@ export const resetImportedForm = (field: FormDescriptor) =>
       throw Error(
         "元の最大文字数を超える入力値があります。先に入力値を修正してください。",
       );
-    const nextValue =
-      field.kind === "dropdown" || field.kind === "list"
+    const currentOptions = d.importedFormEdits[field.key].options;
+    const radioIndex = currentOptions?.indexOf(String(value)) ?? -1;
+    const nextValue = field.kind === "radio" && currentOptions
+      ? radioIndex >= 0 ? field.options[radioIndex] : ""
+      : field.kind === "dropdown" || field.kind === "list"
         ? normalizeChoiceValue(
             value,
             field.choiceOptions?.map((o) => o.value) ?? field.options,

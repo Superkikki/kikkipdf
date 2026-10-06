@@ -16,7 +16,7 @@ const white = (b: number) => [0, 9, 10, 12, 13, 32].includes(b);
 const delimiter = (b: number) =>
   white(b) || [40, 41, 60, 62, 91, 93, 123, 125, 47, 37].includes(b);
 /** Bounded PDF content/CMap lexer. Offsets always refer to original bytes.
- * Inline images are deliberately rejected: their binary data cannot be tokenized.
+ * Inline images with verifiable byte boundaries are kept as opaque operations.
  */
 export function parseContent(bytes: Uint8Array): Operation[] {
   if (bytes.length > 64 * 1024 * 1024)
@@ -150,10 +150,67 @@ export function parseContent(bytes: Uint8Array): Operation[] {
   while (at < bytes.length) {
     const v = value();
     if (isOperator(v)) {
-      if (v.operator === "BI")
-        throw Error(
-          "インライン画像を含むページの直接編集にはまだ対応していません。",
-        );
+      if (v.operator === "BI") {
+        if (args.length) fail();
+        const parameters = new Map<string, Operand>();
+        while (at < bytes.length) {
+          const key = value();
+          if (isOperator(key) && key.operator === "ID") break;
+          if (!isName(key) || parameters.has(key.name)) fail();
+          const item = value();
+          if (isOperator(item)) fail();
+          parameters.set((key as { name: string }).name, item as Operand);
+        }
+        if (!white(bytes[at])) fail();
+        if (bytes[at++] === 13 && bytes[at] === 10) at++;
+        const dataStart = at;
+        const filter = parameters.get("F") ?? parameters.get("Filter");
+        const outer = Array.isArray(filter) ? filter[0] : filter;
+        if (filter === undefined) {
+          const width = parameters.get("W") ?? parameters.get("Width"), height = parameters.get("H") ?? parameters.get("Height");
+          const mask = parameters.get("IM") ?? parameters.get("ImageMask");
+          const bits = parameters.get("BPC") ?? parameters.get("BitsPerComponent") ?? (mask === true ? 1 : undefined);
+          const color = parameters.get("CS") ?? parameters.get("ColorSpace");
+          const name = isName(color) ? color.name : Array.isArray(color) && isName(color[0]) ? color[0].name : "";
+          const components = mask === true || ["G", "DeviceGray", "I", "Indexed"].includes(name) ? 1
+            : ["RGB", "DeviceRGB"].includes(name) ? 3 : ["CMYK", "DeviceCMYK"].includes(name) ? 4 : 0;
+          if (typeof width !== "number" || typeof height !== "number" || typeof bits !== "number" ||
+              !Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 ||
+              width > 16384 || height > 16384 || ![1, 2, 4, 8, 16].includes(bits) || !components) fail();
+          const length = Math.ceil((width as number) * (bits as number) * components / 8) * (height as number);
+          if (length > 64 * 1024 * 1024 || at + length > bytes.length) fail();
+          at += length;
+        } else if (isName(outer) && ["AHx", "ASCIIHexDecode"].includes(outer.name)) {
+          while (at < bytes.length && bytes[at] !== 62) {
+            const b = bytes[at++];
+            if (!white(b) && !((b >= 48 && b <= 57) || (b >= 65 && b <= 70) || (b >= 97 && b <= 102))) fail();
+          }
+          if (bytes[at++] !== 62) fail();
+        } else if (isName(outer) && ["A85", "ASCII85Decode"].includes(outer.name)) {
+          while (at < bytes.length && !(bytes[at] === 126 && bytes[at + 1] === 62)) {
+            const b = bytes[at++];
+            if (!white(b) && !(b >= 33 && b <= 117) && b !== 122) fail();
+          }
+          if (bytes[at++] !== 126 || bytes[at++] !== 62) fail();
+        } else if (isName(outer) && ["RL", "RunLengthDecode"].includes(outer.name)) {
+          let decoded = 0, ended = false;
+          while (at < bytes.length) {
+            const length = bytes[at++];
+            if (length === 128) { ended = true; break; }
+            at += length < 128 ? length + 1 : 1;
+            decoded += length < 128 ? length + 1 : 257 - length;
+            if (at > bytes.length || decoded > 64 * 1024 * 1024) fail();
+          }
+          if (!ended) fail();
+        } else throw Error("このインライン画像の圧縮形式の境界を確認できません。対応形式は非圧縮・ASCIIHex・ASCII85・RunLengthです。");
+        if (at - dataStart > 64 * 1024 * 1024 || !white(bytes[at])) fail();
+        skip();
+        if (bytes[at++] !== 69 || bytes[at++] !== 73 || (at < bytes.length && !delimiter(bytes[at]))) fail();
+        operations.push({ operator: "BI", args: [parameters], start, end: at });
+        args = []; skip(); start = at;
+        if (operations.length > 200000) fail();
+        continue;
+      }
       operations.push({ operator: v.operator, args, start, end: at });
       args = [];
       skip();

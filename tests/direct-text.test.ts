@@ -16,6 +16,7 @@ import {
   rewrittenContent,
 } from "../src/direct/content";
 import { boundedDecode } from "../src/direct/pdfFonts";
+import { inlineTextPatch } from "../src/editor/inlineText";
 import { directTextObject } from "../src/direct/editor";
 import { directReferences } from "../src/direct/model";
 import {
@@ -281,12 +282,12 @@ describe("original glyph removal with preserved text advance", () => {
       "UNIQUE_original_text",
     );
   });
-  it("refuses clipped, rotated, invisible, ActualText and unknown operator text", async () => {
+  it("refuses clipped, sheared, invisible, ActualText and unknown operator text", async () => {
     for (const commands of [
       "0 0 40 40 re W n " + content,
-      content.replace("1 0 0 1 40 300 Tm", "0 1 -1 0 40 300 Tm"),
+      content.replace("1 0 0 1 40 300 Tm", "1 0.5 0 1 40 300 Tm"),
       content.replace("20 Tf", "20 Tf 3 Tr"),
-      "/Span << /ActualText (UNIQUE_original_text) >> BDC " + content + " EMC",
+      "/Span << /ActualText (UNIQUE_original_text) >> BDC " + content + " (Other) Tj EMC",
       content + " 123 UnknownOp",
       "BI /W 1 /H 1 ID x EI " + content,
     ]) {
@@ -645,7 +646,7 @@ describe("Form XObject text editing", () => {
     for (const options of [
       { commands: "0 0 1 1 re W n BT /F1 12 Tf 1 0 0 1 20 50 Tm (FORM_original) Tj ET" },
       { commands: "BT /F1 12 Tf 1 0 0 1 20 0 Tm (FORM_original) Tj ET" },
-      { matrix: [0, 1, -1, 0, 150, 0] },
+      { matrix: [1, 0.5, 0, 1, 150, 0] },
     ]) expect((await inspect(await formFixture(options))).runs).toHaveLength(0);
     const d = await formFixture(), pdf = await PDFDocument.load(d.sources.s.bytes), p = pdf.getPage(0);
     p.node.set(PDFName.of("Contents"), pdf.context.register(pdf.context.flateStream(
@@ -659,4 +660,177 @@ describe("Form XObject text editing", () => {
     p.node.set(PDFName.of("Contents"), pdf.context.register(pdf.context.flateStream(enc("/Form Do"))));
     expect((await inspectDirectText(await pdf.save(), 0)).unsupported).toContain("循環");
   });
+});
+
+describe("Office poster text painting", () => {
+  it("edits text inside transformed and nested rectangle clips, preserving following positions", async () => {
+    const d = await fixture("q 1 0 0 1 10 20 cm 0 0 400 380 re W* n q 400 380 -400 -380 re W n " + content + " Q Q");
+    const before = await inspect(d);
+    expect(before.runs).toHaveLength(2);
+    const saved = await exportPdf(await edit(d));
+    const after = await inspectDirectText(saved, 0);
+    expect(after.runs.some(r => r.text === "UNIQUE_original_text")).toBe(false);
+    expect(after.runs.find(r => r.text === " Following")!.x).toBeCloseTo(before.runs[1].x, 7);
+    expect(after.runs.find(r => r.text === " Following")!.y).toBeCloseTo(before.runs[1].y, 7);
+  });
+  it("preserves same-color outline text across editing, project save and PDF export", async () => {
+    const d = await fixture("q 0 0 420 400 re W* n 0.5 w 0 G " + content.replace("20 Tf", "20 Tf 2 Tr") + " Q");
+    const inspection = await inspect(d);
+    expect(inspection.runs[0].textStrokeWidth).toBe(0.5);
+    const changed = await edit(d);
+    const reopened = await openProject(await saveProject(changed));
+    expect(reopened.pages[0].objects[0].textStrokeWidth).toBe(0.5);
+    const saved = await exportPdf(reopened);
+    const after = await inspectDirectText(saved, 0);
+    const replacement = after.runs.find(r => r.text === "Replaced")!;
+    expect(replacement.textStrokeWidth).toBe(0.5);
+    expect(after.runs.some(r => r.text === "UNIQUE_original_text")).toBe(false);
+    expect(after.runs.find(r => r.text === " Following")!.x).toBeCloseTo(inspection.runs[1].x, 7);
+  });
+  it("accepts explicit Normal blending and None masks without weakening effect rejection", async () => {
+    for (const [settings, accepted] of [
+      [{ BM: "Normal", SMask: "None", ca: 1, CA: 1 }, true],
+      [{ BM: "Multiply" }, false],
+      [{ SMask: { S: "Alpha" } }, false],
+      [{ BM: "Normal", CA: 0.3 }, false],
+    ] as const) {
+      const d = await fixture("/GS gs " + content.replace("20 Tf", "20 Tf 2 Tr"));
+      const pdf = await PDFDocument.load(d.sources.s.bytes);
+      pdf.getPage(0).node.Resources()!.set(PDFName.of("ExtGState"), pdf.context.obj({ GS: settings }));
+      expect((await inspectDirectText(await pdf.save(), 0)).runs.length > 0).toBe(accepted);
+    }
+  });
+  it("refuses partial, complex and intersecting clips, and unsupported outlines", async () => {
+    for (const commands of [
+      "0 0 100 400 re W n " + content,
+      "0 0 420 400 re W n 0 0 20 20 re W* n " + content,
+      "0 0 m 420 0 l 420 400 l 0 400 l h W n " + content,
+      "0 0 420 400 re 0 0 20 20 re W* n " + content,
+
+      "[3 2] 0 d " + content.replace("20 Tf", "20 Tf 2 Tr"),
+
+      content.replace("20 Tf", "20 Tf 6 Tr"),
+    ]) expect((await inspect(await fixture(commands))).runs).toHaveLength(0);
+    const restored = await inspect(await fixture("q 0 0 20 20 re W n Q " + content));
+    expect(restored.runs).toHaveLength(2);
+  });
+});
+
+describe("rotated graph labels", () => {
+  for (const angle of [-90, 90, 180, 35]) {
+    it(`keeps the baseline and neighbours when editing a ${angle} degree label`, async () => {
+      const radians = angle * Math.PI / 180, c = Math.cos(radians), s = Math.sin(radians);
+      const commands = content.replace("1 0 0 1 40 300 Tm", `${c.toFixed(9)} ${s.toFixed(9)} ${(-s).toFixed(9)} ${c.toFixed(9)} 180 200 Tm`).replace("20 Tf", "20 Tf 2 Tc 80 Tz 3 Ts");
+      const d = await fixture(commands), before = await inspect(d), run = before.runs[0];
+      expect(run.rotation).toBeCloseTo(-angle, 5);
+      const object = directTextObject(before, d.pages[0], run.text, run);
+      expect(object.rotation).toBeCloseTo(-angle, 5);
+      expect(object.width).toBeCloseTo(run.advanceWidth!, 7);
+      object.text = "Changed axis";
+      d.pages[0].objects.push(object);
+      const reopened = await openProject(await saveProject(d));
+      const after = await inspectDirectText(await exportPdf(reopened), 0);
+      const replacement = after.runs.find(r => r.text === object.text)!;
+      expect(replacement.rotation).toBeCloseTo(run.rotation!, 5);
+      expect(replacement.baselineX).toBeCloseTo(run.baselineX!, 6);
+      expect(replacement.baseline).toBeCloseTo(run.baseline, 6);
+      const neighbour = after.runs.find(r => r.text === " Following")!;
+      expect(neighbour.baselineX).toBeCloseTo(before.runs[1].baselineX!, 6);
+      expect(neighbour.baseline).toBeCloseTo(before.runs[1].baseline, 6);
+      expect(after.runs.some(r => r.text === run.text)).toBe(false);
+    });
+  }
+  it("merges adjacent rotated operations and distinguishes duplicate labels by position", async () => {
+    const first = "BT /F1 20 Tf 0 1 -1 0 180 100 Tm (Axis) Tj ( label) Tj ET";
+    const d = await fixture(first + " " + first.replace("180 100", "280 100"));
+    const before = await inspect(d), group = before.runs.slice(0, 2);
+    const box = { x: Math.min(...group.map(r => r.x)), y: Math.min(...group.map(r => r.y)),
+      width: Math.max(...group.map(r => r.x + r.width)) - Math.min(...group.map(r => r.x)),
+      height: Math.max(...group.map(r => r.y + r.height)) - Math.min(...group.map(r => r.y)) };
+    const object = directTextObject(before, d.pages[0], "Axis label", box);
+    expect(object.sourceText.additional).toHaveLength(1);
+    expect(object.width).toBeCloseTo(group.reduce((sum, r) => sum + r.advanceWidth!, 0), 6);
+    object.text = "Changed"; d.pages[0].objects.push(object);
+    const after = await inspectDirectText(await exportPdf(d), 0);
+    expect(after.runs.filter(r => r.text === "Axis")).toHaveLength(1);
+    expect(after.runs.filter(r => r.text === " label")).toHaveLength(1);
+    expect(after.runs.some(r => r.text === "Changed")).toBe(true);
+    expect(() => directTextObject(before, d.pages[0], "Axis label", { ...box, x: box.x + 50 })).toThrow();
+  });
+  it("applies rectangular clips to the rotated bounds and refuses reflected or sheared text", async () => {
+    const rotated = content.replace("1 0 0 1 40 300 Tm", "0 1 -1 0 180 100 Tm");
+    expect((await inspect(await fixture("0 0 420 400 re W n " + rotated))).runs).toHaveLength(2);
+    expect((await inspect(await fixture("170 0 5 400 re W n " + rotated))).runs).toHaveLength(0);
+    for (const matrix of ["-1 0 0 1", "1 0.2 0 1", "0 0 0 0"])
+      expect((await inspect(await fixture(content.replace("1 0 0 1 40 300 Tm", `${matrix} 180 200 Tm`)))).runs).toHaveLength(0);
+  });
+});
+
+
+it("keeps a rotated first baseline fixed when the inline editor grows for multiline text", async () => {
+  const d = await fixture(content.replace("1 0 0 1 40 300 Tm", "0 1 -1 0 180 100 Tm"));
+  const inspection = await inspect(d), run = inspection.runs[0];
+  const object = directTextObject(inspection, d.pages[0], run.text, run);
+  Object.assign(object, inlineTextPatch(object, "First line\nSecond line", { width: 130, height: 50 }));
+  d.pages[0].objects.push(object);
+  const after = await inspectDirectText(await exportPdf(d), 0);
+  const first = after.runs.find(r => r.text === "First line")!, second = after.runs.find(r => r.text === "Second line")!;
+  expect(first.baselineX).toBeCloseTo(run.baselineX!, 7);
+  expect(first.baseline).toBeCloseTo(run.baseline, 7);
+  expect(second.baselineX).toBeCloseTo(first.baselineX! + 25, 7);
+  expect(second.baseline).toBeCloseTo(first.baseline, 7);
+});
+
+
+it("separates rewritten numeric TJ operations from adjoining source operators", async () => {
+  const d = await fixture("BT /F1 20 Tf 1 0 0 1 40 300 Tm 2 Tc[(UNIQUE_original_text)]TJ( Following)Tj ET");
+  const before = await inspect(d), after = await inspectDirectText(await exportPdf(await edit(d)), 0);
+  expect(after.runs.some(r => r.text === "Replaced")).toBe(true);
+  expect(after.runs.find(r => r.text === " Following")!.x).toBeCloseTo(before.runs[1].x, 7);
+  expect(after.runs.some(r => r.text === "UNIQUE_original_text")).toBe(false);
+});
+
+it("edits separately colored fill and outline text and outline-only text", async () => {
+  for (const mode of [1, 2]) {
+    const d = await fixture("0.2 0.4 0.6 rg 1 0 0 RG 0.7 w " + content.replace("20 Tf", `20 Tf ${mode} Tr`));
+    const before = await inspect(d), run = before.runs[0];
+    expect(run.textStrokeColor).toBe("#ff0000"); expect(!!run.textOutlineOnly).toBe(mode === 1);
+    const saved = await exportPdf(await openProject(await saveProject(await edit(d))));
+    const after = await inspectDirectText(saved, 0), replacement = after.runs.find(r => r.text === "Replaced")!;
+    expect(replacement.textStrokeColor).toBe("#ff0000"); expect(!!replacement.textOutlineOnly).toBe(mode === 1);
+    expect(after.runs.find(r => r.text === " Following")!.x).toBeCloseTo(before.runs[1].x, 7);
+  }
+});
+it("edits one self-contained ActualText scope and removes the old alternate text on save", async () => {
+  const d = await fixture("/Span << /ActualText (Logical text) /Lang (en) >> BDC BT /F1 20 Tf 1 0 0 1 40 300 Tm (Rendered text) Tj ET EMC " + content);
+  const inspection = await inspect(d), run = inspection.runs[0];
+  expect(run.extractedText).toBe("Logical text");
+  const object = directTextObject(inspection, d.pages[0], "Logical text", run);
+  expect(object.text).toBe("Logical text"); expect(object.sourceText.originalText).toBe("Rendered text");
+  object.text = "Edited logical text"; d.pages[0].objects.push(object);
+  const saved = await exportPdf(d), streams = (await allStreams(saved)).join("\n");
+  expect(streams).not.toContain("ActualText"); expect(streams).not.toContain("Rendered text");
+  expect((await inspectDirectText(saved, 0)).runs.some(r => r.text === "Edited logical text")).toBe(true);
+});
+it("retains inline image bytes with embedded EI tokens while editing neighbouring text", async () => {
+  const image = "q 10 0 0 10 0 0 cm BI /W 5 /H 1 /BPC 8 /CS /G ID  EI x EI Q ";
+  const d = await fixture(image + content), original = await inspect(d);
+  expect(original.runs).toHaveLength(2);
+  const saved = await exportPdf(await edit(d));
+  expect((await allStreams(saved)).some(stream => stream.includes(image))).toBe(true);
+  expect((await inspectDirectText(saved, 0)).runs.some(r => r.text === "Replaced")).toBe(true);
+  for (const data of ["BI /W 1 /H 1 /BPC 8 /CS /G /F /AHx ID FF> EI", "BI /W 1 /H 1 /BPC 8 /CS /G /F /A85 ID z~> EI"])
+    expect(parseContent(enc(data + " " + content)).at(0)?.operator).toBe("BI");
+  expect(() => parseContent(enc("BI /W 1 /H 1 /BPC 8 /CS /G ID x missing"))).toThrow();
+});
+it("edits quarter-turned Form text independently of a shared invocation", async () => {
+  const d = await formFixture({ matrix: [0, 1, -1, 0, 150, 0] });
+  const before = await inspect(d), run = before.runs.find(r => r.text === "FORM_original")!;
+  expect(run.rotation).toBeCloseTo(-90, 5);
+  const object = directTextObject(before, d.pages[0], run.text, run); object.text = "Changed form"; d.pages[0].objects.push(object);
+  const after = await inspectDirectText(await exportPdf(d), 0);
+  const replacement = after.runs.find(r => r.text === "Changed form")!;
+  expect(replacement.rotation).toBeCloseTo(-90, 5);
+  expect(replacement.baselineX).toBeCloseTo(run.baselineX!, 6);
+  expect(replacement.baseline).toBeCloseTo(run.baseline, 6);
 });

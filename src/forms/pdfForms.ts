@@ -142,6 +142,7 @@ export class FormTransfer {
           {
             name: field.getName(),
             kind,
+            ...(field instanceof PDFRadioGroup ? { options: field.getOptions() } : {}),
             hasExportValues:
               (field instanceof PDFDropdown ||
                 field instanceof PDFOptionList) &&
@@ -170,6 +171,13 @@ export class FormTransfer {
             if (checked.multiline) field.enableMultiline();
             else field.disableMultiline();
           }
+        }
+        if (field instanceof PDFRadioGroup && checked.options) {
+          const oldOptions = field.getOptions(), current = String(value ?? field.getSelected() ?? "");
+          const selectedIndex = oldOptions.indexOf(current);
+          value = value !== undefined ? checked.options.includes(current) ? current : ""
+            : selectedIndex >= 0 ? checked.options[selectedIndex] : "";
+          field.acroField.setOpt(checked.options.map(option => PDFHexString.fromText(option)));
         }
         if (field instanceof PDFDropdown || field instanceof PDFOptionList) {
           if (

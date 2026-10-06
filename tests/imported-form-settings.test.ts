@@ -424,3 +424,30 @@ it("keeps choice export values, indices, defaults and appearances across editing
       .acroField.dict.has(PDFName.of("DV")),
   ).toBe(false);
 });
+
+it("renames radio export values while preserving the selected widget, undo and saved options", async () => {
+  const { model, fields } = await fixture(), field = fields.find(f => f.kind === "radio")!;
+  const history = new History(model);
+  history.execute(updateImportedForm(field, { options: ["First", "Second"] }));
+  expect(resolveImportedForm(field, history.current.document).value).toBe("Second");
+  expect(resolveImportedForm(field, history.current.document).widgets[1].option).toBe("Second");
+  history.undo(); expect(resolveImportedForm(field, history.current.document).value).toBe("B"); history.redo();
+  const reopened = await openProject(await saveProject(history.current.document));
+  const saved = await PDFDocument.load(await exportPdf(reopened));
+  expect(saved.getForm().getRadioGroup("Choice").getOptions()).toEqual(["First", "Second"]);
+  expect(saved.getForm().getRadioGroup("Choice").getSelected()).toBe("Second");
+  const restored = resetImportedForm(field).apply(reopened);
+  expect(resolveImportedForm(field, restored).value).toBe("B");
+  expect((await PDFDocument.load(await exportPdf(restored))).getForm().getRadioGroup("Choice").getSelected()).toBe("B");
+  expect(() => updateImportedForm(field, { options: ["One"] }).apply(model)).toThrow("同じ件数");
+  expect(() => updateImportedForm(field, { multiSelect: true }).apply(model)).toThrow();
+});
+
+
+it("preserves the selected radio position when renamed values swap existing names", async () => {
+  const { model, fields } = await fixture(), field = fields.find(f => f.kind === "radio")!;
+  const changed = updateImportedForm(field, { options: ["B", "A"] }).apply(model);
+  expect(resolveImportedForm(field, changed).value).toBe("A");
+  expect((await PDFDocument.load(await exportPdf(changed))).getForm().getRadioGroup("Choice").getSelected()).toBe("A");
+  expect(resolveImportedForm(field, resetImportedForm(field).apply(changed)).value).toBe("B");
+});

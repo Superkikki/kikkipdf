@@ -298,6 +298,14 @@ export function Properties({
                   onChange={(e) => patch({ color: e.target.value })}
                 />
               </label>
+              {!!o.textStrokeWidth && <>
+                <label>文字の輪郭色<input type="color" aria-label="文字の輪郭色" value={o.textStrokeColor ?? o.color}
+                  onChange={e => patch({ textStrokeColor: e.target.value })} /></label>
+                <label>文字の輪郭幅<input type="number" aria-label="文字の輪郭幅" min="0.01" max="1000" step="0.1" value={o.textStrokeWidth}
+                  onChange={e => { const value = Number(e.target.value); if (value > 0 && value <= 1000) patch({ textStrokeWidth: value }); }} /></label>
+                <label><input type="checkbox" aria-label="輪郭線だけの文字" checked={!!o.textOutlineOnly}
+                  onChange={e => patch({ textOutlineOnly: e.target.checked })} />輪郭線だけ</label>
+              </>}
               <label>
                 塗りつぶし
                 <div className="row">

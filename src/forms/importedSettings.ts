@@ -57,7 +57,7 @@ export const importedFormEditSchema = z
   .refine((v) => v.options === undefined || v.choiceOptions === undefined);
 
 export function validateImportedFormEdit(
-  field: Pick<FormDescriptor, "name" | "kind" | "hasExportValues">,
+  field: Pick<FormDescriptor, "name" | "kind" | "hasExportValues"> & { options?: string[] },
   edit: ImportedFormEdit,
 ): ImportedFormEdit {
   const parsed = importedFormEditSchema.safeParse(edit);
@@ -73,12 +73,18 @@ export function validateImportedFormEdit(
     throw Error("複数行と最大文字数はテキスト欄で変更できます。");
   if (
     field.kind !== "dropdown" &&
-    field.kind !== "list" &&
+    field.kind !== "list" && field.kind !== "radio" &&
     (result.options !== undefined ||
       result.choiceOptions !== undefined ||
       result.multiSelect !== undefined)
   )
     throw Error("選択肢と複数選択はドロップダウン・リストで変更できます。");
+  if (field.kind === "radio") {
+    if (result.multiSelect !== undefined || result.choiceOptions !== undefined)
+      throw Error("ラジオボタンは1つだけ選択でき、選択肢の保存値を変更できます。");
+    if (result.options && field.options && result.options.length !== field.options.length)
+      throw Error("ラジオボタンの選択肢数を変更するには入力欄の追加・削除が必要です。現在と同じ件数にしてください。");
+  }
   if (field.hasExportValues && result.options !== undefined)
     throw Error(
       "表示名と保存値が異なる選択欄では、表示名と保存値を指定してください。",
@@ -120,6 +126,15 @@ export function resolveImportedForm(
       : field.hasExportValues,
     value,
   };
+  if (field.kind === "radio" && edit.options) {
+    const oldIndex = field.options.indexOf(String(value));
+    resolved.value = model.formValues[field.key] !== undefined
+      ? resolved.options.includes(String(value)) ? value : ""
+      : oldIndex >= 0 ? resolved.options[oldIndex] : "";
+    resolved.widgets = field.widgets.map(widget => ({ ...widget,
+      option: resolved.options[field.options.indexOf(widget.option ?? "")] ?? widget.option,
+    }));
+  }
   if (
     (field.kind === "dropdown" || field.kind === "list") &&
     (edit.options !== undefined ||

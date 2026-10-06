@@ -39,8 +39,16 @@ export interface DirectTextRun extends Box {
   text: string;
   /** Verified fallback used by PDF.js text extraction for legacy glyphs. */
   extractedText?: string;
+  editableText?: string;
+  textStrokeWidth?: number;
+  textStrokeColor?: string;
+  textOutlineOnly?: boolean;
   fontSize: number;
   baseline: number;
+  /** Screen angle and baseline origin for rotated horizontal text (not vertical writing). */
+  rotation?: number;
+  baselineX?: number;
+  advanceWidth?: number;
   writingMode?: "vertical";
   flowX?: number;
   flowTop?: number;

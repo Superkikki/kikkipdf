@@ -23,10 +23,11 @@ export class OptionalContentSource {
     private output: PDFDocument,
     private copier: PDFObjectCopier,
     private visibility: Record<string, boolean> = {},
+    names: Record<string, string> = {},
   ) {
     const properties = input.context.lookup(input.catalog.get(key("OCProperties")));
     if (!(properties instanceof PDFDict)) {
-      if (Object.keys(visibility).length) throw Error("表示を変更したレイヤーが見つかりません。");
+      if (Object.keys(visibility).length || Object.keys(names).length) throw Error("表示を変更したレイヤーが見つかりません。");
       return;
     }
     this.properties = properties;
@@ -37,6 +38,10 @@ export class OptionalContentSource {
       .map((ref) => `${ref.objectNumber}R${ref.generationNumber || ""}`));
     for (const [id, visible] of Object.entries(visibility)) {
       if (!known.has(id) || typeof visible !== "boolean") throw Error("表示を変更したレイヤーの参照が不正です。");
+    }
+    for (const [id, name] of Object.entries(names)) {
+      if (!known.has(id) || typeof name !== "string" || !name.trim() || name.length > 1000)
+        throw Error("変更したレイヤー名または参照が不正です。");
     }
     const locked = properties.lookupMaybe(key("D"), PDFDict)?.lookupMaybe(key("Locked"), PDFArray);
     if (locked) for (const ref of locked.asArray()) {
@@ -58,6 +63,8 @@ export class OptionalContentSource {
       }
       for (const name of group.keys()) group.delete(name);
       for (const [name, value] of safe) group.set(name, value);
+      const changedName = names[`${ref.objectNumber}R${ref.generationNumber || ""}`];
+      if (changedName !== undefined) group.set(key("Name"), PDFHexString.fromText(changedName));
       const visible = visibility[`${ref.objectNumber}R${ref.generationNumber || ""}`];
       if (visible !== undefined) {
         const usage = group.lookupMaybe(key("Usage"), PDFDict) ?? this.output.context.obj({});

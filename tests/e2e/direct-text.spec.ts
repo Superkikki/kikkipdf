@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, StandardFonts, rgb } from "pdf-lib";
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, StandardFonts, rgb, degrees } from "pdf-lib";
 import { readFile } from "node:fs/promises";
 import { inspectDirectText } from "../../src/direct/content";
 import { openProject } from "../../src/state/project";
@@ -421,3 +421,128 @@ for (const sample of [
     expect(after.runs.find(r => r.text === " Neighbour")!.x).toBeCloseTo(before.runs[1].x, 7);
   });
 }
+
+test("edits an Office-style poster heading through rectangle clipping and preserves its outline on save", async ({ page }, info) => {
+  const pdf = await PDFDocument.create(), sheet = pdf.addPage([420, 595]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  sheet.node.set(PDFName.of("Resources"), pdf.context.obj({
+    Font: { F1: font.ref }, ExtGState: { GS: { BM: "Normal", SMask: "None", ca: 1, CA: 1 } },
+  }));
+  sheet.node.set(PDFName.of("Contents"), pdf.context.register(pdf.context.flateStream(
+    "q 0 0 420 595 re W* n /GS gs 0.2 0.6 0.8 rg 0 0 420 595 re f Q " +
+    "q 0 0 420 595 re W* n /GS gs 0 g 0 G 0.6 w BT /F1 20 Tf 2 Tr " +
+    "1 0 0 1 40 520 Tm (Editable original) Tj ( Neighbour) Tj ET Q",
+  )));
+  await page.goto("/");
+  await open(page, Buffer.from(await pdf.save()), "office-poster.pdf");
+  const span = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Editable original Neighbour$/ });
+  await span.click();
+  const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
+  await expect(input).toBeFocused();
+  await input.fill("Edited poster heading");
+  await input.press("Enter");
+  const overlay = page.locator(".viewer-scroll .editable-text");
+  await expect(overlay).toHaveAttribute("stroke", "#000000");
+  await expect(overlay).toHaveAttribute("stroke-width", "0.6");
+  await expect(span).toHaveCount(0);
+  await expect(page.locator(".viewer-scroll .page-view[data-rendered=true]")).toBeVisible();
+  const background = await page.locator(".viewer-scroll canvas").first().evaluate((canvas: HTMLCanvasElement) =>
+    Array.from(canvas.getContext("2d")!.getImageData(10, 10, 1, 1).data).slice(0, 3));
+  expect(background).toEqual([51, 153, 204]);
+  const download = page.waitForEvent("download");
+  await page.keyboard.press("Control+s");
+  const output = info.outputPath("edited-office-poster.pdf");
+  await (await download).saveAs(output);
+  const saved = await readFile(output);
+  const after = await inspectDirectText(saved, 0);
+  expect(after.runs.find(r => r.text === "Edited poster heading")!.textStrokeWidth).toBe(0.6);
+  expect(after.runs.some(r => r.text.includes("Editable original"))).toBe(false);
+  await page.reload();
+  await open(page, saved);
+  await expect(page.locator(".viewer-scroll .textLayer")).toContainText("Edited poster heading");
+});
+
+for (const angle of [-90, 90, 35]) {
+  test(`edits a rotated ${angle} degree graph label, keeps its origin through multiline growth and saves editable text`, async ({ page }, info) => {
+    const pdf = await PDFDocument.create(), sheet = pdf.addPage([420, 595]);
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const radians = angle * Math.PI / 180, c = Math.cos(radians), s = Math.sin(radians);
+    sheet.node.set(PDFName.of("Resources"), pdf.context.obj({ Font: { F1: font.ref } }));
+    sheet.node.set(PDFName.of("Contents"), pdf.context.register(pdf.context.flateStream(
+      "q 0 0 420 595 re W* n 0.2 0.6 0.8 rg 0 0 420 595 re f Q " +
+      `q 0 0 420 595 re W* n BT /F1 20 Tf ${c.toFixed(9)} ${s.toFixed(9)} ${(-s).toFixed(9)} ${c.toFixed(9)} 180 280 Tm ` +
+      "(Axis) Tj ( label) Tj ET Q BT /F1 20 Tf 1 0 0 1 40 100 Tm (Neighbour) Tj ET",
+    )));
+    if (angle === -90) {
+      sheet.setCropBox(20, 30, 380, 550);
+      sheet.setRotation(degrees(90));
+    }
+    const bytes = await pdf.save(), before = await inspectDirectText(bytes, 0);
+    await page.goto("/");
+    await open(page, Buffer.from(bytes), "rotated-axis.pdf");
+    const axis = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Axis label$/ });
+    const neighbour = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Neighbour$/ });
+    const neighbourBefore = await neighbour.evaluate(el => {
+      const r = el.getBoundingClientRect(), p = el.closest(".page-view")!.getBoundingClientRect();
+      return { x: r.x - p.x, y: r.y - p.y };
+    });
+    await axis.click();
+    const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
+    await expect(input).toBeFocused();
+    await input.fill("変更した軸ラベル\nSecond line");
+    await input.press("Enter");
+    await expect(axis).toHaveCount(0);
+    const overlay = page.locator(".viewer-scroll .editable-text");
+    await expect(overlay).toContainText("変更した軸ラベル");
+    const neighbourAfter = await neighbour.evaluate(el => {
+      const r = el.getBoundingClientRect(), p = el.closest(".page-view")!.getBoundingClientRect();
+      return { x: r.x - p.x, y: r.y - p.y };
+    });
+    expect(neighbourAfter.x).toBeCloseTo(neighbourBefore.x, 1);
+    expect(neighbourAfter.y).toBeCloseTo(neighbourBefore.y, 1);
+    const download = page.waitForEvent("download");
+    await page.keyboard.press("Control+s");
+    const output = info.outputPath("edited-rotated-axis.pdf");
+    await (await download).saveAs(output);
+    const saved = await readFile(output), after = await inspectDirectText(saved, 0);
+    const replacement = after.runs.find(r => r.text === "変更した軸ラベル")!;
+    expect(replacement.rotation).toBeCloseTo(-angle, 5);
+    expect(replacement.baselineX).toBeCloseTo(before.runs[0].baselineX!, 5);
+    expect(replacement.baseline).toBeCloseTo(before.runs[0].baseline, 5);
+    expect(after.runs.some(r => r.text === "Axis" || r.text === " label")).toBe(false);
+    await page.reload();
+    await open(page, saved);
+    const reopened = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^変更した軸ラベル$/ });
+    await reopened.click();
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue("変更した軸ラベル");
+    await input.press("Escape");
+    await expect(reopened).toBeVisible();
+  });
+}
+
+test("edits outlined headings and single-operation ActualText beside a preserved inline image", async ({ page }, info) => {
+  const pdf = await PDFDocument.create(), sheet = pdf.addPage([420, 595]), font = await pdf.embedFont(StandardFonts.Helvetica);
+  sheet.node.set(PDFName.of("Resources"), pdf.context.obj({ Font: { F1: font.ref } }));
+  sheet.node.set(PDFName.of("Contents"), pdf.context.register(pdf.context.flateStream(
+    "q 10 0 0 10 0 0 cm BI /W 1 /H 1 /BPC 8 /CS /G /F /AHx ID 80> EI Q " +
+    "q 0.2 0.4 0.6 rg 1 0 0 RG 0.7 w BT /F1 20 Tf 2 Tr 1 0 0 1 40 520 Tm (Heading) Tj ET Q " +
+    "/Span << /ActualText (Logical) >> BDC BT /F1 20 Tf 1 0 0 1 40 470 Tm (Rendered) Tj ET EMC",
+  )));
+  await page.goto("/"); await open(page, Buffer.from(await pdf.save()), "extended-text.pdf");
+  const text = page.locator(".viewer-scroll .textLayer span");
+  await text.filter({ hasText: /^Heading$/ }).click();
+  const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
+  await expect(input).toBeFocused(); await input.fill("Changed heading"); await input.press("Enter");
+  await expect(page.locator(".viewer-scroll .editable-text").filter({ hasText: "Changed heading" })).toHaveAttribute("stroke", "#ff0000");
+  await text.filter({ hasText: /^(Rendered|Logical)$/ }).click();
+  await expect(input).toHaveValue("Logical"); await input.fill("Changed logical"); await input.press("Enter");
+  const download = page.waitForEvent("download"); await page.keyboard.press("Control+s");
+  const path = info.outputPath("extended-text-edited.pdf"); await (await download).saveAs(path);
+  const saved = await readFile(path), inspection = await inspectDirectText(saved, 0);
+  expect(inspection.runs.find(r => r.text === "Changed heading")!.textStrokeColor).toBe("#ff0000");
+  expect(inspection.runs.some(r => r.text === "Changed logical")).toBe(true);
+  expect(inspection.runs.some(r => r.text === "Heading" || r.text === "Rendered")).toBe(false);
+  await page.reload(); await open(page, saved);
+  await expect(page.locator(".viewer-scroll .textLayer")).toContainText("Changed logical");
+});

@@ -47,7 +47,9 @@ export function TextShape({
       <text
         className="editable-text"
         data-layout-ready={!!layout && !pending && face.ready}
-        fill={o.color}
+        fill={o.textOutlineOnly ? "none" : o.color}
+        stroke={o.textStrokeWidth ? o.textStrokeColor ?? o.color : undefined}
+        strokeWidth={o.textStrokeWidth}
         fontSize={o.fontSize}
         fontFamily={
           o.font === "custom" && !o.fontId

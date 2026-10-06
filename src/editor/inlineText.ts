@@ -66,6 +66,11 @@ export function inlineTextPatch(
   } else {
     patch.width = Math.max(object.width, Math.ceil(layout.width));
     patch.height = Math.max(object.height, Math.ceil(layout.height));
+    if (object.rotation && patch.height !== object.height) {
+      const angle = object.rotation * Math.PI / 180, growth = patch.height - object.height;
+      patch.x = object.x - Math.sin(angle) * growth;
+      patch.y = object.y + (Math.cos(angle) - 1) * growth;
+    }
   }
   return patch;
 }

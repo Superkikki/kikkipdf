@@ -45,7 +45,7 @@ async function selectField(page: Page, name: string) {
   const selector = page.getByLabel("既存の入力欄", { exact: true });
   const option = selector
     .locator("option")
-    .filter({ hasText: `${name} — ページ1` });
+    .filter({ hasText: `${name} — ページ1` }).first();
   await expect(option).toHaveCount(1);
   await selector.selectOption((await option.getAttribute("value"))!);
 }
@@ -344,4 +344,27 @@ test("edits paired display labels and export values without losing dropdown or l
     "B",
   ]);
   expect(errors).toEqual([]);
+});
+
+test("renames radio export values and keeps selection on the same widget through saving", async ({ page }, info) => {
+  const pdf = await PDFDocument.create(), sheet = pdf.addPage();
+  const field = pdf.getForm().createRadioGroup("Answer");
+  field.addOptionToPage("A", sheet, { x: 40, y: 620, width: 20, height: 20 });
+  field.addOptionToPage("B", sheet, { x: 40, y: 570, width: 20, height: 20 }); field.select("B");
+  await page.goto("/"); const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "PDFを開く", exact: true }).click();
+  await (await chooser).setFiles({ name: "radio.pdf", mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()) });
+  await design(page, "Answer");
+  await page.getByLabel("既存フィールド選択肢", { exact: true }).fill("First\nSecond");
+  await page.getByRole("button", { name: "設定を適用", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.getByRole("button", { name: "完了", exact: true }).click();
+  const download = page.waitForEvent("download"); await page.getByRole("button", { name: "保存", exact: true }).click();
+  const path = info.outputPath("radio-renamed.pdf"); await (await download).saveAs(path);
+  const saved = (await PDFDocument.load(await readFile(path))).getForm().getRadioGroup("Answer");
+  expect(saved.getOptions()).toEqual(["First", "Second"]); expect(saved.getSelected()).toBe("Second");
+  await open(page, path); await page.getByRole("button", { name: "ツール", exact: true }).click();
+  await page.getByRole("button", { name: "フォーム入力", exact: true }).click();
+  await page.getByRole("button", { name: "完了", exact: true }).click();
+  await expect(page.getByRole("radio", { name: "Second", exact: true })).toBeChecked();
 });

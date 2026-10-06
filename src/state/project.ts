@@ -78,6 +78,9 @@ const object = z.object({
   fill: z.union([color, z.literal("none")]),
   opacity: number.min(0).max(1),
   strokeWidth: number.min(0).max(1000),
+  textStrokeWidth: number.min(0).max(1000).optional(),
+  textStrokeColor: color.optional(),
+  textOutlineOnly: z.boolean().optional(),
   text: text.optional(),
   author: z.string().max(10000).optional(),
   reviewStatus: reviewStatus.optional(),
@@ -147,6 +150,8 @@ const schema = z.object({
     name: z.string().min(1).max(1000),
     created: number,
     sources: z.record(id, z.object({ ...asset,
+      layerNames: z.record(z.string().regex(/^[1-9]\d*R(?:[1-9]\d*)?$/), z.string().min(1).max(1000).refine(value => !!value.trim()))
+        .refine(items => Object.keys(items).length <= 10000).optional(),
       layerVisibility: z.record(z.string().regex(/^[1-9]\d*R(?:[1-9]\d*)?$/), z.boolean())
         .refine((items) => Object.keys(items).length <= 10000).optional(),
     })),
@@ -311,6 +316,7 @@ export async function saveProject(model: DocumentModel): Promise<Uint8Array> {
       file,
       sha256: await hash(s.bytes),
       layerVisibility: s.layerVisibility,
+      layerNames: s.layerNames,
     };
   }
   for (const [i, s] of Object.values(model.images).entries()) {
@@ -422,7 +428,7 @@ export async function openProject(bytes: Uint8Array): Promise<DocumentModel> {
       const data = files[s.file];
       if (key !== s.id || !data || (await hash(data)) !== s.sha256)
         throw Error("元PDFの整合性エラー");
-      model.sources[key] = { id: s.id, name: s.name, bytes: data, layerVisibility: s.layerVisibility };
+      model.sources[key] = { id: s.id, name: s.name, bytes: data, layerVisibility: s.layerVisibility, layerNames: s.layerNames };
     }
     for (const [key, s] of Object.entries(d.images)) {
       const data = files[s.file];

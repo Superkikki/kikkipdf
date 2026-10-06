@@ -14,6 +14,10 @@ import {
   rgb,
   degrees,
   pushGraphicsState,
+  setTextRenderingMode,
+  setLineWidth,
+  setStrokingColor,
+  TextRenderingMode,
   popGraphicsState,
   translate,
   scale as scaleCoordinates,
@@ -103,7 +107,7 @@ export async function exportPdf(
   for (const source of Object.values(model.sources)) {
     const input = await PDFDocument.load(source.bytes);
     const sharedCopier = PDFObjectCopier.for(input.context, output.context);
-    copiers.set(source.id, new PageCopier(input, output, attachments, model.images, sharedCopier, source.layerVisibility));
+    copiers.set(source.id, new PageCopier(input, output, attachments, model.images, sharedCopier, source.layerVisibility, source.layerNames));
     attachments.prepare(input, source.id);
     if (input.catalog.getAcroForm()?.dict.has(PDFName.of("XFA")))
       throw Error(
@@ -199,6 +203,9 @@ export async function exportPdf(
           rotateRadians((-o.rotation * Math.PI) / 180),
           translate(-x, -y),
         );
+        if (o.textStrokeWidth)
+          page.pushOperators(setLineWidth(o.textStrokeWidth), setStrokingColor(color(o.textStrokeColor ?? o.color)),
+            setTextRenderingMode(o.textOutlineOnly ? TextRenderingMode.Outline : TextRenderingMode.FillAndOutline));
         const font = await fontFor(o);
         if (o.font === "custom") assertGlyphs(font, o.text ?? "");
         const { lines } = layoutText(
@@ -413,6 +420,7 @@ export interface FormDescriptor {
   value: string | boolean | string[];
   options: string[];
   hasExportValues?: boolean;
+  checkboxOnValue?: string;
   choiceOptions?: ChoiceOption[];
   readOnly?: boolean;
   required?: boolean;
@@ -488,7 +496,7 @@ export async function inspectForms(
           maxLength: f.getMaxLength(),
         });
       if (f instanceof PDFCheckBox)
-        result.push({ ...base, kind: "checkbox", value: f.isChecked() });
+        result.push({ ...base, kind: "checkbox", value: f.isChecked(), checkboxOnValue: f.acroField.getOnValue()?.decodeText() ?? "Yes" });
       if (f instanceof PDFRadioGroup)
         result.push({
           ...base,

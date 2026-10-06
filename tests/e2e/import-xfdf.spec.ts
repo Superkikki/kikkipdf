@@ -202,3 +202,19 @@ test("enforces file, annotation, and total point limits before committing and de
   await expect(page.locator(".comment-card").filter({ hasText: "日本語BE" })).toBeVisible();
   await expect(undo).toBeEnabled();
 });
+
+test("imports CSV as independent page notes with undo and saved PDF round trips", async ({ page }, info) => {
+  await openPdf(page, await sourcePdf());
+  const cards = page.locator(".comment-card"); await expect(cards).toHaveCount(1);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "CSVを読み込む", exact: true }).click();
+  await (await chooser).setFiles({ name: "comments.csv", mimeType: "text/csv", buffer: Buffer.from('\uFEFF"ページ","作成者","レビュー状態","コメント","区分"\r\n"1","山田","完了","CSVからのコメント","追加"\r\n"2","佐藤","未確認","次ページのメモ","既存"\r\n') });
+  await expect(cards).toHaveCount(3);
+  await expect(cards.filter({ hasText: "CSVからのコメント" })).toContainText("山田");
+  await page.getByRole("button", { name: /^元に戻す/ }).click(); await expect(cards).toHaveCount(1);
+  await page.getByRole("button", { name: /^やり直す/ }).click(); await expect(cards).toHaveCount(3);
+  const download = page.waitForEvent("download"); await page.getByRole("button", { name: "保存", exact: true }).click();
+  const path = info.outputPath("csv-notes.pdf"); await (await download).saveAs(path);
+  await openPdf(page, await readFile(path)); await expect(cards).toHaveCount(3);
+  await expect(cards.filter({ hasText: "CSVからのコメント" })).toHaveCount(1);
+});

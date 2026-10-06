@@ -92,9 +92,10 @@ export class PageCopier {
     private images: Record<string, ImageAsset> = {},
     copier?: PDFObjectCopier,
     visibility?: Record<string, boolean>,
+    names?: Record<string, string>,
   ) {
     this.copier = copier ?? PDFObjectCopier.for(input.context, output.context);
-    this.optionalContent = new OptionalContentSource(input, output, this.copier, visibility);
+    this.optionalContent = new OptionalContentSource(input, output, this.copier, visibility, names);
   }
   getOptionalContent() {
     return this.exported.size ? this.optionalContent.finish() : undefined;

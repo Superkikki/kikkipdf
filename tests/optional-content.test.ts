@@ -7,6 +7,7 @@ import { importPdf, releasePdfs } from "../src/viewer/pdf";
 import { exportPdf, inspectForms } from "../src/export/engine";
 import { mergeDocuments, duplicatePage } from "../src/commands/document";
 import { OptionalContentSource } from "../src/export/optionalContent";
+import { renameLayer, resetLayerNames } from "../src/layers/commands";
 import { readLayers, resetLayerVisibility, setLayerVisibility } from "../src/layers/model";
 import { History } from "../src/commands/history";
 import { saveProject, openProject } from "../src/state/project";
@@ -291,4 +292,24 @@ describe("PDF optional content layers", () => {
     expect(output.catalog.has(N("OCProperties"))).toBe(false);
     releasePdfs();
   });
+});
+
+
+it("renames layer groups without changing visibility, membership or immutable source bytes", async () => {
+  const source = await layeredPdf(), model = await importPdf({ name: "layers.pdf", bytes: source.bytes });
+  const id = Object.keys(model.sources)[0], info = await readLayers(model.sources[id]);
+  const ids = info.groups.map(g => g.id), history = new History(model);
+  history.execute(renameLayer(id, ids[0], "図の日本語レイヤー", ids));
+  history.execute(renameLayer(id, ids[1], "Locked renamed", ids));
+  const restored = await openProject(await saveProject(history.current.document));
+  expect(restored.sources[id].layerNames?.[ids[0]]).toBe("図の日本語レイヤー");
+  const saved = await PDFDocument.load(await exportPdf(restored));
+  const groups = saved.catalog.lookup(N("OCProperties"), PDFDict).lookup(N("OCGs"), PDFArray);
+  expect((groups.lookup(0, PDFDict).lookup(N("Name")) as PDFString).decodeText()).toBe("図の日本語レイヤー");
+  expect(model.sources[id].bytes).toEqual(source.bytes);
+  history.undo(); expect(history.current.document.sources[id].layerNames?.[ids[1]]).toBeUndefined();
+  const reset = resetLayerNames(id).apply(restored); expect(reset.sources[id].layerNames).toBeUndefined();
+  expect(() => renameLayer(id, "999R", "Unknown", ids)).toThrow();
+  expect(() => renameLayer(id, ids[0], " ", ids)).toThrow();
+  await releasePdfs();
 });

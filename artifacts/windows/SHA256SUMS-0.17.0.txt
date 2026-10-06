@@ -1,0 +1,2 @@
+4707d3d42ed9b96f5898da67915bbb69ae7b7abcd7154e4650b134a84fddf52f  Kikki PDF_0.17.0_x64-setup.exe
+c3cb0b91ac6863126dc6455d0648b2a9dc44b9dddf4c09c49885481de27d26c0  Kikki PDF_0.17.0_x64-setup.zip

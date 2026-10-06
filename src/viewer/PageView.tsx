@@ -336,7 +336,7 @@ export function PageView({
           box,
           Math.max(8, box.height * 0.85),
         );
-      const caret = textCaretAtPoint(target, textValue, click, page.rotation, o.writingMode === "vertical");
+      const caret = textCaretAtPoint(target, textValue, click, page.rotation + o.rotation, o.writingMode === "vertical");
       documentStore.execute(addObject(page.id, o));
       onSelect(o.id);
       window.getSelection()?.removeAllRanges();

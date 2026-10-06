@@ -37,10 +37,10 @@ export const importedMarkupsSchema = z.array(importedMarkupSchema).max(5000).ref
   return ids.size === markups.length && points <= 100000;
 }, { message: "取り込んだ注釈のID重複または座標数の上限超過があります。" });
 
-export function addImportedMarkups(entries: readonly { pageId: string; markup: ImportedMarkup }[]) {
+export function addImportedMarkups(entries: readonly { pageId: string; markup: ImportedMarkup }[], label = "XFDFコメントを読み込み") {
   if (entries.length > 5000) throw Error("一度に読み込める注釈は5000件までです。");
   const captured = entries.map(entry => ({ pageId: entry.pageId, markup: importedMarkupSchema.parse(entry.markup) }));
-  return change("XFDFコメントを読み込み", document => {
+  return change(label, document => {
     const groups = new Map<string, ImportedMarkup[]>();
     const pages = new Set(document.pages.map(page => page.id));
     for (const entry of captured) {

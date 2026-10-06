@@ -133,3 +133,20 @@ test("hides and restores a form overlay with its optional-content group", async 
   await layer.uncheck();
   await expect(field).toHaveCount(0);
 });
+
+test("renames an optional layer with undo, keeps visibility and saves the Japanese name", async ({ page }, info) => {
+  await page.goto("/"); await openPdf(page, await fixture(), "rename-layer.pdf");
+  await page.getByRole("button", { name: "レイヤー", exact: true }).click();
+  await page.getByRole("button", { name: "Hidden artworkの名前を変更", exact: true }).click();
+  await page.getByRole("textbox", { name: "レイヤー名", exact: true }).fill("図のレイヤー");
+  await page.getByRole("button", { name: "適用", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: "図のレイヤー", exact: true })).not.toBeChecked();
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await expect(page.getByRole("checkbox", { name: "Hidden artwork", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /^やり直す/ }).click();
+  const download = page.waitForEvent("download"); await page.getByRole("button", { name: "保存", exact: true }).click();
+  const path = info.outputPath("renamed-layer.pdf"); await (await download).saveAs(path);
+  await page.reload(); await openPdf(page, await readFile(path), "renamed-layer.pdf");
+  await page.getByRole("button", { name: "レイヤー", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: "図のレイヤー", exact: true })).not.toBeChecked();
+});

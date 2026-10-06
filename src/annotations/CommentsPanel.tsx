@@ -6,6 +6,7 @@ import { editAnnotation } from "./commands";
 import { buildComments, filterComments, readComments, commentTypes, reviewStatuses, type ImportedComment } from "./comments";
 import { commentsCsv } from "./commentCsv";
 import { commentsXfdf } from "./commentXfdf";
+import { parseCommentsCsv } from "./importCsv";
 import { parseXfdf } from "./importXfdf";
 import { addImportedMarkups, removeImportedMarkup, updateImportedMarkup } from "./importedMarkup";
 import { flushInlineText } from "../editor/flushInlineText";
@@ -47,18 +48,18 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
       : current.added ? updateObject(current.pageId, current.id, patch) : editAnnotation(current.pageId, current.id, patch));
   }
   function resetList() { setSelected(""); setOffset(0); }
-  async function importComments() {
+  async function importComments(format: "xfdf" | "csv" = "xfdf") {
     if (!flushInlineText()) return;
     setSaveError(""); setImportStatus(""); setSaving(true);
     try {
-      const [file] = await pickFiles("xfdf");
+      const [file] = await pickFiles(format);
       if (!file) return;
       if (!flushInlineText()) return;
       const snapshot = documentStore.document;
       if (!snapshot || snapshot.id !== model.id) throw Error("文書が切り替わりました。読み込み先のPDFで再度実行してください。");
-      const result = await parseXfdf(file.bytes, snapshot);
+      const result = format === "xfdf" ? await parseXfdf(file.bytes, snapshot) : { entries: parseCommentsCsv(file.bytes, snapshot) };
       if (documentStore.document !== snapshot) throw Error("読み込み中に文書が変更されました。再度実行してください。");
-      documentStore.execute(addImportedMarkups(result.entries));
+      documentStore.execute(addImportedMarkups(result.entries, format === "csv" ? "CSVコメントを読み込み" : "XFDFコメントを読み込み"));
       resetList();
       setImportStatus(`${result.entries.length}件の注釈を読み込みました。Undoで戻せます。`);
     } catch (reason) {
@@ -113,6 +114,8 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
     </div>
     <div className="comment-export">
       <button disabled={saving} onClick={() => void importComments()}>XFDFを読み込む</button>
+      <button disabled={saving} onClick={() => void importComments("csv")}>CSVを読み込む</button>
+      <p className="hint">CSVは位置情報を含まないため、各コメントを指定ページの新しい付箋として追加します。</p>
     </div>
     {importStatus && <p role="status">{importStatus}</p>}
     <div className="comment-export">

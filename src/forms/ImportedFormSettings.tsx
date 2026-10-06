@@ -29,7 +29,7 @@ export function ImportedFormSettings({
   });
   const [error, setError] = useState("");
   const choice = field.kind === "dropdown" || field.kind === "list";
-  const editableChoice = choice;
+  const editableChoice = choice || field.kind === "radio";
   const pairedChoice = field.hasExportValues || !!resolved.choiceOptions?.some((o) => o.value !== o.label);
   const dirty =
     draft.name !== resolved.name ||
@@ -133,7 +133,7 @@ export function ImportedFormSettings({
             複数行
           </label>
         )}
-        {editableChoice && (
+        {choice && (
           <label>
             <input
               type="checkbox"
@@ -176,7 +176,8 @@ export function ImportedFormSettings({
               />
             </label>
             <p className="hint">
-              削除した選択肢の入力値は解除されます。複数選択を解除すると先頭の選択だけを残します。
+              {field.kind === "radio" ? "現在と同じ件数で保存値を変更できます。選択中の入力欄は同じ位置を保持します。PDF本文のラベルは文字編集で変更してください。"
+                : "削除した選択肢の入力値は解除されます。複数選択を解除すると先頭の選択だけを残します。"}
             </p>
           </>
         )}
