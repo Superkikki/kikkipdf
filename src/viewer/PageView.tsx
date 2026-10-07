@@ -1,3 +1,4 @@
+import type { ObjectMenuActions } from "../editor/objectActions";
 import { FormOverlay } from "../forms/FormOverlay";
 import {
   ImportedFormOverlay,
@@ -32,6 +33,7 @@ import { textCaretAtPoint } from "../editor/inlineText";
 const noSearchHits: SearchHit[] = [];
 export type Tool = "select" | "editText" | "editImage" | "appearanceText" | ObjectKind;
 export function PageView({
+  objectMenuActions,
   model,
   page,
   scale,
@@ -48,6 +50,7 @@ export function PageView({
   keepVisible = false,
   onEditingChange,
 }: {
+  objectMenuActions?: ObjectMenuActions;
   searchHits?: SearchHit[];
   currentSearchId?: string;
   model: DocumentModel;
@@ -453,6 +456,7 @@ export function PageView({
                 <ExistingImageOverlay model={model} page={page} onSelect={onSelect} onError={onError} />}
               <ImportedMarkupOverlay page={page} />
               <Overlay
+                objectMenuActions={objectMenuActions}
                 model={model}
                 page={page}
                 selected={selected}

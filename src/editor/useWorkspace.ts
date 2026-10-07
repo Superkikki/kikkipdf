@@ -4,7 +4,9 @@ import { APP_NAME } from "../config";
 import { newObject, uid, type ImageAsset, type BookmarkDestination } from "../state/model";
 import type { BookmarkNavigation } from "../viewer/bookmarkNavigation";
 import { documentStore, useDocument } from "../state/store";
-import { change } from "../commands/document";
+import { extractImageAsset } from "../images/extract";
+import { pasteObject, type ObjectMenuActions } from "./objectActions";
+import { change, deleteObject } from "../commands/document";
 import { setPreference } from "../state/recovery";
 import { isTauri, pickFiles, readPath } from "../platform/files";
 import { usePrompt } from "../components/Prompt";
@@ -162,8 +164,45 @@ export function useWorkspace() {
     setSelected, setTool, setStatus,
   });
   useDesktopLifecycle({ openFiles, mayDiscard, busyRef, report });
+  const objectMenuActions: ObjectMenuActions = {
+    canPaste: () => !!clipboard.current,
+    run: (action, pageId, objectId) => {
+      if (busyRef.current || !flushInlineText()) return;
+      const snapshot = documentStore.document;
+      const current = snapshot?.pages.find(p => p.id === pageId)?.objects.find(o => o.id === objectId);
+      if (!snapshot || !current) return;
+      void work("オブジェクトを操作中…", async signal => {
+        const data = action === "paste" ? clipboard.current : {
+          object: current,
+          font: current.fontId ? snapshot.fonts?.[current.fontId] : undefined,
+          image: current.kind === "direct-image"
+            ? await extractImageAsset(snapshot, current, signal)
+            : current.imageId ? snapshot.images[current.imageId] : undefined,
+        };
+        if (!data || signal.aborted || documentStore.document?.id !== snapshot.id ||
+          documentStore.document.pages.find(p => p.id === pageId)?.objects.find(o => o.id === objectId) !== current) return;
+        setActive(pageId);
+        setTool("select");
+        if (action === "paste" || action === "duplicate") {
+          const pasted = pasteObject(pageId, data);
+          documentStore.execute(pasted.command);
+          setSelected(pasted.id);
+          setStatus(action === "paste" ? "オブジェクトを貼り付けました" : "オブジェクトを複製しました");
+        } else {
+          clipboard.current = data;
+          if (action === "cut") {
+            documentStore.execute(deleteObject(pageId, objectId));
+            setSelected(null);
+          }
+          setStatus(action === "cut" ? "オブジェクトを切り取りました" : "オブジェクトをコピーしました");
+        }
+      });
+    },
+  };
+
   return {
     ...state,
+    objectMenuActions,
     active,
     page,
     setActive,

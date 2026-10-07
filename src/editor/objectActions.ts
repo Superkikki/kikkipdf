@@ -107,3 +107,9 @@ export function reorderObject(
     "重なり順を変更",
   );
 }
+
+export type ObjectMenuAction = "copy" | "cut" | "paste" | "duplicate";
+export interface ObjectMenuActions {
+  canPaste: () => boolean;
+  run: (action: ObjectMenuAction, pageId: string, objectId: string) => void;
+}

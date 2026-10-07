@@ -1,3 +1,4 @@
+import type { ObjectMenuActions } from "../editor/objectActions";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DocumentModel } from "../state/model";
 import { pageSize } from "../state/model";
@@ -10,6 +11,7 @@ import type { DocumentSearch } from "./useDocumentSearch";
 import { pageLabel } from "../pages/labels";
 export type { ZoomMode } from "./zoom";
 export function Viewer({
+  objectMenuActions,
   model,
   active,
   onActive,
@@ -24,6 +26,7 @@ export function Viewer({
   onBookmarkNavigated,
   search,
 }: {
+  objectMenuActions?: ObjectMenuActions;
   search: DocumentSearch;
   model: DocumentModel;
   active: string;
@@ -199,6 +202,7 @@ export function Viewer({
               </span>
             </div>
             <PageView
+              objectMenuActions={objectMenuActions}
               searchHits={search.byPage.get(p.id)}
               currentSearchId={search.currentId}
               model={model}

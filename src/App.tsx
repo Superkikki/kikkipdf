@@ -154,6 +154,7 @@ export function App() {
               }}
             />
             <Viewer
+              objectMenuActions={w.objectMenuActions}
               search={search}
               key={`viewer:${doc.id}`}
               onScale={setRenderedScale}

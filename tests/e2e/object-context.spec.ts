@@ -32,7 +32,7 @@ test("right-click deletes the clicked shape, supports undo/redo, and saves only 
   const menu = page.getByRole("menu", { name: "オブジェクトの操作" });
   await expect(menu).toBeVisible();
   await expect(
-    menu.getByRole("menuitem", { name: "削除", exact: true }),
+    menu.getByRole("menuitem", { name: "コピー", exact: true }),
   ).toBeFocused();
   await page.screenshot({ path: info.outputPath("right-click-menu.png") });
   await menu.getByRole("menuitem", { name: "削除", exact: true }).click();
@@ -145,4 +145,54 @@ test("context menu targets a rotated second page, works during drawing, stays in
   await expect(menu).toBeVisible();
   await page.locator(".viewer-scroll").dispatchEvent("scroll");
   await expect(menu).toHaveCount(0);
+});
+
+test("context actions share the keyboard clipboard, change stacking, and edit text in place", async ({ page }) => {
+  const d = emptyDocument("actions.pdf");
+  const rect = { ...newObject("rect", 40, 50), width: 100, height: 70 };
+  const ellipse = { ...newObject("ellipse", 210, 50), width: 100, height: 70 };
+  const text = { ...newObject("text", 40, 180), text: "右クリックで編集", width: 240, height: 50 };
+  d.pages = [{ ...blankPage(), objects: [rect, ellipse, text] }];
+  await page.goto("/");
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "PDFを開く", exact: true }).click();
+  await (await chooser).setFiles({ name: "actions.kpdf", mimeType: "application/zip", buffer: Buffer.from(await saveProject(d)) });
+  await page.getByLabel("ズーム", { exact: true }).selectOption("0.5");
+  const objects = page.locator(".viewer-scroll .object-layer > g");
+  const shape = (id: string) => page.locator(`.viewer-scroll g[data-object-id="${id}"]`);
+  const menu = page.getByRole("menu", { name: "オブジェクトの操作" });
+  const item = (name: string) => menu.getByRole("menuitem", { name, exact: true });
+  await shape(rect.id).click({ button: "right" });
+  await expect(item("貼り付け")).toBeDisabled();
+  await page.keyboard.press("ArrowDown");
+  await expect(item("切り取り")).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(item("コピー")).toBeFocused();
+  await item("コピー").click();
+  await expect(menu).toHaveCount(0);
+  await page.keyboard.press("Control+v");
+  await expect(objects).toHaveCount(4);
+  await page.keyboard.press("Control+z");
+  await expect(objects).toHaveCount(3);
+  await shape(rect.id).click({ button: "right" });
+  await item("最前面へ").click();
+  await expect(objects.last()).toHaveAttribute("data-object-id", rect.id);
+  await page.keyboard.press("Control+z");
+  await expect(objects.first()).toHaveAttribute("data-object-id", rect.id);
+  await shape(ellipse.id).click({ button: "right" });
+  await item("複製").click();
+  await expect(objects).toHaveCount(4);
+  await page.keyboard.press("Control+z");
+  await expect(objects).toHaveCount(3);
+  await shape(ellipse.id).click({ button: "right" });
+  await item("切り取り").click();
+  await expect(shape(ellipse.id)).toHaveCount(0);
+  await shape(rect.id).click({ button: "right" });
+  await item("貼り付け").click();
+  await expect(objects).toHaveCount(3);
+  await expect(objects.last().locator("ellipse")).toHaveCount(1);
+  await shape(text.id).click({ button: "right" });
+  await item("文字を編集").click();
+  await expect(menu).toHaveCount(0);
+  await expect(page.locator(".inline-text-editor")).toBeVisible();
 });

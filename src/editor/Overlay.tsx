@@ -1,3 +1,4 @@
+import type { ObjectMenuActions } from "./objectActions";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   DocumentModel,
@@ -159,6 +160,7 @@ export function ObjectShape({
   );
 }
 export function Overlay({
+  objectMenuActions,
   page,
   model,
   selected,
@@ -174,6 +176,7 @@ export function Overlay({
   selected: string | null;
   onSelect: (id: string) => void;
   interactive: boolean;
+  objectMenuActions?: ObjectMenuActions;
   contextEnabled?: boolean;
   textInteractive?: boolean;
   editingId?: string;
@@ -374,6 +377,8 @@ export function Overlay({
       </svg>
       {context && (
         <ObjectContextMenu
+          objectMenuActions={objectMenuActions}
+          onEditText={onEditText}
           pageId={page.id}
           objectId={context.id}
           point={context.point}
