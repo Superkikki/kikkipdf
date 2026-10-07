@@ -99,7 +99,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       );
       const output = await PDFDocument.create();
       const copier = PDFObjectCopier.for(input.context, output.context);
-      const layers = new OptionalContentSource(input, output, copier, req.source.layerVisibility);
+      const layers = new OptionalContentSource(input, output, copier, req.source.layerVisibility, req.source.layerNames);
       const node = copier.copy(source.node);
       const page = PDFPage.of(node, output.context.register(node), output);
       output.addPage(page);

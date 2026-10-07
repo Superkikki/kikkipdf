@@ -313,3 +313,51 @@ it("renames layer groups without changing visibility, membership or immutable so
   expect(() => renameLayer(id, ids[0], " ", ids)).toThrow();
   await releasePdfs();
 });
+
+it("applies display presets atomically, saves and restores them with unchanged source bytes", async () => {
+  const { applyLayerPreset } = await import("../src/layers/presets");
+  const fixture = await layeredPdf({ count: 2, configs: false });
+  const input = await PDFDocument.load(fixture.bytes), oc = input.catalog.lookup(N("OCProperties"), PDFDict);
+  const d = oc.lookup(N("D"), PDFDict); d.delete(N("Locked")); d.delete(N("RBGroups"));
+  oc.set(N("Configs"), input.context.obj([
+    { Name: PDFString.of("All hidden"), BaseState: "OFF" },
+    { Name: PDFString.of("First only"), BaseState: "OFF", ON: [fixture.groups[0]] },
+    { Name: PDFString.of("Keep second"), BaseState: "Unchanged", ON: [fixture.groups[1]] },
+  ]));
+  const model = await importPdf({ name: "presets.pdf", bytes: await input.save() }), source = Object.values(model.sources)[0];
+  const original = source.bytes.slice(), info = await readLayers(source), history = new History(model);
+  expect(info.presets?.map(p => p.name)).toEqual(["All hidden", "First only", "Keep second"]);
+  history.execute(applyLayerPreset(source.id, "1", info));
+  expect(history.current.document.sources[source.id].layerVisibility).toEqual({ [info.groups[1].id]: false });
+  const changed = history.current.document;
+  history.undo(); expect(history.current.document).toBe(model); history.redo(); expect(history.current.document).toBe(changed);
+  history.execute(applyLayerPreset(source.id, "1", info)); expect(history.current.document).toBe(changed);
+  const project = await openProject(await saveProject(changed)); expect(project.sources[source.id].layerVisibility).toEqual(changed.sources[source.id].layerVisibility);
+  const output = await exportPdf(project), loading = getDocument({ data: output }), parsed = await loading.promise;
+  const config = await parsed.getOptionalContentConfig();
+  expect([...config].map(([, group]) => group.visible)).toEqual([true, false]); await loading.destroy();
+  const saved = await PDFDocument.load(await exportPdf(changed)); expect(catalog(saved).oc.lookup(N("Configs"), PDFArray).size()).toBe(3);
+  history.execute(applyLayerPreset(source.id, "2", info)); expect(history.current.document.sources[source.id].layerVisibility).toEqual({});
+  history.execute(applyLayerPreset(source.id, "0", info)); expect(Object.values(history.current.document.sources[source.id].layerVisibility!)).toEqual([false, false]);
+  expect(source.bytes).toEqual(original); releasePdfs();
+});
+
+it("rejects locked and radio-conflicting presets without changes and isolates unsupported configuration data", async () => {
+  const { applyLayerPreset } = await import("../src/layers/presets");
+  const fixture = await layeredPdf({ count: 2 }), input = await PDFDocument.load(fixture.bytes), oc = input.catalog.lookup(N("OCProperties"), PDFDict);
+  oc.set(N("Configs"), input.context.obj([
+    { Name: PDFString.of("Locked change"), BaseState: "OFF" },
+    { Name: PDFString.of("Conflict"), BaseState: "ON" },
+    { Name: PDFString.of("Unknown"), ON: [input.context.register(input.context.obj({ Type: "OCG", Name: PDFString.of("outside") }))] },
+    { Name: PDFString.of("Duplicate"), ON: [fixture.groups[0]], OFF: [fixture.groups[0]] },
+    { Name: PDFString.of("Auto"), AS: [{ Event: "View" }] },
+    { Name: PDFString.of("Bad base"), BaseState: "Invalid" },
+  ]));
+  const model = await importPdf({ name: "locked-presets.pdf", bytes: await input.save() }), source = Object.values(model.sources)[0], info = await readLayers(source), history = new History(model);
+  expect(info.presets!.slice(2).every(p => p.error)).toBe(true);
+  for (const id of ["0", "1", "2", "3", "4", "5", "missing"]) {
+    expect(() => history.execute(applyLayerPreset(source.id, id, info))).toThrow();
+    expect(history.current.document).toBe(model); expect(history.dirty).toBe(false); expect(history.canUndo).toBe(false);
+  }
+  releasePdfs();
+});

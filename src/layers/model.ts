@@ -3,6 +3,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { Command } from "../commands/history";
 import type { Source } from "../state/model";
 import { sourcePdf } from "../viewer/pdf";
+import { readLayerPresets, type LayerPreset } from "./presets";
 
 export interface LayerGroup {
   id: string;
@@ -12,7 +13,7 @@ export interface LayerGroup {
   radioGroups: string[][];
 }
 export interface LayerRow { id?: string; name: string; depth: number }
-export interface LayerInfo { groups: LayerGroup[]; rows: LayerRow[] }
+export interface LayerInfo { groups: LayerGroup[]; rows: LayerRow[]; presets?: LayerPreset[] }
 export const layerRefId = (ref: PDFRef) => `${ref.objectNumber}R${ref.generationNumber || ""}`;
 const cache = new WeakMap<Uint8Array, Promise<LayerInfo>>();
 
@@ -47,7 +48,7 @@ export function readLayers(source: Source): Promise<LayerInfo> {
       }
       walk(config.getOrder(), 0);
       for (const group of groups) if (!seen.has(group.id)) rows.push({ id: group.id, name: group.name, depth: 0 });
-      return { groups, rows };
+      return { groups, rows, presets: readLayerPresets(raw, new Set(groups.map(group => group.id))) };
     })();
     cache.set(source.bytes, ready);
     ready.catch(() => cache.delete(source.bytes));

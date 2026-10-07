@@ -1,4 +1,4 @@
-const { PDFDocument, StandardFonts, PDFName, PDFDict, PDFHexString, PDFString } = require("pdf-lib");
+const { PDFDocument, StandardFonts, PDFOperator, PDFName, PDFDict, PDFHexString, PDFString } = require("pdf-lib");
 const { writeFile, readFile } = require("node:fs/promises");
 (async () => {
   if (process.argv[3] === "bookmarks") {
@@ -98,6 +98,15 @@ const { writeFile, readFile } = require("node:fs/promises");
       font,
     });
   }
+  const layer = pdf.context.register(pdf.context.obj({ Type: "OCG", Name: PDFString.of("Smoke artwork") }));
+  pdf.getPage(0).node.Resources().set(PDFName.of("Properties"), pdf.context.obj({ SmokeLayer: layer }));
+  pdf.getPage(0).pushOperators(PDFOperator.of("BDC", [PDFName.of("OC"), PDFName.of("SmokeLayer")]));
+  pdf.getPage(0).drawRectangle({ x: 340, y: 250, width: 25, height: 25 });
+  pdf.getPage(0).pushOperators(PDFOperator.of("EMC"));
+  pdf.catalog.set(PDFName.of("OCProperties"), pdf.context.obj({ OCGs: [layer], D: { BaseState: "ON", OFF: [layer] }, Configs: [
+    { Name: PDFString.of("Show artwork"), BaseState: "ON" },
+    { Name: PDFString.of("Hide artwork"), BaseState: "OFF" },
+  ] }));
   const existing = pdf.getForm().createTextField("NativeOriginal");
   existing.addToPage(pdf.getPage(0), {
     x: 260,

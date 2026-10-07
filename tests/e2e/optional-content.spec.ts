@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { openProject } from "../../src/state/project";
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from "pdf-lib";
 
 async function fixture() {
@@ -149,4 +150,52 @@ test("renames an optional layer with undo, keeps visibility and saves the Japane
   await page.reload(); await openPdf(page, await readFile(path), "renamed-layer.pdf");
   await page.getByRole("button", { name: "レイヤー", exact: true }).click();
   await expect(page.getByRole("checkbox", { name: "図のレイヤー", exact: true })).not.toBeChecked();
+});
+
+async function presetFixture(locked = false) {
+  const pdf = await PDFDocument.create(), page = pdf.addPage([300, 300]), c = pdf.context;
+  const red = c.register(c.obj({ Type: "OCG", Name: PDFString.of("Red artwork") }));
+  const green = c.register(c.obj({ Type: "OCG", Name: PDFString.of("Green artwork") }));
+  page.node.set(PDFName.of("Resources"), c.obj({ Properties: { Red: red, Green: green } }));
+  page.node.set(PDFName.of("Contents"), c.register(c.flateStream("/OC /Red BDC q 1 0 0 rg 50 150 60 60 re f Q EMC /OC /Green BDC q 0 0.7 0 rg 150 150 60 60 re f Q EMC")));
+  pdf.catalog.set(PDFName.of("OCProperties"), c.obj({ OCGs: [red, green], D: { BaseState: "ON", OFF: [red], ...(locked ? { Locked: [green] } : {}) }, Configs: [
+    { Name: PDFString.of("Red only"), BaseState: "OFF", ON: [red] },
+    { Name: PDFString.of("All shown"), BaseState: "ON" },
+    { Name: PDFString.of("Hide red only"), BaseState: "Unchanged", OFF: [red] },
+    { Name: PDFString.of("Automatic"), AS: [{ Event: "View" }] },
+  ] }));
+  return Buffer.from(await pdf.save());
+}
+test("applies a multi-layer display preset with one undo and saves project and PDF states", async ({ page }, info) => {
+  const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+  await page.goto("/"); await openPdf(page, await presetFixture(), "presets.pdf");
+  await page.getByRole("button", { name: "レイヤー", exact: true }).click();
+  const red = page.getByRole("checkbox", { name: "Red artwork", exact: true }), green = page.getByRole("checkbox", { name: "Green artwork", exact: true });
+  const select = page.getByLabel("presets.pdfの表示プリセット", { exact: true });
+  await expect(select).toBeVisible(); await expect(select.locator('option[value="3"]')).toHaveJSProperty("disabled", true);
+  await select.selectOption("0"); await page.getByRole("button", { name: "プリセットを適用", exact: true }).click();
+  await expect(red).toBeChecked(); await expect(green).not.toBeChecked();
+  await expect.poll(() => pixel(page, 80, 120).then(rgb => rgb[0] > 180 && rgb[1] < 100)).toBe(true);
+  await expect.poll(() => pixel(page, 180, 120).then(rgb => rgb.every(channel => channel > 240))).toBe(true);
+  await page.getByTitle("元に戻す (Ctrl+Z)").click(); await expect(red).not.toBeChecked(); await expect(green).toBeChecked();
+  await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+  await page.getByTitle("やり直す (Ctrl+Y)").click(); await expect(red).toBeChecked(); await expect(green).not.toBeChecked();
+  let download = page.waitForEvent("download"); await page.getByText("ファイル", { exact: true }).click(); await page.getByRole("button", { name: "編集プロジェクトを保存", exact: true }).click();
+  const project = info.outputPath("presets.kpdf"); await (await download).saveAs(project);
+  const model = await openProject(new Uint8Array(await readFile(project))); expect(Object.values(Object.values(model.sources)[0].layerVisibility!).sort()).toEqual([false, true]);
+  download = page.waitForEvent("download"); await page.getByRole("button", { name: "保存", exact: true }).click(); const output = info.outputPath("presets-saved.pdf"); await (await download).saveAs(output);
+  const saved = await PDFDocument.load(await readFile(output)); expect(saved.catalog.lookup(PDFName.of("OCProperties"), PDFDict).lookup(PDFName.of("Configs"), PDFArray).size()).toBe(4);
+  await page.reload(); await openPdf(page, await readFile(output), "presets-saved.pdf"); await page.getByRole("button", { name: "レイヤー", exact: true }).click();
+  await expect(red).toBeChecked(); await expect(green).not.toBeChecked();
+  await page.getByLabel("presets-saved.pdfの表示プリセット", { exact: true }).selectOption("1"); await page.getByRole("button", { name: "プリセットを適用", exact: true }).click();
+  await expect(green).toBeChecked();
+  await page.getByLabel("presets-saved.pdfの表示プリセット", { exact: true }).selectOption("2"); await page.getByRole("button", { name: "プリセットを適用", exact: true }).click();
+  await expect(red).not.toBeChecked(); await expect(green).toBeChecked(); expect(errors).toEqual([]);
+});
+test("does not partially apply a preset that changes a locked layer", async ({ page }) => {
+  await page.goto("/"); await openPdf(page, await presetFixture(true), "locked-presets.pdf"); await page.getByRole("button", { name: "レイヤー", exact: true }).click();
+  await page.getByLabel("locked-presets.pdfの表示プリセット", { exact: true }).selectOption("0"); await page.getByRole("button", { name: "プリセットを適用", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("ロック"); await expect(page.getByRole("checkbox", { name: "Red artwork", exact: true })).not.toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Green artwork", exact: true })).toBeChecked(); await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+  await expect(page.getByTitle("元に戻す (Ctrl+Z)")).toBeDisabled();
 });

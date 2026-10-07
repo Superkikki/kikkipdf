@@ -3,12 +3,14 @@ import type { DocumentModel, Source } from "../state/model";
 import { documentStore } from "../state/store";
 import { usePrompt } from "../components/Prompt";
 import { renameLayer, resetLayerNames } from "./commands";
+import { applyLayerPreset } from "./presets";
 import { readLayers, resetLayerVisibility, setLayerVisibility, type LayerInfo } from "./model";
 
 function SourceLayers({ source }: { source: Source }) {
   const prompt = usePrompt();
   const [info, setInfo] = useState<LayerInfo>();
   const [error, setError] = useState("");
+  const [presetId, setPresetId] = useState("");
   useEffect(() => {
     let live = true;
     readLayers(source).then((value) => { if (live) setInfo(value); }, () => {
@@ -22,6 +24,18 @@ function SourceLayers({ source }: { source: Source }) {
     {!info && !error && <p role="status">レイヤーを読み込み中…</p>}
     {error && <p role="alert">{error}</p>}
     {info && !info.groups.length && <p>このPDFにはレイヤーがありません。</p>}
+    {!!info?.presets?.length && <div className="layer-presets">
+      <label>表示プリセット<select aria-label={`${source.name}の表示プリセット`} value={presetId} onChange={event => setPresetId(event.target.value)}>
+        <option value="">選択してください</option>
+        {info.presets.map((preset, index) => <option key={preset.id} value={preset.id} disabled={!!preset.error}>{index + 1}. {preset.name}{preset.error ? "（未対応）" : ""}</option>)}
+      </select></label>
+      <button disabled={!presetId} onClick={() => {
+        try { documentStore.execute(applyLayerPreset(source.id, presetId, info)); setError(""); }
+        catch (reason) { setError(reason instanceof Error ? reason.message : "プリセットを適用できません。"); }
+      }}>プリセットを適用</button>
+      <p className="hint">表示状態を一括変更します。ロック・排他設定と現在の階層を保持します。</p>
+      {info.presets.filter(preset => preset.error).map(preset => <p className="hint" key={preset.id}>{preset.name}: {preset.error}</p>)}
+    </div>}
     {info?.rows.map((row, index) => {
       if (!row.id) return <div className="layer-heading" key={index} style={{ paddingLeft: row.depth * 12 }}>{row.name}</div>;
       const group = groups.get(row.id)!;

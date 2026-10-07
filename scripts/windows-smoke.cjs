@@ -561,6 +561,18 @@ async function verifyObjectContext(page, root) {
     await browser.close();
     return;
   }
+  await page.getByRole("button", { name: "レイヤー", exact: true }).click();
+  const smokeLayer = page.getByRole("checkbox", { name: "Smoke artwork", exact: true });
+  await expect(smokeLayer).not.toBeChecked();
+  await page.getByLabel("native-fixture.pdfの表示プリセット", { exact: true }).selectOption("0");
+  await page.getByRole("button", { name: "プリセットを適用", exact: true }).click();
+  await expect(smokeLayer).toBeChecked();
+  await page.getByRole("button", { name: /^元に戻す/ }).click(); await expect(smokeLayer).not.toBeChecked();
+  await page.getByRole("button", { name: /^やり直す/ }).click(); await expect(smokeLayer).toBeChecked();
+  await page.getByLabel("native-fixture.pdfの表示プリセット", { exact: true }).selectOption("1");
+  await page.getByRole("button", { name: "プリセットを適用", exact: true }).click();
+  await expect(smokeLayer).not.toBeChecked();
+  await page.getByRole("button", { name: "ページ", exact: true }).click();
   await page.getByRole("button", { name: "ページ管理", exact: true }).click();
   await page.getByRole("button", { name: "回転", exact: true }).click();
   await page
@@ -1104,6 +1116,7 @@ async function verifyObjectContext(page, root) {
       ocrJapaneseAndEnglish: true,
       nativeEncryptionRoundTrip: true,
       editableJapaneseForm: true,
+      nativeLayerPresets: true,
       nativeFormXfdfRoundTrip: true,
       restoredFormValues: true,
       savedBookmarks: true,

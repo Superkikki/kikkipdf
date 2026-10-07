@@ -38,7 +38,7 @@ export function acquirePagePdf(source: Source, page: PageModel, assets: Record<s
       })),
       release() {},
     };
-  const key = `${source.id}:${page.sourceIndex}:${JSON.stringify({ refs, images, visibility: source.layerVisibility })}`;
+  const key = `${source.id}:${page.sourceIndex}:${JSON.stringify({ refs, images, visibility: source.layerVisibility, names: source.layerNames })}`;
   let entry = previews.get(key);
   if (!entry) {
     const controller = new AbortController();
