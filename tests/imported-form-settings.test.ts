@@ -1,3 +1,4 @@
+import { dataFields, applyFormData, resetFormDataToDefaults } from "../src/forms/data";
 import { expect, it } from "vitest";
 import { PDFDocument, PDFName, PDFHexString, PDFArray, type PDFRawStream } from "pdf-lib";
 import { zipSync, unzipSync, strToU8, strFromU8 } from "fflate";
@@ -7,6 +8,8 @@ import {
   updateImportedForm,
   resetImportedForm,
   updateFormWidget,
+  setImportedFormDeleted,
+  duplicateImportedForm,
 } from "../src/forms/commands";
 import { resolveImportedForm } from "../src/forms/importedSettings";
 import { History } from "../src/commands/history";
@@ -450,4 +453,109 @@ it("preserves the selected radio position when renamed values swap existing name
   expect(resolveImportedForm(field, changed).value).toBe("A");
   expect((await PDFDocument.load(await exportPdf(changed))).getForm().getRadioGroup("Choice").getSelected()).toBe("A");
   expect(resolveImportedForm(field, resetImportedForm(field).apply(changed)).value).toBe("B");
+});
+
+it("deletes all shared widgets of each supported kind without changing source, values or placement and restores with history", async () => {
+  const { model: initial, fields } = await fixture();
+  const model = duplicatePage(initial.pages[0].id).apply(initial), originalBytes = model.sources.s.bytes.slice();
+  for (const field of fields) {
+    const placed = updateFormWidget(model.pages.find(page => page.sourceIndex === field.widgets[0].pageIndex)!.id, field.widgets[0].id, { x: 80, y: 70, width: 100, height: 30 }).apply(model);
+    const history = new History(placed); history.execute(setImportedFormDeleted(field, true));
+    const deleted = history.current.document;
+    expect(deleted.formValues).toBe(placed.formValues); expect(deleted.pages).toBe(placed.pages);
+    expect(deleted.sources.s.bytes).toEqual(originalBytes);
+    expect(dataFields(deleted, fields).some(item => item.key === field.key)).toBe(false);
+    expect(setImportedFormDeleted(field, true).apply(deleted)).toBe(deleted);
+    expect(() => applyFormData(fields, [{ name: field.name, values: ["x"] }]).apply(deleted)).toThrow(/見つからない/);
+    const restored = await openProject(await saveProject(deleted));
+    const bytes = await exportPdf(restored), pdf = await PDFDocument.load(bytes);
+    expect(pdf.getForm().getFields().map(item => item.getName())).not.toContain(field.name);
+    const remaining = await inspectForms({ sources: { s: { ...model.sources.s, bytes } } });
+    expect(remaining.map(item => item.name)).not.toContain(field.name);
+    history.undo(); expect(history.current.document).toBe(placed); history.redo();
+    history.execute(setImportedFormDeleted(field, false));
+    const restoredPdf = await PDFDocument.load(await exportPdf(history.current.document));
+    expect(restoredPdf.getForm().getField(field.name).acroField.getWidgets()[0].getRectangle().width).toBe(100);
+    expect(resolveImportedForm(field, history.current.document).value).toEqual(resolveImportedForm(field, placed).value);
+  }
+});
+it("removes every deleted field and widget from normal, extracted and flattened output while retaining unrelated annotations", async () => {
+  const { model, fields } = await fixture(), input = await PDFDocument.load(model.sources.s.bytes);
+  const note = input.context.register(input.context.obj({ Type: "Annot", Subtype: "Text", Rect: [10, 10, 30, 30], Contents: PDFHexString.fromText("Keep note") }));
+  input.getPages()[0].node.addAnnot(note); model.sources.s.bytes = await input.save();
+  let deleted = model;
+  for (const field of fields) deleted = setImportedFormDeleted(field, true).apply(deleted);
+  for (const output of [await exportPdf(deleted), await exportPdf(deleted, undefined, { indices: [0] }), await exportPdf({ ...deleted, flattenForms: true })]) {
+    const pdf = await PDFDocument.load(output); expect(pdf.getForm().getFields()).toHaveLength(0);
+    const { PDFDict } = await import("pdf-lib");
+    for (const page of pdf.getPages()) {
+      const annots = page.node.Annots();
+      for (const annotation of annots?.asArray() ?? []) {
+        const dict = pdf.context.lookup(annotation, PDFDict);
+        expect(dict.get(PDFName.of("Subtype"))).not.toBe(PDFName.of("Widget"));
+        expect((dict.get(PDFName.of("Contents")) as PDFHexString).decodeText()).toBe("Keep note");
+      }
+    }
+    expect(pdf.getPages()[0].node.Annots()?.size()).toBe(1);
+  }
+});
+it("duplicates all five imported kinds as independent created fields with unique names, current settings and project/PDF persistence", async () => {
+  const { model: initial, fields } = await fixture();
+  let model = initial;
+  const text = fields.find(field => field.kind === "text")!, dropdown = fields.find(field => field.kind === "dropdown")!;
+  model = updateImportedForm(text, { name: "Updated", readOnly: false, required: true, multiline: true, maxLength: 30, defaultValue: "Default" }).apply(model);
+  model.formValues[text.key] = "Edited text";
+  model = updateFormWidget(model.pages[0].id, text.widgets[0].id, { x: 80, y: 70, width: 160, height: 50 }).apply(model);
+  model = updateImportedForm(dropdown, { choiceOptions: [{ value: "R", label: "Red" }, { value: "G", label: "Green" }], defaultValue: "G" }).apply(model);
+  model.formValues[dropdown.key] = "G";
+  const history = new History(model);
+  for (const field of fields) {
+    const widget = field.widgets[0], page = model.pages.find(page => page.sourceIndex === widget.pageIndex)!;
+    history.execute(duplicateImportedForm(fields, field.key, page.id, widget.id));
+  }
+  const copied = history.current.document, added = copied.formFields!;
+  expect(added).toHaveLength(5);
+  expect(added.find(field => field.kind === "text")).toMatchObject({ name: "Updated_copy", value: "Edited text", defaultValue: "Default", x: 92, y: 82, width: 160, height: 50, required: true, readOnly: false, multiline: true, maxLength: 30 });
+  expect(added.find(field => field.kind === "radio")).toMatchObject({ options: ["A", "B"], value: "B" });
+  expect(added.find(field => field.kind === "radio")!.height).toBeGreaterThanOrEqual(40);
+  history.undo(); expect(history.current.document.formFields).toHaveLength(4); history.redo(); expect(history.current.document).toBe(copied);
+  const restored = await openProject(await saveProject(copied));
+  expect(restored.formFields!.find(field => field.kind === "dropdown")?.choiceOptions).toEqual([{ value: "R", label: "Red" }, { value: "G", label: "Green" }]);
+  const pdf = await PDFDocument.load(await exportPdf(restored)), form = pdf.getForm();
+  expect(form.getFields()).toHaveLength(10);
+  expect(form.getTextField("Updated_copy").getText()).toBe("Edited text");
+  expect(form.getCheckBox("Consent_copy").isChecked()).toBe(true);
+  expect(form.getRadioGroup("Choice_copy").getSelected()).toBe("B");
+  expect(form.getDropdown("Color_copy").getSelected()).toEqual(["G"]);
+  expect(form.getDropdown("Color_copy").getOptions()).toEqual(["Red", "Green"]);
+  const { decodePDFRawStream, PDFDict } = await import("pdf-lib");
+  const appearance = form.getDropdown("Color_copy").acroField.getWidgets()[0].dict.lookup(PDFName.of("AP"), PDFDict).lookup(PDFName.of("N")) as PDFRawStream;
+  expect(new TextDecoder().decode(decodePDFRawStream(appearance).decode())).toContain("477265656E");
+  expect((await PDFDocument.load(await exportPdf({ ...restored, flattenForms: true }))).getForm().getFields()).toHaveLength(0);
+  expect(form.getOptionList("Tags_copy").getSelected()).toEqual(["One", "Three"]);
+  const independent = applyFormData(fields, [{ name: "Updated_copy", values: ["Independent"] }]).apply(restored);
+  expect(resolveImportedForm(text, independent).value).toBe("Edited text");
+  expect(resetFormDataToDefaults(fields).apply(independent).formFields!.find(field => field.name === "Updated_copy")?.value).toBe("Default");
+  const again = duplicateImportedForm(fields, text.key, model.pages[0].id, text.widgets[0].id).apply(copied);
+  expect(again.formFields!.at(-1)?.name).toBe("Updated_copy2");
+  expect(again.sources.s.bytes).toBe(initial.sources.s.bytes);
+});
+it("rejects stale/deleted duplicate targets and malformed defaults without partial changes and keeps deletion over merge and extraction", async () => {
+  const { model, fields } = await fixture(), field = fields[0];
+  const deleted = setImportedFormDeleted(field, true).apply(model), history = new History(deleted);
+  for (const [key, page, widget] of [[field.key, model.pages[0].id, field.widgets[0].id], ["missing", model.pages[0].id, field.widgets[0].id], [field.key, "missing", field.widgets[0].id]]) {
+    expect(() => history.execute(duplicateImportedForm(fields, key, page, widget))).toThrow();
+    expect(history.current.document).toBe(deleted); expect(history.canUndo).toBe(false);
+  }
+  const other = await fixture("other"), merged = mergeDocuments(other.model).apply(deleted);
+  const pdf = await PDFDocument.load(await exportPdf(merged));
+  expect(pdf.getForm().getTextField(field.name).acroField.getWidgets()).toHaveLength(2);
+  const extracted = await PDFDocument.load(await exportPdf(merged, undefined, { indices: [0] }));
+  expect(extracted.getForm().getFields().map(field => field.getName())).not.toContain(field.name);
+  const broken = fields.map(item => item.key === field.key ? { ...item, defaultValueError: "Invalid DV" } : item);
+  const cleanHistory = new History(model);
+  expect(() => cleanHistory.execute(duplicateImportedForm(broken, field.key, model.pages[0].id, field.widgets[0].id))).toThrow(/Invalid DV/);
+  expect(cleanHistory.canUndo).toBe(false);
+  const invalid = { ...model, importedFormEdits: { [field.key]: { deleted: "yes" } } };
+  await expect(saveProject(invalid as unknown as typeof model)).rejects.toThrow();
 });

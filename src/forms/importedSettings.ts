@@ -1,3 +1,4 @@
+import { validateDefaultValue } from "./values";
 import { z } from "zod";
 import type { FormDescriptor } from "../export/engine";
 import type {
@@ -8,6 +9,8 @@ import type {
 
 export const importedFormEditSchema = z
   .object({
+    deleted: z.boolean().optional(),
+    defaultValue: z.union([z.string().max(1000000), z.boolean(), z.array(z.string().max(1000000)).max(10000)]).nullable().optional(),
     name: z
       .string()
       .min(1)
@@ -106,7 +109,7 @@ export function normalizeChoiceValue(
 export function resolveImportedForm(
   field: FormDescriptor,
   model: Pick<DocumentModel, "formValues" | "importedFormEdits">,
-): FormDescriptor {
+): FormDescriptor & { deleted?: boolean } {
   const edit = model.importedFormEdits?.[field.key] ?? {};
   const value = model.formValues[field.key] ?? field.value;
   const resolved = {
@@ -125,12 +128,18 @@ export function resolveImportedForm(
       ? edit.choiceOptions.some((o) => o.value !== o.label)
       : field.hasExportValues,
     value,
+    defaultValue: edit.defaultValue === null ? undefined : edit.defaultValue ?? field.defaultValue,
+    defaultValueError: edit.defaultValue !== undefined ? undefined : field.defaultValueError,
   };
   if (field.kind === "radio" && edit.options) {
     const oldIndex = field.options.indexOf(String(value));
     resolved.value = model.formValues[field.key] !== undefined
       ? resolved.options.includes(String(value)) ? value : ""
       : oldIndex >= 0 ? resolved.options[oldIndex] : "";
+    if (edit.defaultValue === undefined && typeof field.defaultValue === "string") {
+      const defaultIndex = field.options.indexOf(field.defaultValue);
+      resolved.defaultValue = defaultIndex >= 0 ? resolved.options[defaultIndex] : "";
+    }
     resolved.widgets = field.widgets.map(widget => ({ ...widget,
       option: resolved.options[field.options.indexOf(widget.option ?? "")] ?? widget.option,
     }));
@@ -147,4 +156,9 @@ export function resolveImportedForm(
       !!resolved.multiSelect,
     );
   return resolved;
+}
+
+export function validateEditedDefault(field: FormDescriptor, edit: ImportedFormEdit) {
+  if (edit.defaultValue !== undefined && edit.defaultValue !== null)
+    validateDefaultValue(field, edit.defaultValue);
 }

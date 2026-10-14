@@ -46,11 +46,11 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
     });
     return result ? parseRange(result.range, doc.pages.length) : null;
   }
-  async function dispatch(a: Action) {
+  async function dispatch(a: Action, targetPageId?: string) {
     if (!flushInlineText()) return;
     // The synchronous commit can replace the model before React rerenders.
     const doc = documentStore.document;
-    const page = doc?.pages.find(p => p.id === options.page?.id);
+    const page = doc?.pages.find(p => p.id === (targetPageId ?? options.page?.id));
     setError("");
     try {
       if (a === "open") {

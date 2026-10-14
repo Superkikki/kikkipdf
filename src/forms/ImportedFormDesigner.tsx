@@ -4,7 +4,7 @@ import type { FormDescriptor } from "../export/engine";
 import { pageSize } from "../state/model";
 import { documentStore } from "../state/store";
 import { PageView } from "../viewer/PageView";
-import { resetFormWidget, updateFormWidget } from "./commands";
+import { resetFormWidget, updateFormWidget, setImportedFormDeleted, duplicateImportedForm } from "./commands";
 import { resolveImportedForm } from "./importedSettings";
 import { ImportedFormSettings } from "./ImportedFormSettings";
 
@@ -18,6 +18,7 @@ export function ImportedFormDesigner({
   active: string;
 }) {
   const [selected, setSelected] = useState("");
+  const [error, setError] = useState("");
   const widgets = model.pages.flatMap((page, index) =>
     fields
       .filter((f) => f.sourceId === page.sourceId)
@@ -93,13 +94,34 @@ export function ImportedFormDesigner({
               <option value="">選択してください</option>
               {widgets.map((w) => (
                 <option key={w.key} value={w.key}>
-                  {w.field.name} — ページ{w.index + 1}
+                  {w.field.name} — ページ{w.index + 1}{w.field.deleted ? "（削除済み）" : ""}
                   {w.widget.option ? ` / ${w.widget.option}` : ""}
                 </option>
               ))}
             </select>
           </label>
-          {entry && box && (
+          {entry && (
+            <>
+              <div className="form-kind-buttons">
+                {!entry.field.deleted && <button onClick={() => {
+                  try {
+                    documentStore.execute(duplicateImportedForm(fields, entry.field.key, entry.page.id, entry.widget.id));
+                    setError("");
+                  } catch (reason) { setError(reason instanceof Error ? reason.message : "複製できませんでした。"); }
+                }}>独立した項目として複製</button>}
+                <button className={entry.field.deleted ? undefined : "danger"} onClick={() => {
+                  try {
+                    documentStore.execute(setImportedFormDeleted(entry.original, !entry.field.deleted));
+                    setError("");
+                  } catch (reason) { setError(reason instanceof Error ? reason.message : "項目を変更できませんでした。"); }
+                }}>{entry.field.deleted ? "削除した項目を復元" : "項目を全ページから削除"}</button>
+              </div>
+              <p className="hint">削除は同じ項目の全ページの入力欄に適用します。複製は選んだページに独立した追加項目を作成します。ラジオは全選択肢を縦に並べ、外観はこのアプリで生成します。</p>
+              {entry.field.deleted && <p role="status">この項目は削除済みです。値・設定・配置は復元まで保持します。</p>}
+            </>
+          )}
+          {error && <p className="warning" role="alert">{error}</p>}
+          {entry && !entry.field.deleted && box && (
             <>
               <ImportedFormSettings
                 key={JSON.stringify([

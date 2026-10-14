@@ -152,6 +152,10 @@ export interface ChoiceOption {
   label: string;
 }
 export interface ImportedFormEdit {
+  /** Removes all widgets of the source field from output, while retaining editable history. */
+  deleted?: boolean;
+  /** null explicitly removes inherited PDF /DV. */
+  defaultValue?: FieldValue | null;
   name?: string;
   required?: boolean;
   readOnly?: boolean;
@@ -168,6 +172,7 @@ export interface FormFieldModel extends Box {
   name: string;
   kind: FormKind;
   value: FieldValue;
+  defaultValue?: FieldValue;
   options: string[];
   choiceOptions?: ChoiceOption[];
   fontSize: number;

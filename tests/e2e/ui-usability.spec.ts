@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { PDFDocument } from "pdf-lib";
+import { readFile } from "node:fs/promises";
 
 async function openFixture(page: Page, count = 3) {
   const pdf = await PDFDocument.create();
@@ -20,6 +21,154 @@ async function openFixture(page: Page, count = 3) {
   await expect(page.locator(".document-tab")).toContainText("ui-review.pdf");
   await expect(page.locator(".viewer-scroll .page-view[data-rendered=true]").first()).toBeVisible();
 }
+
+test("document name edits inline, cancels, validates, undoes, and saves under the new name", async ({ page }, info) => {
+  await page.goto("/");
+  await openFixture(page);
+  const name = page.getByRole("button", { name: "文書の名前を変更", exact: true });
+  const input = page.getByRole("textbox", { name: "文書のファイル名", exact: true });
+  await name.click();
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue("ui-review");
+  await page.screenshot({ path: info.outputPath("inline-document-name.png") });
+  expect(await input.evaluate((el: HTMLInputElement) => el.selectionEnd! - el.selectionStart!)).toBe(9);
+  await input.fill("cancelled");
+  await input.press("Escape");
+  await expect(name).toBeFocused();
+  await expect(name).toContainText("ui-review.pdf");
+  await page.keyboard.press("F2");
+  await input.fill("invalid/name");
+  await input.press("Enter");
+  await expect(page.locator(".document-name-hint")).toHaveAttribute("role", "alert");
+  await expect(input).toBeFocused();
+  await input.fill("会議資料.pdf");
+  await input.press("Enter");
+  await expect(name).toContainText("会議資料.pdf");
+  await expect(page.locator(".document-save-state")).toHaveText("未保存の変更");
+  await page.keyboard.press("Control+z");
+  await expect(name).toContainText("ui-review.pdf");
+  await page.keyboard.press("Control+y");
+  await expect(name).toContainText("会議資料.pdf");
+  const download = page.waitForEvent("download");
+  await page.keyboard.press("Control+s");
+  expect((await download).suggestedFilename()).toBe("会議資料.pdf");
+  await expect(page.locator(".document-save-state")).toHaveText("保存済み");
+  await page.locator(".menu").first().locator("summary").click();
+  await page.getByRole("button", { name: "名前を変更 F2", exact: true }).click();
+  await expect(input).toBeFocused();
+  await input.fill("別の資料");
+  await page.getByRole("button", { name: "名前を確定", exact: true }).click();
+  await expect(name).toContainText("別の資料.pdf");
+});
+
+test("saving commits the name draft and invalid names stop both button and keyboard saves", async ({ page }) => {
+  await page.goto("/");
+  await openFixture(page, 1);
+  const input = page.getByRole("textbox", { name: "文書のファイル名", exact: true });
+  await page.getByRole("button", { name: "文書の名前を変更", exact: true }).click();
+  await input.fill("ボタンで保存");
+  let download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  expect((await download).suggestedFilename()).toBe("ボタンで保存.pdf");
+  await expect(input).toHaveCount(0);
+  await expect(page.locator(".busy-overlay")).toHaveCount(0);
+  await page.keyboard.press("F2");
+  await input.fill("キーで保存");
+  download = page.waitForEvent("download");
+  await input.press("Control+s");
+  expect((await download).suggestedFilename()).toBe("キーで保存.pdf");
+  await expect(page.locator(".busy-overlay")).toHaveCount(0);
+  await page.keyboard.press("F2");
+  await input.fill("invalid/name");
+  const downloads: string[] = [];
+  page.on("download", (file) => downloads.push(file.suggestedFilename()));
+  await input.press("Control+s");
+  await expect(input).toHaveAttribute("aria-invalid", "true");
+  await expect(input).toBeFocused();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(input).toBeFocused();
+  expect(downloads).toEqual([]);
+  await expect(page.locator(".document-tab")).not.toContainText("invalid/name.pdf");
+  await input.fill("保存しない変換途中");
+  await input.dispatchEvent("compositionstart");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(input).toBeVisible();
+  expect(downloads).toEqual([]);
+  await input.dispatchEvent("compositionend");
+  download = page.waitForEvent("download");
+  await input.press("Control+Shift+s");
+  expect((await download).suggestedFilename()).toBe("保存しない変換途中.pdf");
+});
+
+test("thumbnail menus operate on the chosen page and deleting a page focuses its range", async ({ page }, info) => {
+  await page.goto("/");
+  await openFixture(page);
+  const thumbnails = page.locator(".thumbnail");
+  const menu = page.getByRole("menu", { name: "ページの操作", exact: true });
+  await thumbnails.nth(1).click({ button: "right" });
+  await menu.getByRole("menuitem", { name: "90° 回転", exact: true }).click();
+  await expect(thumbnails.nth(1)).toHaveAttribute("aria-current", "page");
+  const download = page.waitForEvent("download");
+  await page.keyboard.press("Control+s");
+  const file = await download;
+  const saved = info.outputPath("rotated.pdf");
+  await file.saveAs(saved);
+  const pdf = await PDFDocument.load(await readFile(saved));
+  expect(pdf.getPages().map((p) => p.getRotation().angle)).toEqual([0, 90, 0]);
+  await page.getByRole("button", { name: "ページ 2 の操作", exact: true }).click();
+  await menu.getByRole("menuitem", { name: "複製", exact: true }).click();
+  await expect(thumbnails).toHaveCount(4);
+  await page.keyboard.press("Control+z");
+  await expect(thumbnails).toHaveCount(3);
+  await thumbnails.nth(1).focus();
+  await page.keyboard.press("Shift+F10");
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: "削除", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "ページを削除" });
+  const range = dialog.getByRole("textbox", { name: "削除するページ範囲" });
+  await expect(range).toBeFocused();
+  await expect(range).toHaveValue("2");
+  expect(await range.evaluate((el: HTMLInputElement) => el.selectionEnd! - el.selectionStart!)).toBe(1);
+  await range.press("Enter");
+  await expect(thumbnails).toHaveCount(2);
+  await page.keyboard.press("Control+z");
+  await expect(thumbnails).toHaveCount(3);
+  await page.getByRole("button", { name: "ページ 1 の操作", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "ページ 1 の操作", exact: true })).toBeFocused();
+  await page.getByRole("button", { name: "ページ 3 の操作", exact: true }).click();
+  await page.locator(".document-tab").click({ position: { x: 4, y: 4 } });
+  await expect(menu).toHaveCount(0);
+});
+
+test("page menus fit short windows, skip disabled deletion, and sidebar tabs have visible labels", async ({ page }, info) => {
+  await page.setViewportSize({ width: 800, height: 600 });
+  await page.goto("/");
+  await openFixture(page, 1);
+  for (const name of ["ページ", "しおり", "コメント", "検索", "添付ファイル", "OCR校正", "レイヤー"]) {
+    const button = page.locator(".side-tabs").getByRole("button", { name, exact: true });
+    await expect(button.locator("span")).toBeVisible();
+    const bounds = (await button.boundingBox())!;
+    const label = (await button.locator("span").boundingBox())!;
+    expect(label.x).toBeGreaterThanOrEqual(bounds.x);
+    expect(label.x + label.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+  }
+  await page.getByRole("button", { name: "ページ 1 の操作", exact: true }).click();
+  const menu = page.getByRole("menu", { name: "ページの操作", exact: true });
+  await expect(menu.getByRole("menuitem", { name: "削除", exact: true })).toBeDisabled();
+  await page.keyboard.press("End");
+  await expect(menu.getByRole("menuitem", { name: "複製", exact: true })).toBeFocused();
+  const bounds = (await menu.boundingBox())!;
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(592);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(792);
+  await page.screenshot({ path: info.outputPath("page-menu-compact.png") });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "ツール", exact: true }).click();
+  await page.getByRole("button", { name: "OCR", exact: true }).click();
+  await expect(page.getByRole("dialog").getByLabel("ページ範囲（空欄は全ページ）", { exact: true })).toBeFocused();
+  await page.getByRole("dialog").getByRole("button", { name: "キャンセル", exact: true }).click();
+});
 
 test("narrow workspace expands the document and reveals properties when editing", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });

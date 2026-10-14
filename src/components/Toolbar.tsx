@@ -53,6 +53,7 @@ export type Action =
   | "new"
   | "save"
   | "saveAs"
+  | "rename"
   | "undo"
   | "redo"
   | "rotate"
@@ -183,6 +184,7 @@ export function Toolbar({
               ["print", "印刷", "Ctrl+P"],
               ["save", "保存", "Ctrl+S"],
               ["saveAs", "名前を付けて保存", "Ctrl+Shift+S"],
+              ["rename", "名前を変更", "F2"],
               ["merge", "PDFを結合 / 追加", ""],
               ["imagesPdf", "画像からPDFを作成", ""],
               ["png", "現在のページをPNGへ", ""],

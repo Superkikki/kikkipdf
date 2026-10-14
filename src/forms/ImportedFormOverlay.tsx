@@ -59,7 +59,7 @@ export function ImportedFormOverlay({
   >(undefined);
   const widgets = fields
     .map((f) => resolveImportedForm(f, model))
-    .filter((f) => f.sourceId === page.sourceId)
+    .filter((f) => !f.deleted && f.sourceId === page.sourceId)
     .flatMap((field) =>
       field.widgets
         .filter((w) => w.pageIndex === page.sourceIndex && (!w.optionalContent ||

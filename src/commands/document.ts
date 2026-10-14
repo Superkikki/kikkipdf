@@ -13,6 +13,17 @@ export const change = (label: string, apply: Command["apply"]): Command => ({
   label,
   apply,
 });
+export function renameDocument(value: string): Command {
+  const base = value.trim().replace(/\.pdf$/i, "").trim();
+  if (!base || base === "." || base === "..") throw new Error("ファイル名を入力してください。");
+  if (/[<>:"/\\|?*]/.test(base) || Array.from(base).some((char) => char.charCodeAt(0) < 32) || /[. ]$/.test(base) ||
+    /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(base)) {
+    throw new Error("ファイル名に使用できない文字や名前が含まれています。");
+  }
+  if (base.length > 200) throw new Error("ファイル名は200文字以内で入力してください。");
+  const name = `${base}.pdf`;
+  return change("文書名を変更", (d) => d.name === name ? d : { ...d, name, path: undefined });
+}
 export function editPage(
   id: string,
   update: (p: PageModel) => PageModel,

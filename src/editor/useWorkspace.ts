@@ -6,7 +6,7 @@ import type { BookmarkNavigation } from "../viewer/bookmarkNavigation";
 import { documentStore, useDocument } from "../state/store";
 import { extractImageAsset } from "../images/extract";
 import { pasteObject, type ObjectMenuActions } from "./objectActions";
-import { change, deleteObject } from "../commands/document";
+import { change, deleteObject, renameDocument } from "../commands/document";
 import { setPreference } from "../state/recovery";
 import { isTauri, pickFiles, readPath } from "../platform/files";
 import { usePrompt } from "../components/Prompt";
@@ -44,6 +44,7 @@ export function useWorkspace() {
     [recent, setRecent] = useState<string[]>([]);
   const controller = useRef<AbortController | null>(null),
     busyRef = useRef(false);
+  const [renameRequest, setRenameRequest] = useState<{ documentId: string; serial: number } | null>(null);
   const { ask, dialog } = usePrompt();
   const report = useCallback((s: string) => setError(s), []);
   const page = doc?.pages.find((p) => p.id === active) ?? doc?.pages[0];
@@ -147,8 +148,26 @@ export function useWorkspace() {
     setActive, setSelected, setModal, openFiles, save, mayDiscard,
   });
   const action = (a: Action) => {
-    if (!busyRef.current) void dispatch(a);
+    if (busyRef.current) return;
+    if (a === "rename") {
+      if (!flushInlineText()) return;
+      const current = documentStore.document;
+      if (current) setRenameRequest((request) => ({ documentId: current.id, serial: (request?.serial ?? 0) + 1 }));
+      return;
+    }
+    void dispatch(a);
   };
+  function rename(value: string) {
+    if (busyRef.current || !flushInlineText()) return false;
+    documentStore.execute(renameDocument(value));
+    setStatus("名前を変更しました。保存すると新しい名前が使われます。");
+    return true;
+  }
+  function pageAction(action: "rotate" | "duplicate" | "delete", pageId: string) {
+    if (busyRef.current || !flushInlineText()) return;
+    jump(pageId);
+    void dispatch(action, pageId);
+  }
   useStartupDocuments({ ask, openFiles, setActive, setRecent, report });
   useRecovery(report);
   useEffect(() => {
@@ -161,7 +180,7 @@ export function useWorkspace() {
   }, [doc, state.dirty]);
   useKeyboardShortcuts({
     openFiles, save, dispatch, selected, page, work, busyRef, clipboard,
-    setSelected, setTool, setStatus,
+    setSelected, setTool, setStatus, requestRename: () => action("rename"),
   });
   useDesktopLifecycle({ openFiles, mayDiscard, busyRef, report });
   const objectMenuActions: ObjectMenuActions = {
@@ -202,6 +221,9 @@ export function useWorkspace() {
 
   return {
     ...state,
+    rename,
+    renameRequest,
+    pageAction,
     objectMenuActions,
     active,
     page,

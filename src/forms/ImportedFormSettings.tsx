@@ -1,3 +1,4 @@
+import { ChoiceOptionsEditor } from "./ChoiceOptionsEditor";
 import { useState } from "react";
 import type { FormDescriptor } from "../export/engine";
 import type { DocumentModel, ImportedFormEdit } from "../state/model";
@@ -187,66 +188,7 @@ export function ImportedFormSettings({
             <p className="hint">
               表示名は画面に表示され、保存値はPDFに記録されます。保存値は重複できません。
             </p>
-            {draft.choiceOptions.map((option, index) => (
-              <div className="form-kind-buttons" key={index}>
-                <label>
-                  表示名
-                  <input
-                    aria-label={`選択肢${index + 1}の表示名`}
-                    value={option.label}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        choiceOptions: draft.choiceOptions.map((o, i) =>
-                          i === index ? { ...o, label: e.target.value } : o,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-                <label>
-                  保存値
-                  <input
-                    aria-label={`選択肢${index + 1}の保存値`}
-                    value={option.value}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        choiceOptions: draft.choiceOptions.map((o, i) =>
-                          i === index ? { ...o, value: e.target.value } : o,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-                <button
-                  aria-label={`選択肢${index + 1}を削除`}
-                  onClick={() =>
-                    setDraft({
-                      ...draft,
-                      choiceOptions: draft.choiceOptions.filter(
-                        (_, i) => i !== index,
-                      ),
-                    })
-                  }
-                >
-                  削除
-                </button>
-              </div>
-            ))}
-            <button
-              onClick={() =>
-                setDraft({
-                  ...draft,
-                  choiceOptions: [
-                    ...draft.choiceOptions,
-                    { value: "", label: "" },
-                  ],
-                })
-              }
-            >
-              選択肢を追加
-            </button>
+            <ChoiceOptionsEditor options={draft.choiceOptions} onChange={choiceOptions => setDraft({ ...draft, choiceOptions })} />
             <p className="hint">
               削除した保存値の選択は解除されます。複数選択を解除すると先頭の選択だけを残します。
             </p>

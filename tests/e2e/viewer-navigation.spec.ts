@@ -175,7 +175,8 @@ test("Ctrl+wheel and trackpad pinch zoom only the PDF and retain the cursor loca
 });
 
 test("pointer drag reorders pages in both directions, supports keyboard and undo, and persists on save", async ({ page }, info) => {
-  await page.setViewportSize({ width: 1440, height: 1100 });
+  // Keep all three targets visible below the labelled sidebar tabs.
+  await page.setViewportSize({ width: 1440, height: 1200 });
   await page.goto("/");
   await openFixture(page, 3);
   const thumbs = page.locator(".thumbnail");
@@ -183,6 +184,11 @@ test("pointer drag reorders pages in both directions, supports keyboard and undo
   async function drag(from: number, to: number, edge: "before" | "after") {
     const a = (await thumbs.nth(from).boundingBox())!;
     const b = (await thumbs.nth(to).boundingBox())!;
+    const list = (await page.locator(".side-scroll").boundingBox())!;
+    for (const target of [a, b]) {
+      expect(target.y).toBeGreaterThanOrEqual(list.y);
+      expect(target.y + target.height).toBeLessThanOrEqual(list.y + list.height);
+    }
     await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
     await page.mouse.down();
     await page.mouse.move(b.x + b.width / 2, b.y + b.height * (edge === "before" ? 0.2 : 0.8), { steps: 12 });

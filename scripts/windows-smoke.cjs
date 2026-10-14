@@ -86,6 +86,73 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_UI_ONLY === "1") {
+    const dir = process.env.KIKKI_SMOKE_DIR;
+    const fixture = path.join(dir, "native-fixture.pdf");
+    const original = await fs.readFile(fixture);
+    const thumbnails = page.locator(".thumbnail");
+    const menu = page.getByRole("menu", { name: "ページの操作", exact: true });
+    await thumbnails.nth(1).click({ button: "right" });
+    await menu.getByRole("menuitem", { name: "90° 回転", exact: true }).click();
+    await expect(thumbnails.nth(1)).toHaveAttribute("aria-current", "page");
+    await page.getByRole("button", { name: "ページ 2 の操作", exact: true }).click();
+    await menu.getByRole("menuitem", { name: "複製", exact: true }).click();
+    await expect(thumbnails).toHaveCount(4);
+    await page.keyboard.press("Control+z");
+    await expect(thumbnails).toHaveCount(3);
+    await page.getByRole("button", { name: "ページ 2 の操作", exact: true }).click();
+    await menu.getByRole("menuitem", { name: "削除", exact: true }).click();
+    const range = page.getByRole("dialog").getByLabel("削除するページ範囲");
+    await expect(range).toBeFocused();
+    await expect(range).toHaveValue("2");
+    await range.press("Enter");
+    await expect(thumbnails).toHaveCount(2);
+    await page.keyboard.press("Control+z");
+    await expect(thumbnails).toHaveCount(3);
+    for (const name of ["ページ", "しおり", "コメント", "検索", "添付ファイル", "OCR校正", "レイヤー"])
+      await expect(page.locator(".side-tabs").getByRole("button", { name, exact: true }).locator("span")).toBeVisible();
+    const input = page.getByRole("textbox", { name: "文書のファイル名", exact: true });
+    await page.getByRole("button", { name: "文書の名前を変更", exact: true }).click();
+    await input.fill("invalid/name");
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(input).toHaveAttribute("aria-invalid", "true");
+    await expect(input).toBeFocused();
+    const namedBase = `UI名前変更-${started}`;
+    await input.fill(namedBase);
+    const namedPath = path.join(dir, `${namedBase}.pdf`);
+    const buttonPick = pickNativeFile(namedPath).then(() => ({ ok: true }), error => ({ error }));
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    const buttonResult = await buttonPick;
+    if (buttonResult.error) throw buttonResult.error;
+    await expect(page.locator(".document-save-state")).toHaveText("保存済み", { timeout: 30000 });
+    await expect(page.locator(".busy-overlay")).toHaveCount(0);
+    const saved = await PDFDocument.load(await fs.readFile(namedPath));
+    if (saved.getPages().map(p => p.getRotation().angle).join(",") !== "0,90,0")
+      throw Error("Page menu rotated the wrong page");
+    if (!original.equals(await fs.readFile(fixture))) throw Error("Renaming overwrote the original PDF");
+    await page.keyboard.press("F2");
+    const keyboardBase = `UIキーボード保存-${started}`;
+    await input.fill(keyboardBase);
+    const keyboardPath = path.join(dir, `${keyboardBase}.pdf`);
+    const keyboardPick = pickNativeFile(keyboardPath).then(() => ({ ok: true }), error => ({ error }));
+    await input.press("Control+s");
+    const keyboardResult = await keyboardPick;
+    if (keyboardResult.error) throw keyboardResult.error;
+    await expect(page.locator(".document-save-state")).toHaveText("保存済み", { timeout: 30000 });
+    await expect(page.locator(".busy-overlay")).toHaveCount(0);
+    if ((await PDFDocument.load(await fs.readFile(keyboardPath))).getPageCount() !== 3)
+      throw Error("Keyboard save did not persist the renamed document");
+    await page.getByRole("button", { name: "ページ 2 の操作", exact: true }).click();
+    await page.screenshot({ path: path.join(dir, "workspace-ui.png") });
+    await page.keyboard.press("Escape");
+    if (errors.length) throw Error(errors.join("\n"));
+    console.log(JSON.stringify({ native: true, thumbnailActions: true, undoRedo: true,
+      promptFocus: true, sidebarLabels: true, invalidNameBlocksSave: true,
+      buttonRenameSave: true, keyboardRenameSave: true, originalFilePreserved: true,
+      elapsedSeconds: Math.round((Date.now() - started) / 1000), errors }));
+    await browser.close();
+    return;
+  }
   if (process.env.KIKKI_SMOKE_BOOKMARK_ONLY === "1") {
     await page.getByRole("button", { name: "しおり", exact: true }).click();
     const panel = page.locator(".bookmark-panel"), search = panel.getByLabel("しおりを検索", { exact: true });
@@ -493,11 +560,22 @@ async function verifyObjectContext(page, root) {
     await expect.poll(async () => Number(await zoom.inputValue())).toBeGreaterThan(scale);
     const thumbs = page.locator(".thumbnail");
     const ids = await thumbs.evaluateAll(els => els.map(el => el.dataset.pageId));
+    // Native window sizes vary with Windows display scaling; reveal the drop point first.
+    await page.locator(".side-scroll").evaluate(el => {
+      const second = el.querySelectorAll(".thumbnail")[1].getBoundingClientRect();
+      const list = el.getBoundingClientRect();
+      el.scrollTop += Math.max(0, second.top + second.height * 0.65 - (list.bottom - 70));
+    });
     const a = await thumbs.nth(0).boundingBox();
     const b = await thumbs.nth(1).boundingBox();
-    await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+    const list = await page.locator(".side-scroll").boundingBox();
+    const startY = Math.min(a.y + a.height - 15, Math.max(list.y + 45, a.y + a.height / 2));
+    const targetY = b.y + b.height * 0.6;
+    if (startY < list.y || targetY > list.y + list.height - 40)
+      throw Error("Native drag test targets are outside the thumbnail viewport");
+    await page.mouse.move(a.x + a.width / 2, startY);
     await page.mouse.down();
-    await page.mouse.move(b.x + b.width / 2, b.y + b.height * 0.55, { steps: 12 });
+    await page.mouse.move(b.x + b.width / 2, targetY, { steps: 12 });
     await expect(thumbs.nth(1)).toHaveClass(/drop-after/);
     await page.mouse.up();
     const order = () => thumbs.evaluateAll(els => els.map(el => el.dataset.pageId));

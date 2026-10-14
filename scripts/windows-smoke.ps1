@@ -1,4 +1,4 @@
-param([string]$Mode = 'release', [string]$Target = 'x86_64-pc-windows-msvc', [switch]$ContextOnly, [switch]$NavigationOnly, [switch]$FormOnly, [switch]$ImageOnly, [switch]$VerticalOnly, [switch]$ChoiceOnly, [switch]$BookmarkOnly, [switch]$InlineOnly)
+param([string]$Mode = 'release', [string]$Target = 'x86_64-pc-windows-msvc', [switch]$ContextOnly, [switch]$NavigationOnly, [switch]$FormOnly, [switch]$ImageOnly, [switch]$VerticalOnly, [switch]$ChoiceOnly, [switch]$BookmarkOnly, [switch]$InlineOnly, [switch]$UiOnly)
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
 $Exe = Join-Path $Root "src-tauri\target\$Target\$Mode\kikki-pdf.exe"
@@ -19,6 +19,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not create test PDF' }
 Copy-Item (Join-Path $Root 'src-tauri\icons\128x128.png') (Join-Path $TestDir 'replacement.png') -Force
 $env:KIKKI_SMOKE_DIR = $TestDir
 $env:KIKKI_SMOKE_CONTEXT_ONLY = if ($ContextOnly) {'1'} else {''}
+$env:KIKKI_SMOKE_UI_ONLY = if ($UiOnly) {'1'} else {''}
 $env:KIKKI_SMOKE_NAVIGATION_ONLY = if ($NavigationOnly) {'1'} else {''}
 $env:KIKKI_SMOKE_FORM_ONLY = if ($FormOnly) {'1'} else {''}
 $env:KIKKI_SMOKE_VERTICAL_ONLY = if ($VerticalOnly) {'1'} else {''}

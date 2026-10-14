@@ -35,8 +35,9 @@ import {
   PDFOptionList,
   type PDFPage,
 } from "pdf-lib";
-import { FormTransfer, createFormField } from "../forms/pdfForms";
+import { FormTransfer, createFormField, updateChoiceAppearances } from "../forms/pdfForms";
 import { widgetKey } from "../forms/commands";
+import { inspectDefaultValue } from "../forms/defaultValue";
 import { APP_NAME } from "../config";
 import fontkit from "@pdf-lib/fontkit";
 import type { ChoiceOption, DocumentModel, EditObject } from "../state/model";
@@ -373,8 +374,10 @@ export async function exportPdf(
     // Force regeneration for geometries changed by the transfer engine.
     const form = output.getForm();
     for (const field of form.getFields())
-      if (form.fieldIsDirty(field.ref))
-        field.defaultUpdateAppearances(formFont);
+      if (form.fieldIsDirty(field.ref)) {
+        if (field instanceof PDFDropdown || field instanceof PDFOptionList) updateChoiceAppearances(field, formFont);
+        else field.defaultUpdateAppearances(formFont);
+      }
     output.getForm().updateFieldAppearances(formFont);
     output
       .getForm()
@@ -418,6 +421,8 @@ export interface FormDescriptor {
   name: string;
   kind: "text" | "checkbox" | "radio" | "dropdown" | "list";
   value: string | boolean | string[];
+  defaultValue?: string | boolean | string[];
+  defaultValueError?: string;
   options: string[];
   hasExportValues?: boolean;
   checkboxOnValue?: string;
@@ -478,6 +483,7 @@ export async function inspectForms(
         });
       });
       const base = {
+        ...inspectDefaultValue(f),
         key: `${s.id}:${f.getName()}`,
         name: f.getName(),
         readOnly: f.isReadOnly(),

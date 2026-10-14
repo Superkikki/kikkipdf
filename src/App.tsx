@@ -17,6 +17,7 @@ import { flushInlineText } from "./editor/flushInlineText";
 import { ZoomControls } from "./components/ZoomControls";
 import { PageNavigation } from "./components/PageNavigation";
 import { Toolbar } from "./components/Toolbar";
+import { DocumentName } from "./components/DocumentName";
 import { Sidebar } from "./components/Sidebar";
 import { Properties } from "./components/Properties";
 import { Viewer } from "./viewer/Viewer";
@@ -107,8 +108,13 @@ export function App() {
         <>
           <div className="document-tab">
             <FileText size={16} />
-            <strong title={doc.name}>{doc.name}</strong>
-            {w.dirty && <span className="unsaved-dot" title="未保存の変更" />}
+            <DocumentName key={`${doc.id}:${w.renameRequest?.serial ?? 0}`}
+              name={doc.name} autoEdit={w.renameRequest?.documentId === doc.id}
+              disabled={!!w.busy} rename={w.rename} />
+            <span className={`document-save-state ${w.dirty ? "dirty" : ""}`}>
+              {w.dirty && <span className="unsaved-dot" aria-hidden="true" />}
+              {w.dirty ? "未保存の変更" : "保存済み"}
+            </span>
             <span className="tab-type">PDF</span>
             <div className="document-panel-controls">
               <button
@@ -137,6 +143,7 @@ export function App() {
           </div>
           <main className="workspace" inert={!!w.busy}>
             <Sidebar
+              pageAction={w.pageAction}
               search={search}
               key={`sidebar:${doc.id}`}
               searchRequest={searchRequest}

@@ -1,3 +1,4 @@
+import { setFieldDefaultValue } from "./defaultValue";
 import {
   defaultDropdownAppearanceProvider,
   defaultOptionListAppearanceProvider,
@@ -82,6 +83,20 @@ export function setFieldValue(field: PDFField, value: FieldValue) {
   }
 }
 
+/** Appearance providers must render labels while /V continues to contain export values. */
+export function updateChoiceAppearances(field: PDFDropdown | PDFOptionList, font: PDFFont) {
+  const labels = new Map(field.acroField.getOptions().map(option => [option.value.decodeText(), (option.display ?? option.value).decodeText()]));
+  const displayField = new Proxy(field, {
+    get(target, key, receiver) {
+      if (key === "getSelected") return () => target.getSelected().map(value => labels.get(value) ?? value);
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  if (field instanceof PDFDropdown)
+    field.updateAppearances(font, (_, widget, embeddedFont) => defaultDropdownAppearanceProvider(displayField as PDFDropdown, widget, embeddedFont));
+  else field.updateAppearances(font, (_, widget, embeddedFont) => defaultOptionListAppearanceProvider(displayField as PDFOptionList, widget, embeddedFont));
+}
+
 /** A bounded form transfer. Page/Parent/Kids graphs are rebuilt, never recursively copied.
  * Existing AP streams are preserved. JavaScript, submit actions and signatures are not copied.
  */
@@ -157,6 +172,12 @@ export class FormTransfer {
           edit,
         );
         this.edits.set(field.ref, checked);
+        if (checked.deleted) {
+          // Keep the original widgets available for detachment from every page below.
+          // Removing the field from AcroForm prevents appearance regeneration and copying.
+          form.acroForm.removeField(field.acroField);
+          continue;
+        }
         if (checked.required !== undefined) {
           if (checked.required) field.enableRequired();
           else field.disableRequired();
@@ -216,6 +237,8 @@ export class FormTransfer {
       if (value !== undefined) setFieldValue(field, value);
       if (edit?.maxLength !== undefined && field instanceof PDFTextField)
         field.setMaxLength(edit.maxLength ?? undefined);
+      if (edit?.defaultValue !== undefined && edit.defaultValue !== null)
+        setFieldDefaultValue(field, edit.defaultValue);
     }
     if (fields.length) {
       this.input.registerFontkit(fontkit);
@@ -223,43 +246,12 @@ export class FormTransfer {
         ? await this.input.embedFont(fontBytes, { subset: false })
         : await this.input.embedFont(StandardFonts.Helvetica);
       for (const field of fields) {
+        if (this.edits.get(field.ref)?.deleted) continue;
         if (
           (field instanceof PDFDropdown || field instanceof PDFOptionList) &&
           field.needsAppearancesUpdate()
         ) {
-          const labels = new Map(
-            field.acroField
-              .getOptions()
-              .map((o) => [
-                o.value.decodeText(),
-                (o.display ?? o.value).decodeText(),
-              ]),
-          );
-          // Supply display text to the appearance provider without changing stored /V or selection indices.
-          const displayField = new Proxy(field, {
-            get(target, key, receiver) {
-              if (key === "getSelected")
-                return () =>
-                  target.getSelected().map((v) => labels.get(v) ?? v);
-              return Reflect.get(target, key, receiver);
-            },
-          });
-          if (field instanceof PDFDropdown)
-            field.updateAppearances(font, (_, widget, embeddedFont) =>
-              defaultDropdownAppearanceProvider(
-                displayField as PDFDropdown,
-                widget,
-                embeddedFont,
-              ),
-            );
-          else
-            field.updateAppearances(font, (_, widget, embeddedFont) =>
-              defaultOptionListAppearanceProvider(
-                displayField as PDFOptionList,
-                widget,
-                embeddedFont,
-              ),
-            );
+          updateChoiceAppearances(field, font);
         }
       }
       form.updateFieldAppearances(font);
@@ -282,9 +274,10 @@ export class FormTransfer {
         const ref = annots.get(i),
           dict = this.input.context.lookup(ref);
         const entry = dict instanceof PDFDict ? owner.get(dict) : undefined;
-        if (entry && dict instanceof PDFDict)
-          items.push({ ...entry, widget: dict });
-        else retained.push(ref);
+        if (entry && dict instanceof PDFDict) {
+          if (!this.edits.get(entry.field.ref)?.deleted)
+            items.push({ ...entry, widget: dict });
+        } else retained.push(ref);
       }
       page.node.set(PDFName.of("Annots"), retained);
       this.widgets.set(index, items);
@@ -312,11 +305,12 @@ export class FormTransfer {
           "TU",
           "TM",
         ]) {
+          if (key === "DV" && edit?.defaultValue === null) continue;
           if (key === "Opt" && field instanceof PDFRadioGroup) continue;
           const value = field.acroField.getInheritableAttribute(
             PDFName.of(key),
           );
-          if (key === "DV" && value && edit) {
+          if (key === "DV" && value && edit && edit.defaultValue === undefined) {
             if (
               field instanceof PDFTextField &&
               edit.maxLength !== undefined &&
@@ -455,6 +449,7 @@ export function createFormField(
     throw Error("フォームのフィールド名を入力してください。");
   if (
     ["radio", "dropdown", "list"].includes(field.kind) &&
+    !(field.kind !== "radio" && field.choiceOptions) &&
     (!field.options.length ||
       field.options.some((v) => !v.trim()) ||
       new Set(field.options).size !== field.options.length)
@@ -510,21 +505,21 @@ export function createFormField(
       field.kind === "dropdown"
         ? form.createDropdown(name)
         : form.createOptionList(name);
-    f.setOptions(field.options);
+    if (field.choiceOptions) {
+      validateImportedFormEdit({ name: field.name, kind: field.kind }, { choiceOptions: field.choiceOptions });
+      f.acroField.setOptions(field.choiceOptions.map(option => ({ value: PDFHexString.fromText(option.value), display: PDFHexString.fromText(option.label) })));
+    } else f.setOptions(field.options);
     if (field.multiSelect) f.enableMultiselect();
     f.addToPage(page, options);
     f.setFontSize(field.fontSize);
     created = f;
   }
   setFieldValue(created, field.value);
+  if (field.defaultValue !== undefined) setFieldDefaultValue(created, field.defaultValue);
   if (field.readOnly) created.enableReadOnly();
   if (field.required) created.enableRequired();
   // Unlike appearance subsets, the shared full font permits future input in other viewers.
   created.acroField.setDefaultAppearance(`/KikkiForm ${field.fontSize} Tf 0 g`);
-  if (
-    created instanceof PDFTextField ||
-    created instanceof PDFDropdown ||
-    created instanceof PDFOptionList
-  )
-    created.updateAppearances(font);
+  if (created instanceof PDFDropdown || created instanceof PDFOptionList) updateChoiceAppearances(created, font);
+  else if (created instanceof PDFTextField) created.updateAppearances(font);
 }

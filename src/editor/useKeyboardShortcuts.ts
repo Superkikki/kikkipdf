@@ -18,6 +18,7 @@ interface KeyboardOptions extends Pick<ReturnType<typeof useDocumentIO>, "openFi
   setSelected: (id: string | null) => void;
   setTool: (tool: Tool) => void;
   setStatus: (status: string) => void;
+  requestRename: () => void;
 }
 export function useKeyboardShortcuts(options: KeyboardOptions) {
   const latest = useRef(options);
@@ -31,6 +32,11 @@ export function useKeyboardShortcuts(options: KeyboardOptions) {
         e.target instanceof HTMLElement &&
         !!e.target.closest("input,textarea,select,[contenteditable]");
       if (window.document.querySelector("dialog[open]")) return;
+      if (e.key === "F2" && !input && !e.ctrlKey && !e.metaKey && !e.altKey && !busyRef.current) {
+        e.preventDefault();
+        shortcuts.requestRename();
+        return;
+      }
       if (e.ctrlKey || e.metaKey) {
         const k = e.key.toLowerCase();
         if (!input && !busyRef.current && ["c", "x", "v", "d"].includes(k)) {

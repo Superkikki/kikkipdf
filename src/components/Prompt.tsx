@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Dialog } from "./Dialog";
 export interface PromptOptions {
   title: string;
@@ -52,6 +52,7 @@ function PromptForm({
       (options.fields ?? []).map((f) => [f.key, f.value ?? ""]),
     ),
   );
+  const selectedFirst = useRef(false);
   return (
     <Dialog title={options.title} onClose={() => finish(null)}>
       <form
@@ -66,11 +67,13 @@ function PromptForm({
               {options.message}
             </p>
           )}
-          {options.fields?.map((f) => (
+          {options.fields?.map((f, index) => (
             <label key={f.key}>
               {f.label}
               {f.options ? (
                 <select
+                  autoFocus={index === 0}
+                  data-autofocus={index === 0 ? true : undefined}
                   aria-label={f.label}
                   value={values[f.key]}
                   onChange={(e) =>
@@ -83,6 +86,14 @@ function PromptForm({
                 </select>
               ) : (
                 <input
+                  autoFocus={index === 0}
+                  data-autofocus={index === 0 ? true : undefined}
+                  onFocus={(e) => {
+                    if (index === 0 && !selectedFirst.current && (!f.type || f.type === "text" || f.type === "password")) {
+                      e.currentTarget.select();
+                      selectedFirst.current = true;
+                    }
+                  }}
                   autoComplete="off"
                   aria-label={f.label}
                   type={f.type ?? "text"}

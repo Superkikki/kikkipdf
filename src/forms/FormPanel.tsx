@@ -6,8 +6,7 @@ import { documentStore } from "../state/store";
 import { FormDesigner } from "./FormDesigner";
 import { updateFormField } from "./commands";
 import { change } from "../commands/document";
-import { resolveImportedForm } from "./importedSettings";
-import { dataFields, applyFormData, restoreFormData } from "./data";
+import { dataFields, applyFormData, restoreFormData, resetFormDataToDefaults, setFormDefaults } from "./data";
 import { formDataXfdf, parseFormDataXfdf } from "./xfdf";
 import { pickFiles, saveBytes } from "../platform/files";
 import { flushInlineText } from "../editor/flushInlineText";
@@ -107,35 +106,39 @@ export function FormPanel({
               try { documentStore.execute(restoreFormData(fields)); }
               catch (reason) { setDataError(reason instanceof Error ? reason.message : "フォーム値を戻せませんでした。"); }
             }}>入力値を読み込み時に戻す</button>
+            <button disabled={busy || loading || !!error || !dataFields(model, fields).length} onClick={() => {
+              if (!flushInlineText()) return;
+              setDataError(""); setStatus("");
+              try {
+                documentStore.execute(resetFormDataToDefaults(fields));
+                setStatus("PDFの既定値に戻しました。Undoで戻せます。");
+              } catch (reason) { setDataError(reason instanceof Error ? reason.message : "既定値に戻せませんでした。"); }
+            }}>入力値をPDFの既定値に戻す</button>
           </div>
-          <p className="hint">XFDFはフォーム名と保存値をやり取りします。注釈はコメントパネルで扱います。値を戻す操作は設定と配置を保持し、追加した欄は空にします。読み取り専用欄は変更しません。</p>
+          <div className="form-kind-buttons">
+            {[false, true].map(clear => (
+              <button key={String(clear)} disabled={busy || loading || !!error || !dataFields(model, fields).some(field => !field.readOnly)} onClick={() => {
+                if (!flushInlineText()) return;
+                setDataError(""); setStatus("");
+                try {
+                  documentStore.execute(setFormDefaults(fields, clear));
+                  setStatus(clear ? "既定値を解除しました。Undoで戻せます。" : "現在の入力値を既定値に設定しました。Undoで戻せます。");
+                } catch (reason) { setDataError(reason instanceof Error ? reason.message : "既定値を変更できませんでした。"); }
+              }}>{clear ? "既定値を解除" : "現在の入力値を既定値に設定"}</button>
+            ))}
+          </div>
+          <p className="hint">XFDFはフォーム名と保存値をやり取りします。注釈はコメントパネルで扱います。読み込み時へ戻す操作は設定と配置を保持し、追加した欄は空にします。読み取り専用欄は変更しません。</p>
+          <p className="hint">現在の入力値を既定値に設定すると、既存欄と追加欄のDVを更新します。設定・解除は現在の入力値を変えません。PDFの既定値はDVに設定された値です。DVのない欄は空にします。現在の選択肢・文字数制限などで戻せない欄がある場合は、全件を変更せず中止します。</p>
           {dataError && <p role="alert" className="warning">{dataError}</p>}
           {status && <p role="status">{status}</p>}
           {loading && <p>フォームを読み込み中…</p>}
           {error && <p className="warning">{error}</p>}
           {!loading &&
-            !fields.length &&
-            !model.formFields?.length &&
+            !dataFields(model, fields).length &&
             !error && (
               <p>このPDFには対応するフォームフィールドがありません。</p>
             )}
-          {[
-            ...fields
-              .map((f) => resolveImportedForm(f, model))
-              .filter((f) =>
-                f.widgets.some((w) =>
-                  model.pages.some(
-                    (p) =>
-                      p.sourceId === f.sourceId &&
-                      p.sourceIndex === w.pageIndex,
-                  ),
-                ),
-              ),
-            ...(model.formFields ?? []).map((f) => ({
-              ...f,
-              key: "new:" + f.id,
-            })),
-          ].map((f) => {
+          {dataFields(model, fields).map((f) => {
             const value = f.value;
             return (
               <label key={f.key}>

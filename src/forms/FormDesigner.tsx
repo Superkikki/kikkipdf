@@ -1,3 +1,5 @@
+import { ChoiceOptionsEditor } from "./ChoiceOptionsEditor";
+import { normalizeChoiceValue } from "./importedSettings";
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import {
@@ -144,7 +146,15 @@ export function FormDesigner({
               }
             />
           </label>
-          {["radio", "dropdown", "list"].includes(field.kind) && (
+          {(field.kind === "dropdown" || field.kind === "list") && field.choiceOptions ? (
+            <div className="choice-option-editor">
+              <p className="hint">表示名は画面に表示され、保存値はPDFに記録されます。保存値は重複できません。</p>
+              <ChoiceOptionsEditor prefix="追加選択肢" options={field.choiceOptions} onChange={choiceOptions => patch({
+                choiceOptions, options: choiceOptions.map(option => option.label),
+                value: normalizeChoiceValue(field.value, choiceOptions.map(option => option.value), !!field.multiSelect),
+              })} />
+            </div>
+          ) : ["radio", "dropdown", "list"].includes(field.kind) && (
             <label>
               選択肢（1行に1つ）
               <textarea

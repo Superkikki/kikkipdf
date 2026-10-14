@@ -17,6 +17,7 @@ export function Dialog({
   const titleId = useId();
   useEffect(() => {
     ref.current?.showModal();
+    ref.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
   }, []);
   return (
     <dialog

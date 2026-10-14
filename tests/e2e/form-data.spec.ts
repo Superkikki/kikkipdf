@@ -1,9 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
-import { PDFDocument, PDFHexString } from "pdf-lib";
+import { PDFDocument, PDFHexString, PDFName } from "pdf-lib";
 import { readFile } from "node:fs/promises";
 import { openProject } from "../../src/state/project";
 
-async function open(page: Page) {
+async function open(page: Page, defaults = false) {
   const pdf = await PDFDocument.create(), sheet = pdf.addPage(), form = pdf.getForm();
   const text = form.createTextField("Customer.Name"); text.setText("Before"); text.enableMultiline(); text.setMaxLength(20); text.addToPage(sheet, { x: 30, y: 650, width: 180, height: 30 });
   const check = form.createCheckBox("Agree"); check.addToPage(sheet, { x: 30, y: 600 });
@@ -11,6 +11,13 @@ async function open(page: Page) {
   const dropdown = form.createDropdown("Color"); dropdown.setOptions(["Red", "Green"]); dropdown.addToPage(sheet, { x: 30, y: 480, width: 180, height: 30 });
   dropdown.acroField.setOptions([{ value: PDFHexString.fromText("R"), display: PDFHexString.fromText("Red") }, { value: PDFHexString.fromText("G"), display: PDFHexString.fromText("Green") }]); dropdown.select("R");
   const list = form.createOptionList("Tags"); list.setOptions(["One", "Two", "Three"]); list.enableMultiselect(); list.select(["One", "Three"]); list.addToPage(sheet, { x: 30, y: 350, width: 180, height: 90 });
+  if (defaults) {
+    text.acroField.dict.set(PDFName.of("DV"), PDFHexString.fromText("Default"));
+    check.acroField.dict.set(PDFName.of("DV"), check.acroField.getOnValue()!);
+    radio.acroField.dict.set(PDFName.of("DV"), radio.acroField.getOnValues()[0]);
+    dropdown.acroField.dict.set(PDFName.of("DV"), PDFHexString.fromText("G"));
+    list.acroField.dict.set(PDFName.of("DV"), pdf.context.obj([PDFHexString.fromText("Two")]));
+  }
   await page.goto("/"); const chooser = page.waitForEvent("filechooser"); await page.getByRole("button", { name: "PDFを開く", exact: true }).click();
   await (await chooser).setFiles({ name: "form-data.pdf", mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()) });
   await showForm(page);
@@ -25,6 +32,36 @@ async function importData(page: Page, xml: string, utf16 = false) {
   const picker = page.waitForEvent("filechooser"); await page.getByRole("button", { name: "フォーム値をXFDF読み込み", exact: true }).click();
   await (await picker).setFiles({ name: "values.xfdf", mimeType: "application/vnd.adobe.xfdf", buffer: utf16 ? Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(xml, "utf16le")]) : Buffer.from(xml) });
 }
+test("resets to PDF defaults rather than loaded values, undoes/redoes, saves and reopens", async ({ page }, info) => {
+  await open(page, true);
+  const dialog = page.locator("dialog");
+  await page.getByRole("button", { name: "入力値をPDFの既定値に戻す", exact: true }).click();
+  await expect(dialog.getByLabel("Customer.Name", { exact: true })).toHaveValue("Default");
+  await expect(dialog.getByLabel("Agree", { exact: true })).toBeChecked();
+  await expect(dialog.getByLabel("Choice", { exact: true })).toHaveValue("A");
+  await expect(dialog.getByLabel("Color", { exact: true })).toHaveValue("G");
+  await expect(dialog.getByLabel("Tags", { exact: true })).toHaveValues(["Two"]);
+  await page.getByRole("button", { name: "完了", exact: true }).click();
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await showForm(page);
+  await expect(dialog.getByLabel("Customer.Name", { exact: true })).toHaveValue("Before");
+  await expect(dialog.getByLabel("Agree", { exact: true })).not.toBeChecked();
+  await expect(dialog.getByLabel("Choice", { exact: true })).toHaveValue("B");
+  await page.getByRole("button", { name: "完了", exact: true }).click();
+  await page.getByRole("button", { name: /^やり直す/ }).click();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  const output = info.outputPath("defaults.pdf"); await (await download).saveAs(output);
+  const pdf = await PDFDocument.load(await readFile(output));
+  expect(pdf.getForm().getTextField("Customer.Name").getText()).toBe("Default");
+  expect(pdf.getForm().getOptionList("Tags").getSelected()).toEqual(["Two"]);
+  await page.reload();
+  const chooser = page.waitForEvent("filechooser"); await page.getByRole("button", { name: "PDFを開く", exact: true }).click();
+  await (await chooser).setFiles(output); await showForm(page);
+  await dialog.getByLabel("Customer.Name", { exact: true }).fill("Changed");
+  await page.getByRole("button", { name: "入力値をPDFの既定値に戻す", exact: true }).click();
+  await expect(dialog.getByLabel("Customer.Name", { exact: true })).toHaveValue("Default");
+});
 test("imports nested UTF16 form values, undoes atomically, and saves XFDF, project and PDF", async ({ page }, info) => {
   const errors: string[] = []; page.on("pageerror", error => errors.push(error.message)); await open(page);
   await importData(page, valid, true); const dialog = page.locator("dialog");
@@ -71,4 +108,43 @@ test("round trips empty selections and preserves read-only values", async ({ pag
   await page.getByLabel("既存フィールド読み取り専用", { exact: true }).check(); await page.getByRole("button", { name: "設定を適用", exact: true }).click(); await page.getByRole("button", { name: "値を入力", exact: true }).click();
   await importData(page, wrap('<field name="Customer.Name"><value>Changed</value></field>')); await expect(page.getByRole("alert")).toContainText("読み取り専用");
   await importData(page, wrap('<field name="Customer.Name"><value>Before</value></field>')); await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("sets and clears PDF defaults independently of input with undo and saved PDF/project round trips", async ({ page }, info) => {
+  await open(page, true);
+  const dialog = page.locator("dialog");
+  await page.getByRole("button", { name: "現在の入力値を既定値に設定", exact: true }).click();
+  await expect(dialog.getByLabel("Customer.Name", { exact: true })).toHaveValue("Before");
+  await dialog.getByLabel("Customer.Name", { exact: true }).fill("Changed");
+  await page.getByRole("button", { name: "入力値をPDFの既定値に戻す", exact: true }).click();
+  await expect(dialog.getByLabel("Customer.Name", { exact: true })).toHaveValue("Before");
+  await expect(dialog.getByLabel("Choice", { exact: true })).toHaveValue("B");
+  await page.getByRole("button", { name: "既定値を解除", exact: true }).click();
+  await expect(dialog.getByLabel("Customer.Name", { exact: true })).toHaveValue("Before");
+  await page.getByRole("button", { name: "完了", exact: true }).click();
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await page.getByRole("button", { name: /^やり直す/ }).click();
+  await showForm(page);
+  await page.getByRole("button", { name: "入力値をPDFの既定値に戻す", exact: true }).click();
+  await expect(dialog.getByLabel("Customer.Name", { exact: true })).toHaveValue("");
+  await expect(dialog.getByLabel("Choice", { exact: true })).toHaveValue("");
+  await page.getByRole("button", { name: "完了", exact: true }).click();
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  let download = page.waitForEvent("download");
+  await page.getByText("ファイル", { exact: true }).click();
+  await page.getByRole("button", { name: "編集プロジェクトを保存", exact: true }).click();
+  const project = info.outputPath("defaults.kpdf"); await (await download).saveAs(project);
+  const model = await openProject(new Uint8Array(await readFile(project)));
+  expect(Object.values(model.importedFormEdits ?? {}).map(edit => edit.defaultValue)).toContain("Before");
+  download = page.waitForEvent("download"); await page.getByRole("button", { name: "保存", exact: true }).click();
+  const output = info.outputPath("defaults.pdf"); await (await download).saveAs(output);
+  const pdf = await PDFDocument.load(await readFile(output));
+  expect(pdf.getForm().getTextField("Customer.Name").getText()).toBe("Before");
+  expect(pdf.getForm().getTextField("Customer.Name").acroField.dict.lookup(PDFName.of("DV"), PDFHexString).decodeText()).toBe("Before");
+  await page.reload(); const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "PDFを開く", exact: true }).click(); await (await chooser).setFiles(output);
+  await showForm(page); await dialog.getByLabel("Customer.Name", { exact: true }).fill("Changed again");
+  await page.getByRole("button", { name: "入力値をPDFの既定値に戻す", exact: true }).click();
+  await expect(dialog.getByLabel("Customer.Name", { exact: true })).toHaveValue("Before");
 });

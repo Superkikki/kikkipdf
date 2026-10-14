@@ -1,7 +1,9 @@
+import { validateDefaultValue } from "../forms/values";
 import { z } from "zod";
 import {
   importedFormEditSchema,
   resolveImportedForm,
+  validateEditedDefault,
   validateImportedFormEdit,
 } from "../forms/importedSettings";
 import { inspectForms } from "../export/engine";
@@ -243,6 +245,8 @@ const schema = z.object({
           name: z.string().min(1).max(500),
           kind: z.enum(["text", "checkbox", "radio", "dropdown", "list"]),
           value,
+          defaultValue: value.optional(),
+          choiceOptions: importedFormEditSchema.shape.choiceOptions,
           options: z.array(text).max(10000),
           fontSize: number.positive().max(1000),
           required: z.boolean(),
@@ -491,6 +495,11 @@ export async function openProject(bytes: Uint8Array): Promise<DocumentModel> {
 }
 
 async function checkImportedFormSettings(model: DocumentModel) {
+  for (const field of model.formFields ?? []) {
+    if (field.choiceOptions) validateImportedFormEdit(field, { choiceOptions: field.choiceOptions });
+    if (field.defaultValue !== undefined)
+      validateDefaultValue({ ...field, key: `new:${field.id}`, checkboxOnValue: "Yes" }, field.defaultValue);
+  }
   const edits = Object.entries(model.importedFormEdits ?? {});
   if (!edits.length) return;
   const fields = new Map((await inspectForms(model)).map((f) => [f.key, f]));
@@ -498,7 +507,9 @@ async function checkImportedFormSettings(model: DocumentModel) {
     const field = fields.get(key);
     if (!field) throw Error("設定を変更した既存フォームの参照先がありません。");
     validateImportedFormEdit(field, edit);
+    if (edit.deleted) continue;
     const resolved = resolveImportedForm(field, model);
+    validateEditedDefault(resolved, edit);
     if (
       field.kind === "text" &&
       resolved.maxLength !== undefined &&

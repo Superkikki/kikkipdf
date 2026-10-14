@@ -9,6 +9,7 @@ import { exportDocument, importProject } from "../export/client";
 import type { Ask, Work, Progress } from "./types";
 
 import { flushInlineText } from "./flushInlineText";
+import { flushDocumentName } from "./flushDocumentName";
 
 interface DocumentIOOptions {
   ask: Ask;
@@ -88,6 +89,7 @@ export function useDocumentIO(options: DocumentIOOptions) {
     });
   }
   async function save(as = false) {
+    if (!flushDocumentName()) return false;
     if (!flushInlineText()) return false;
     const h = documentStore.history;
     if (!h) return false;

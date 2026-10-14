@@ -72,7 +72,7 @@ export function usePageReorder(jump: (id: string) => void) {
       if (e.button !== 0 || !e.isPrimary) return;
       if (e.pointerType === "touch" && !(e.target as HTMLElement).closest(".page-drag-handle")) return;
       e.preventDefault();
-      e.currentTarget.focus();
+      e.currentTarget.focus({ preventScroll: true });
       suppressClick.current = false;
       drag.current = { id, pointer: e.pointerId, x: e.clientX, y: e.clientY, startX: e.clientX, startY: e.clientY, moving: false };
       e.currentTarget.setPointerCapture(e.pointerId);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Files,
   Bookmark,
@@ -9,6 +9,7 @@ import {
   Paperclip,
   ScanText,
   Layers,
+  MoreHorizontal,
 } from "lucide-react";
 import type { BookmarkDestination, DocumentModel } from "../state/model";
 import { pageSize } from "../state/model";
@@ -24,6 +25,7 @@ import { BookmarkPanel } from "../pages/BookmarkPanel";
 import { AttachmentPanel } from "../attachments/AttachmentPanel";
 import { ReviewPanel } from "../ocr/ReviewPanel";
 import { LayerPanel } from "../layers/LayerPanel";
+import { PageContextMenu, type PageAction, type PageMenuAnchor } from "../pages/PageContextMenu";
 export function Sidebar({
   model,
   active,
@@ -35,7 +37,9 @@ export function Sidebar({
   onClose,
   searchRequest = 0,
   search,
+  pageAction,
 }: {
+  pageAction: (action: PageAction, pageId: string) => void;
   search: DocumentSearch;
   searchRequest?: number;
   hidden?: boolean;
@@ -48,6 +52,8 @@ export function Sidebar({
   selectObject: (pageId: string, id: string) => void;
 }) {
   const [tab, setTab] = useState("pages");
+  const [pageMenu, setPageMenu] = useState<PageMenuAnchor | null>(null);
+  const closePageMenu = useCallback(() => setPageMenu(null), []);
   const reorder = usePageReorder(jump);
   const scroll = useRef<HTMLDivElement>(null);
   const lastSearchRequest = useRef(searchRequest);
@@ -80,8 +86,8 @@ export function Sidebar({
           { id: "bookmarks", label: "しおり", icon: Bookmark },
           { id: "comments", label: "コメント", icon: MessageSquare },
           { id: "search", label: "検索", icon: Search },
-          { id: "attachments", label: "添付ファイル", icon: Paperclip },
-          { id: "ocr", label: "OCR校正", icon: ScanText },
+          { id: "attachments", label: "添付ファイル", short: "添付", icon: Paperclip },
+          { id: "ocr", label: "OCR校正", short: "OCR", icon: ScanText },
           { id: "layers", label: "レイヤー", icon: Layers },
         ].map((t) => (
           <button
@@ -90,9 +96,10 @@ export function Sidebar({
             aria-label={t.label}
             className={tab === t.id ? "active" : ""}
             key={t.id}
-            onClick={() => setTab(t.id)}
+            onClick={() => { closePageMenu(); setTab(t.id); }}
           >
             <t.icon size={19} />
+            <span>{t.short ?? t.label}</span>
           </button>
         ))}
       </div>
@@ -124,8 +131,8 @@ export function Sidebar({
       <div className="side-scroll" ref={scroll}>
         {tab === "pages" &&
           model.pages.map((p, i) => (
+            <div className="thumbnail-item" key={p.id}>
             <div
-              key={p.id}
               className={`thumbnail ${active === p.id ? "selected" : ""} ${reorder.source === p.id ? "dragging" : ""} ${reorder.drop?.id === p.id ? `drop-${reorder.drop.edge}` : ""}`}
               data-page-id={p.id}
               role="button"
@@ -134,6 +141,12 @@ export function Sidebar({
                 ? `ページ ${pageLabel(p, i) || "（空）"}（${i + 1} / ${model.pages.length}）` : `ページ ${i + 1}`}
               aria-current={active === p.id ? "page" : undefined}
               onKeyDown={(e) => {
+                if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+                  e.preventDefault(); e.stopPropagation();
+                  const bounds = e.currentTarget.getBoundingClientRect();
+                  setPageMenu({ pageId: p.id, anchor: e.currentTarget, x: bounds.right, y: bounds.top });
+                  return;
+                }
                 if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
                   e.preventDefault();
                   e.stopPropagation();
@@ -155,6 +168,11 @@ export function Sidebar({
               onPointerCancel={reorder.cancel}
               onLostPointerCapture={reorder.cancel}
               onClick={() => reorder.click(p.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                reorder.cancel();
+                setPageMenu({ pageId: p.id, anchor: e.currentTarget, x: e.clientX, y: e.clientY });
+              }}
             >
               <div className="thumb-paper">
                 <PageView
@@ -169,6 +187,14 @@ export function Sidebar({
                 <span className="thumbnail-page-label" title={pageLabel(p, i)}>{pageLabel(p, i) || "（空）"}</span>
                 {p.label !== undefined && p.label !== String(i + 1) && <small>（{i + 1} / {model.pages.length}）</small>}
               </span>
+            </div>
+            <button className="thumbnail-actions" aria-label={`ページ ${i + 1} の操作`}
+              title="ページの操作" aria-haspopup="menu" aria-expanded={pageMenu?.pageId === p.id}
+              onClick={(e) => {
+                if (pageMenu?.pageId === p.id) { closePageMenu(); return; }
+                const bounds = e.currentTarget.getBoundingClientRect();
+                setPageMenu({ pageId: p.id, anchor: e.currentTarget, x: bounds.right, y: bounds.bottom });
+              }}><MoreHorizontal size={17} /></button>
             </div>
           ))}
         {tab === "bookmarks" && (
@@ -194,6 +220,8 @@ export function Sidebar({
           ? "ドラッグで並べ替え · Alt＋↑／↓でも移動"
           : "すべてローカルで処理"}
       </div>
+      {pageMenu && !hidden && tab === "pages" && model.pages.some((p) => p.id === pageMenu.pageId) &&
+        <PageContextMenu target={pageMenu} run={pageAction} close={closePageMenu} />}
     </aside>
   );
 }
