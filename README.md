@@ -2,9 +2,17 @@
 
 Tauri 2 / React / TypeScript / Vite / Rust で作った、ローカル処理のPDF編集デスクトップアプリです。Windows 11を第一対象とし、画面のデザイン・アプリの編集モデル・操作コマンドは独自実装です。PDFの解釈・描画・書き出しにはOSSを使用しています。
 
-**バージョン0.21.0は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
+**バージョン0.22.0は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
 
-Windows配布物は [0.21.0インストーラー](artifacts/windows/Kikki.PDF_0.21.0_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.21.0_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.21.0.txt)もGit管理に含めます。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.21.0)からもダウンロードできます。
+Windows配布物は [0.22.0インストーラー](artifacts/windows/Kikki.PDF_0.22.0_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.22.0_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.22.0.txt)もGit管理に含めます。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.22.0)からもダウンロードできます。
+
+## 0.22.0：既存文字の直接編集の対応拡大
+
+色空間を明示する `cs`／`CS` と `sc`／`SC`／`scn`／`SCN` によるDeviceGray・DeviceRGB・DeviceCMYKの文字色指定に対応しました。ColorSpaceリソースのデバイス色空間への別名参照、塗りと輪郭線の別々の色指定、`q`／`Q`による色空間の復元も扱います。パターン・ICC・特色など未対応の色空間は対象外です。
+
+`re`で作られた矩形に加え、`m`／`l`で4辺を結んだ矩形クリップ内の文字を編集できます。明示・暗黙の閉路と90度単位の座標変換に対応し、文字全体が矩形内に収まる場合に限ります。複数の部分パス・曲線・矩形以外・文字が欠けるクリップは対象外です。
+
+均等倍率の回転を含む座標変換内の横書きの輪郭線付き文字にも対応しました。元の輪郭線の色・太さ・塗りの有無と最初のベースラインを引き継ぎ、後続文字の位置を保って元の文字描画を除去します。輪郭線を変形する不均等倍率・せん断・反転は対象外です。編集プロジェクトとPDF保存に対応します。0.22.0のWindows配布物に含めています。
 
 ## 0.21.0：PDF比較の文字差分
 
@@ -150,7 +158,7 @@ npm run desktop:build
 通常のWindows/MSVCビルドでは以下を生成します。
 
 - `src-tauri/target/release/kikki-pdf.exe`
-- `src-tauri/target/release/bundle/nsis/Kikki PDF_0.21.0_x64-setup.exe`
+- `src-tauri/target/release/bundle/nsis/Kikki PDF_0.22.0_x64-setup.exe`
 
 NSISはユーザー単位でインストールする日本語・英語対応のインストーラーです。OSSのライセンス本文も同梱します。現時点ではコード署名していません。WebView2未導入の環境ではインストーラーがRuntimeの取得を必要とするため、オフラインでインストールするときは事前にRuntimeを用意してください。
 

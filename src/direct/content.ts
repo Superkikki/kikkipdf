@@ -63,13 +63,43 @@ const rgb = (r: number, g: number, b: number) =>
         .padStart(2, "0"),
     )
     .join("");
+type DeviceSpace = "DeviceGray" | "DeviceRGB" | "DeviceCMYK";
+const deviceSpaces = new Set<string>(["DeviceGray", "DeviceRGB", "DeviceCMYK"]);
+const deviceColor = (space: DeviceSpace | undefined, values: Operand[]) => {
+  if (!space) return undefined;
+  const count = space === "DeviceGray" ? 1 : space === "DeviceRGB" ? 3 : 4;
+  if (values.length !== count) throw Error("色指定の引数が不正です。");
+  const v = values.map(number);
+  if (space === "DeviceGray") return rgb(v[0], v[0], v[0]);
+  if (space === "DeviceRGB") return rgb(v[0], v[1], v[2]);
+  const [c, m, y, k] = v.map(n => Math.max(0, Math.min(1, n)));
+  return rgb(1 - Math.min(1, c + k), 1 - Math.min(1, m + k), 1 - Math.min(1, y + k));
+};
+/** Recognize only a single axis-aligned rectangle, including implicit closure. */
+function rectanglePath(points: { x: number; y: number }[]): Box | undefined {
+  const vertices = [...points];
+  const same = (a: typeof points[number], b: typeof a) => Math.abs(a.x - b.x) < 1e-7 && Math.abs(a.y - b.y) < 1e-7;
+  if (vertices.length === 5 && same(vertices[0], vertices[4])) vertices.pop();
+  if (vertices.length !== 4) return;
+  const xs = vertices.map(p => p.x), ys = vertices.map(p => p.y);
+  const x = Math.min(...xs), y = Math.min(...ys), width = Math.max(...xs) - x, height = Math.max(...ys) - y;
+  if (width <= 0 || height <= 0) return;
+  for (let i = 0; i < 4; i++) {
+    const a = vertices[i], b = vertices[(i + 1) % 4], c = vertices[(i + 2) % 4];
+    if (same(a, b) || !((Math.abs(a.x - b.x) < 1e-7 && Math.abs(b.y - c.y) < 1e-7) ||
+      (Math.abs(a.y - b.y) < 1e-7 && Math.abs(b.x - c.x) < 1e-7))) return;
+  }
+  return { x, y, width, height };
+}
 interface GraphicsState {
+  colorSpace: DeviceSpace | undefined; strokeSpace: DeviceSpace | undefined;
   ctm: Matrix; font: string; size: number; tc: number; tw: number; tz: number;
   leading: number; rise: number; render: number; color: string | undefined;
   opacity: number; strokeOpacity: number; strokeColor: string | undefined; lineWidth: number; strokeEffects: boolean;
   clip: boolean; clipBounds: Box[]; effects: boolean;
 }
 const initialState = (): GraphicsState => ({
+  colorSpace: "DeviceGray", strokeSpace: "DeviceGray",
   ctm: identity(), font: "", size: 0, tc: 0, tw: 0, tz: 1, leading: 0,
   rise: 0, render: 0, color: "#000000", opacity: 1, strokeOpacity: 1, strokeColor: "#000000", lineWidth: 1, strokeEffects: false, clip: false, clipBounds: [], effects: false,
 });
@@ -166,7 +196,13 @@ async function analyzeContent(
     tm = [...lm];
   };
   // Paths are not part of q/Q graphics state. Apply W/W* only when the path ends.
-  let pathRectangle: Box | undefined, complexPath = false, pendingClip = false;
+  const resolveSpace = (name: string): DeviceSpace | undefined => {
+    const entry = deviceSpaces.has(name) ? key(name) : resources?.lookupMaybe(key("ColorSpace"), PDFDict)?.lookup(key(name));
+    return entry instanceof PDFName && deviceSpaces.has(entry.decodeText()) ? entry.decodeText() as DeviceSpace : undefined;
+  };
+  const point = (x: number, y: number) => ({ x: state.ctm[0] * x + state.ctm[2] * y + state.ctm[4] - base.x,
+    y: base.y + base.height - (state.ctm[1] * x + state.ctm[3] * y + state.ctm[5]) });
+  let pathRectangle: Box | undefined, pathPoints: { x: number; y: number }[] = [], complexPath = false, pendingClip = false;
   const pathEnds = new Set("S s f F f* B B* b b* n".split(" "));
   const passive = new Set(
     "BI m l c v y h re S s f F f* B B* b b* n w J j M d ri i sh MP DP BX EX".split(
@@ -176,6 +212,7 @@ async function analyzeContent(
   for (const [operatorIndex, op] of operations.entries()) {
     const { operator, args } = op;
     if (pathEnds.has(operator)) {
+      pathRectangle ??= rectanglePath(pathPoints);
       if (pendingClip) {
         if (pathRectangle && !complexPath) {
           if (state.clipBounds.length >= 128) throw Error("矩形クリッピングが複雑すぎます。");
@@ -184,22 +221,31 @@ async function analyzeContent(
         else state.clip = true;
       }
       pathRectangle = undefined;
+      pathPoints = [];
       complexPath = false;
       pendingClip = false;
     }
     switch (operator) {
       case "re": {
-        const [x, y, width, height] = numbers(op, 4), [a, b, c, d, e, f] = state.ctm;
-        if (pathRectangle || complexPath || Math.abs(b) > 1e-7 || Math.abs(c) > 1e-7 || a === 0 || d === 0)
-          complexPath = true;
-        else pathRectangle = {
-          x: Math.min(a * x + e, a * (x + width) + e) - base.x,
-          y: base.y + base.height - Math.max(d * y + f, d * (y + height) + f),
-          width: Math.abs(a * width), height: Math.abs(d * height),
-        };
+        const [x, y, width, height] = numbers(op, 4);
+        if (pathRectangle || pathPoints.length || complexPath) complexPath = true;
+        else {
+          pathRectangle = rectanglePath([point(x, y), point(x + width, y), point(x + width, y + height), point(x, y + height)]);
+          if (!pathRectangle) complexPath = true;
+        }
         break;
       }
-      case "m": case "l": case "c": case "v": case "y": case "h":
+      case "m": case "l": {
+        const [x, y] = numbers(op, 2);
+        if (pathRectangle || (operator === "m" ? pathPoints.length > 0 : pathPoints.length === 0) || pathPoints.length >= 5)
+          complexPath = true;
+        if (!complexPath) pathPoints.push(point(x, y));
+        break;
+      }
+      case "h":
+        if (!rectanglePath(pathPoints)) complexPath = true;
+        break;
+      case "c": case "v": case "y":
         complexPath = true;
         break;
       case "w":
@@ -282,44 +328,28 @@ async function analyzeContent(
       case "T*":
         nextLine(0, -state.leading);
         break;
-      case "rg": {
-        const [r, g, b] = numbers(op, 3);
-        state.color = rgb(r, g, b);
+      case "rg": case "g": case "k":
+      case "RG": case "G": case "K": {
+        const stroke = operator === operator.toUpperCase();
+        const space: DeviceSpace = operator.toLowerCase() === "g" ? "DeviceGray" : operator.toLowerCase() === "rg" ? "DeviceRGB" : "DeviceCMYK";
+        if (stroke) { state.strokeSpace = space; state.strokeColor = deviceColor(space, args); }
+        else { state.colorSpace = space; state.color = deviceColor(space, args); }
         break;
       }
-      case "g": {
-        const [g] = numbers(op, 1);
-        state.color = rgb(g, g, g);
+      case "cs": case "CS": {
+        if (args.length !== 1 || !isName(args[0])) throw Error("色空間の指定が不正です。");
+        const space = resolveSpace(args[0].name);
+        const initial = space ? "#000000" : undefined;
+        if (operator === "CS") { state.strokeSpace = space; state.strokeColor = initial; }
+        else { state.colorSpace = space; state.color = initial; }
         break;
       }
-      case "k": {
-        const [c, m, y, k] = numbers(op, 4);
-        state.color = rgb(
-          1 - Math.min(1, c + k),
-          1 - Math.min(1, m + k),
-          1 - Math.min(1, y + k),
-        );
+      case "sc": case "scn":
+        state.color = deviceColor(state.colorSpace, args);
         break;
-      }
-      case "cs":
-      case "sc":
-      case "scn":
-        state.color = undefined;
+      case "SC": case "SCN":
+        state.strokeColor = deviceColor(state.strokeSpace, args);
         break;
-      case "CS": case "SC": case "SCN":
-        state.strokeColor = undefined;
-        break;
-      case "G": {
-        const [g] = numbers(op, 1); state.strokeColor = rgb(g, g, g); break;
-      }
-      case "RG": {
-        const [r, g, b] = numbers(op, 3); state.strokeColor = rgb(r, g, b); break;
-      }
-      case "K": {
-        const [c, m, y, k] = numbers(op, 4);
-        state.strokeColor = rgb(1 - Math.min(1, c + k), 1 - Math.min(1, m + k), 1 - Math.min(1, y + k));
-        break;
-      }
       case "W":
       case "W*":
         pendingClip = true;
@@ -502,6 +532,11 @@ async function analyzeContent(
         const orthogonal = scaleX > 0 && scaleY > 0 &&
           Math.abs((m[0] * m[2] + m[1] * m[3]) / (scaleX * scaleY)) < 1e-7 &&
           m[0] * m[3] - m[1] * m[2] > 0;
+        const strokeScale = Math.hypot(state.ctm[0], state.ctm[1]);
+        const uniformStroke = strokeScale > 0 &&
+          Math.abs(strokeScale - Math.hypot(state.ctm[2], state.ctm[3])) < 1e-7 &&
+          Math.abs(state.ctm[0] * state.ctm[2] + state.ctm[1] * state.ctm[3]) < 1e-7 &&
+          state.ctm[0] * state.ctm[3] - state.ctm[1] * state.ctm[2] > 0;
         const rotation = horizontal ? 0 : Math.atan2(-m[1], m[0]) * 180 / Math.PI;
         const size = state.size * (vertical ? m[3] : scaleY),
           baselineX = m[4] + state.rise * m[2] - base.x,
@@ -529,9 +564,7 @@ async function analyzeContent(
           state.tz > 0 &&
           (state.render === 0 || ([1, 2].includes(state.render) && !vertical &&
             state.strokeColor && state.strokeOpacity > 0 && (state.render === 1 || state.strokeOpacity === state.opacity) &&
-            !state.strokeEffects && state.lineWidth > 0 && state.ctm[3] > 0 &&
-            Math.abs(state.ctm[0] - state.ctm[3]) < 1e-7 &&
-            Math.abs(state.ctm[1]) < 1e-7 && Math.abs(state.ctm[2]) < 1e-7)) &&
+            !state.strokeEffects && state.lineWidth > 0 && uniformStroke)) &&
           (state.render === 1 ? state.strokeOpacity : state.opacity) > 0 &&
           !state.clip &&
           !state.effects &&
@@ -539,10 +572,10 @@ async function analyzeContent(
           !marked.some(Boolean) &&
           text.trim() &&
           [...bounds, ...state.clipBounds].every(b => containsBox(b, {
-            x: box.x - ([1, 2].includes(state.render) ? state.lineWidth * state.ctm[0] / 2 : 0),
-            y: box.y - ([1, 2].includes(state.render) ? state.lineWidth * state.ctm[3] / 2 : 0),
-            width: box.width + ([1, 2].includes(state.render) ? state.lineWidth * state.ctm[0] : 0),
-            height: box.height + ([1, 2].includes(state.render) ? state.lineWidth * state.ctm[3] : 0),
+            x: box.x - ([1, 2].includes(state.render) ? state.lineWidth * strokeScale / 2 : 0),
+            y: box.y - ([1, 2].includes(state.render) ? state.lineWidth * strokeScale / 2 : 0),
+            width: box.width + ([1, 2].includes(state.render) ? state.lineWidth * strokeScale : 0),
+            height: box.height + ([1, 2].includes(state.render) ? state.lineWidth * strokeScale : 0),
           }))
         ) {
           runs.push({
@@ -564,7 +597,7 @@ async function analyzeContent(
             baseline,
             fontSize: size,
             ...([1, 2].includes(state.render) ? {
-              textStrokeWidth: state.lineWidth * state.ctm[3], textStrokeColor: state.strokeColor!,
+              textStrokeWidth: state.lineWidth * strokeScale, textStrokeColor: state.strokeColor!,
               ...(state.render === 1 ? { textOutlineOnly: true } : {}),
             } : {}),
             color: (state.render === 1 ? state.strokeColor : state.color)!,

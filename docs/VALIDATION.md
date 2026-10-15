@@ -1,5 +1,22 @@
 # 検証記録
 
+## 0.22.0のWindows配布物（2026-10-15）
+
+- 文字の直接編集の対応拡大を含むソースを専用の作業ディレクトリでビルド。
+- `npm run check`でESLint・単体テスト279件（36ファイル）・TypeScript・production build、`cargo test --manifest-path tests/native/Cargo.toml`でRustテスト7件が成功。`npm run assets`で同梱資産を確認。
+- `npx playwright test --workers=2`で全128件が成功（3.2分）。新たに対応した色指定・矩形クリップの文字編集とPDF再読み込みを含め、全機能を回帰確認。
+- Windows MSVC releaseビルド・NSIS生成が成功。Windows上でアプリとインストーラーのFileVersion／ProductVersionが0.22.0で一致。生成物と配布コピー・ZIP内容のバイト一致、ZIP整合性、SHA-256を確認。
+- 最終配布バイナリのWindows WebView2フルnative smokeが成功（148秒、JavaScriptエラー0件）。元文字の除去と直接編集・ネイティブ保存、ページ回転、OCR、暗号化、フォームとXFDF、しおり・添付・リンク、レイヤープリセット、比較レポート、コメント入出力などを確認。初回はWebView2自動操作接続が開始されず、対話セッションでの起動と接続を診断後、同じバイナリで再実行して成功。
+- 配布物は`Kikki.PDF_0.22.0_x64-setup.exe`（23,117,696 bytes）、同名ZIP（23,078,255 bytes）、`SHA256SUMS-0.22.0.txt`。配布物は未署名。新規Windows環境でのインストール／アンインストールと他製品との相互運用は未検証。
+
+## 0.22.0開発時：文字の直接編集の対応拡大（2026-10-15）
+
+- `npm test`で36ファイル・279件が成功。Device色空間とリソース別名、塗りと輪郭線、色空間の初期化・状態復元、直線で構成された矩形クリップ、回転と均等倍率を含む輪郭線付き文字を検証。
+- 元の文字描画の除去、後続文字の位置、ベースライン、輪郭線の色・太さ、プロジェクト往復とPDF再読み込み、共有Formの他の呼び出しの保持を確認。未対応色空間・不正な成分数・矩形以外・部分クリップ・不均等倍率などの拒否も確認。
+- `npm run lint`、`npm run build`が成功。Viteのチャンクサイズと依存パッケージのコメントに関する警告あり。
+- `npx playwright test tests/e2e/direct-text.spec.ts`で16件が成功（5.0分）。DeviceRGBの塗り・輪郭線と直線で構成された矩形クリップを組み合わせた文字のクリック編集・保存・再読み込みを検証し、既存の直接編集、Undo／Redo、背景・後続文字、共有Form、各種文字対応、回転文字も回帰確認。
+- この開発時点ではWindows配布物は未生成（公開版の検証は上記）。
+
 ## 0.21.0のWindows配布物（2026-10-15）
 
 - `npm run check`でESLint・単体テスト274件（36ファイル）・TypeScript・production build、Rustテスト7件が成功。`npm run assets`で同梱PDF／OCR／フォント資産を確認。

@@ -704,7 +704,7 @@ describe("Office poster text painting", () => {
     for (const commands of [
       "0 0 100 400 re W n " + content,
       "0 0 420 400 re W n 0 0 20 20 re W* n " + content,
-      "0 0 m 420 0 l 420 400 l 0 400 l h W n " + content,
+      "0 0 m 420 0 l 400 400 l 0 400 l h W n " + content,
       "0 0 420 400 re 0 0 20 20 re W* n " + content,
 
       "[3 2] 0 d " + content.replace("20 Tf", "20 Tf 2 Tr"),
@@ -833,4 +833,100 @@ it("edits quarter-turned Form text independently of a shared invocation", async 
   expect(replacement.rotation).toBeCloseTo(-90, 5);
   expect(replacement.baselineX).toBeCloseTo(run.baselineX!, 6);
   expect(replacement.baseline).toBeCloseTo(run.baseline, 6);
+});
+
+describe("additional direct text painting", () => {
+  it("edits device color-space operators and resource aliases with both fill and stroke", async () => {
+    for (const [paint, color, stroke] of [
+      ["/DeviceRGB cs 0.2 0.4 0.6 sc", "#336699", undefined],
+      ["/DeviceGray cs 0.5 scn", "#808080", undefined],
+      ["/DeviceCMYK cs 0 1 1 0 scn", "#ff0000", undefined],
+      ["/RGB cs 0.2 0.4 0.6 scn /Gray CS 0.5 SC", "#336699", "#808080"],
+      ["/DeviceRGB cs 1 0 0 sc /DeviceGray cs", "#000000", undefined],
+      ["/DeviceCMYK cs", "#000000", undefined],
+      ["1 0 0 rg 0.2 0.4 0.6 sc", "#336699", undefined],
+    ] as const) {
+      const d = await fixture(paint + " 0.7 w " + content.replace("20 Tf", stroke ? "20 Tf 2 Tr" : "20 Tf"));
+      const pdf = await PDFDocument.load(d.sources.s.bytes);
+      pdf.getPage(0).node.Resources()!.set(PDFName.of("ColorSpace"), pdf.context.obj({ RGB: "DeviceRGB", Gray: "DeviceGray" }));
+      d.sources.s.bytes = await pdf.save();
+      const before = await inspect(d);
+      expect(before.runs[0].color).toBe(color);
+      expect(before.runs[0].textStrokeColor).toBe(stroke);
+      const saved = await exportPdf(await openProject(await saveProject(await edit(d))));
+      const after = await inspectDirectText(saved, 0), replacement = after.runs.find(r => r.text === "Replaced")!;
+      expect(replacement.color).toBe(color); expect(replacement.textStrokeColor).toBe(stroke);
+      expect(after.runs.some(r => r.text === "UNIQUE_original_text")).toBe(false);
+      expect(after.runs.find(r => r.text === " Following")!.x).toBeCloseTo(before.runs[1].x, 7);
+    }
+  });
+  it("restores color spaces after q/Q and refuses unknown, pattern and malformed colors", async () => {
+    const before = await inspect(await fixture("/DeviceRGB cs q /DeviceGray cs Q 1 0 0 sc " + content));
+    expect(before.runs[0].color).toBe("#ff0000");
+    for (const paint of ["/Unknown cs 1 sc", "/Pattern cs /P scn", "/DeviceRGB cs 1 0 sc", "/DeviceRGB cs /P scn",
+      "/DeviceRGB CS 1 0 SC 2 Tr"])
+      expect((await inspect(await fixture(paint + " " + content))).runs).toHaveLength(0);
+    // Returning to a known space makes subsequent text editable again.
+    expect((await inspect(await fixture("/Unknown cs 1 sc /DeviceRGB cs 1 0 0 sc " + content))).runs).toHaveLength(2);
+  });
+  it("edits inside line-built rectangles with explicit or implicit closure", async () => {
+    for (const path of [
+      "0 0 m 420 0 l 420 400 l 0 400 l h",
+      "0 0 m 0 400 l 420 400 l 420 0 l",
+      "0 0 m 420 0 l 420 400 l 0 400 l 0 0 l",
+    ]) {
+      const d = await fixture(path + " W* n " + content), before = await inspect(d);
+      expect(before.runs).toHaveLength(2);
+      const saved = await exportPdf(await edit(d)), after = await inspectDirectText(saved, 0);
+      expect(after.runs.some(r => r.text === "Replaced")).toBe(true);
+      expect(after.runs.find(r => r.text === " Following")!.x).toBeCloseTo(before.runs[1].x, 7);
+      expect((await allStreams(saved)).join("\n")).toContain(path);
+    }
+    for (const path of [
+      "0 0 m 420 0 l 420 400 l", // triangle
+      "0 0 m 420 400 l 420 0 l 0 400 l h", // crossing
+      "0 0 m 100 0 l 100 400 l 0 400 l h", // partial clip
+      "0 0 m 420 0 l 420 400 l 0 400 l h 10 10 m 20 10 l 20 20 l h", // multiple subpaths
+    ]) expect((await inspect(await fixture(path + " W n " + content))).runs).toHaveLength(0);
+  });
+  it("keeps outline width, colors and baseline under a rotated graphics transform", async () => {
+    for (const mode of [1, 2]) {
+      const d = await fixture("q 0 1.2 -1.2 0 400 0 cm 0 0 420 400 re W n 0.2 0.4 0.6 rg 1 0 0 RG 0.7 w " +
+        content.replace("20 Tf", `20 Tf ${mode} Tr`).replace("40 300", "40 200") + " Q");
+      const before = await inspect(d), run = before.runs[0];
+      expect(run.textStrokeWidth).toBeCloseTo(0.84, 7);
+      const saved = await exportPdf(await edit(d)), after = await inspectDirectText(saved, 0);
+      const replacement = after.runs.find(r => r.text === "Replaced")!;
+      expect(replacement.textStrokeWidth).toBeCloseTo(0.84, 7);
+      expect(replacement.textStrokeColor).toBe("#ff0000");
+      expect(!!replacement.textOutlineOnly).toBe(mode === 1);
+      expect(replacement.baselineX).toBeCloseTo(run.baselineX!, 6);
+      expect(replacement.baseline).toBeCloseTo(run.baseline, 6);
+      expect(after.runs.find(r => r.text === " Following")!.baseline).toBeCloseTo(before.runs[1].baseline, 6);
+    }
+    for (const matrix of ["1 0 0 2", "1 0.2 0 1", "-1 0 0 1"])
+      expect((await inspect(await fixture(`q ${matrix} 0 0 cm ` + content.replace("20 Tf", "20 Tf 2 Tr") + " Q"))).runs).toHaveLength(0);
+  });
+});
+
+it("edits a rotated shared Form outline independently of its other invocation", async () => {
+  const d = await formFixture({ repeated: true, matrix: [0, 1, -1, 0, 150, 0],
+    commands: "0.7 w 1 0 0 RG BT /F1 12 Tf 2 Tr 1 0 0 1 20 50 Tm (FORM_original) Tj ( Tail) Tj ET" });
+  const before = await inspect(d), run = before.runs[0];
+  expect(run.textStrokeWidth).toBeCloseTo(0.7, 7);
+  const object = directTextObject(before, d.pages[0], run.text, run);
+  object.text = "Changed outline"; d.pages[0].objects.push(object);
+  const saved = await exportPdf(await openProject(await saveProject(d))), after = await inspectDirectText(saved, 0);
+  expect(after.runs.filter(r => r.text === "FORM_original")).toHaveLength(1);
+  const replacement = after.runs.find(r => r.text === "Changed outline")!;
+  expect(replacement.textStrokeWidth).toBeCloseTo(0.7, 7);
+  expect(replacement.textStrokeColor).toBe("#ff0000");
+  expect(replacement.rotation).toBeCloseTo(-90, 5);
+  expect(replacement.baselineX).toBeCloseTo(run.baselineX!, 6);
+  expect(replacement.baseline).toBeCloseTo(run.baseline, 6);
+  after.runs.filter(r => r.text === " Tail").forEach((r, i) => {
+    const original = before.runs.filter(r => r.text === " Tail")[i];
+    expect(r.baselineX).toBeCloseTo(original.baselineX!, 6);
+    expect(r.baseline).toBeCloseTo(original.baseline, 6);
+  });
 });

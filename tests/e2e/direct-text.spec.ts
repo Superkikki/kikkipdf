@@ -521,12 +521,12 @@ for (const angle of [-90, 90, 35]) {
   });
 }
 
-test("edits outlined headings and single-operation ActualText beside a preserved inline image", async ({ page }, info) => {
+test("edits device-color outlined headings inside line-built clips and single-operation ActualText beside a preserved inline image", async ({ page }, info) => {
   const pdf = await PDFDocument.create(), sheet = pdf.addPage([420, 595]), font = await pdf.embedFont(StandardFonts.Helvetica);
   sheet.node.set(PDFName.of("Resources"), pdf.context.obj({ Font: { F1: font.ref } }));
   sheet.node.set(PDFName.of("Contents"), pdf.context.register(pdf.context.flateStream(
     "q 10 0 0 10 0 0 cm BI /W 1 /H 1 /BPC 8 /CS /G /F /AHx ID 80> EI Q " +
-    "q 0.2 0.4 0.6 rg 1 0 0 RG 0.7 w BT /F1 20 Tf 2 Tr 1 0 0 1 40 520 Tm (Heading) Tj ET Q " +
+    "q 0 0 m 420 0 l 420 595 l 0 595 l h W n /DeviceRGB cs 0.2 0.4 0.6 scn /DeviceRGB CS 1 0 0 SC 0.7 w BT /F1 20 Tf 2 Tr 1 0 0 1 40 520 Tm (Heading) Tj ET Q " +
     "/Span << /ActualText (Logical) >> BDC BT /F1 20 Tf 1 0 0 1 40 470 Tm (Rendered) Tj ET EMC",
   )));
   await page.goto("/"); await open(page, Buffer.from(await pdf.save()), "extended-text.pdf");
