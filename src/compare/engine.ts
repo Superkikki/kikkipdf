@@ -1,12 +1,14 @@
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { comparePixels, type PixelDifference } from "./pixels";
+import { compareText, extractedText, MAX_DOCUMENT_TEXT, type TextDifference } from "./text";
 
-export interface CompareOptions { threshold?: number; dpi?: number; signal?: AbortSignal; onProgress?: (done: number, total: number) => void }
+export interface CompareOptions { threshold?: number; dpi?: number; compareText?: boolean; signal?: AbortSignal; onProgress?: (done: number, total: number) => void }
 export interface ComparedPage extends PixelDifference {
   index: number; status: "same" | "changed" | "added" | "removed"; sizeChanged: boolean;
   width: number; height: number; scale: number;
   leftSize: { width: number; height: number } | null;
   rightSize: { width: number; height: number } | null;
+  text?: TextDifference;
 }
 export const checkAbort = (signal?: AbortSignal) => { if (signal?.aborted) throw new DOMException("比較を中止しました", "AbortError"); };
 
@@ -42,9 +44,14 @@ export async function renderPair(left: PDFDocumentProxy, right: PDFDocumentProxy
     checkAbort(options.signal);
     const pixels = canvases.map(c => c.getContext("2d")!.getImageData(0, 0, width, height).data);
     const difference = comparePixels(pixels[0], pixels[1], width, height, options.threshold);
+    const text = options.compareText ? compareText(
+      pages[0] ? extractedText((await pages[0].getTextContent()).items) : "",
+      pages[1] ? extractedText((await pages[1].getTextContent()).items) : "",
+    ) : undefined;
+    checkAbort(options.signal);
     const sizeChanged = !!sizes[0] && !!sizes[1] && (Math.abs(sizes[0].width - sizes[1].width) > .1 || Math.abs(sizes[0].height - sizes[1].height) > .1);
-    const result: ComparedPage = { ...difference, index, width, height, scale, leftSize: sizes[0], rightSize: sizes[1], sizeChanged,
-      status: !pages[0] ? "added" : !pages[1] ? "removed" : sizeChanged || difference.changedPixels ? "changed" : "same" };
+    const result: ComparedPage = { ...difference, index, width, height, scale, leftSize: sizes[0], rightSize: sizes[1], sizeChanged, ...(text ? { text } : {}),
+      status: !pages[0] ? "added" : !pages[1] ? "removed" : sizeChanged || difference.changedPixels || text?.changed ? "changed" : "same" };
     return { result, pixels };
   } finally {
     for (const canvas of canvases) { canvas.width = 0; canvas.height = 0; }
@@ -55,9 +62,13 @@ export async function renderPair(left: PDFDocumentProxy, right: PDFDocumentProxy
 export async function comparePdfs(left: PDFDocumentProxy, right: PDFDocumentProxy, options: CompareOptions = {}): Promise<ComparedPage[]> {
   if (left.numPages > 500 || right.numPages > 500) throw new Error("PDF比較は各文書500ページまでです。");
   const total = Math.max(left.numPages, right.numPages), results: ComparedPage[] = [];
+  let textSize = 0;
   for (let index = 0; index < total; index++) {
     checkAbort(options.signal);
     results.push((await renderPair(left, right, index, options)).result);
+    // Count unchanged chunks twice, as they occur in both documents.
+    for (const part of results.at(-1)?.text?.changes ?? []) textSize += part.text.length * (part.kind === "same" ? 2 : 1);
+    if (textSize > MAX_DOCUMENT_TEXT) throw Error("文字比較は両文書の合計1,000,000文字までです。");
     options.onProgress?.(index + 1, total);
     // Allow cancellation and progress painting between pages.
     await new Promise<void>(resolve => setTimeout(resolve, 0));

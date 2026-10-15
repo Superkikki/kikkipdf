@@ -1927,9 +1927,16 @@ progress {
 .comparison-images figure { margin: 0; min-width: 0; }
 .comparison-images figcaption { font-size: 12px; margin-bottom: 6px; }
 .comparison-images canvas { width: 100%; height: auto; display: block; border: 1px solid #d4d7e1; background: white; }
+.comparison-text-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.comparison-text-columns > div { min-width: 0; }
+.comparison-text h4 { font-size: 12px; margin: 8px 0; }
+.comparison-text pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; padding: 10px; border: 1px solid #d4d7e1; line-height: 1.7; font-family: inherit; }
+.comparison-text del { background: #ffe0e5; color: #8c1731; }
+.comparison-text ins { background: #d8f5df; color: #155d2d; text-decoration: underline; }
 @media (max-width: 750px) {
   .comparison-layout { grid-template-columns: 1fr; }
   .comparison-layout nav { flex-direction: row; max-height: 100px; flex-wrap: wrap; }
   .comparison-images { grid-template-columns: 1fr; }
+  .comparison-text-columns { grid-template-columns: 1fr; }
   .comparison-images canvas { max-width: 380px; }
 }

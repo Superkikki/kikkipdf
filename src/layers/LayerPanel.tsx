@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import type { DocumentModel, Source } from "../state/model";
+import { uid, type DocumentModel, type Source } from "../state/model";
 import { documentStore } from "../state/store";
 import { usePrompt } from "../components/Prompt";
 import { renameLayer, resetLayerNames } from "./commands";
-import { applyLayerPreset } from "./presets";
+import { applyLayerPreset, deleteLayerPreset, layerPresets, saveLayerPreset } from "./presets";
 import { readLayers, resetLayerVisibility, setLayerVisibility, type LayerInfo } from "./model";
 
 function SourceLayers({ source }: { source: Source }) {
@@ -19,22 +19,44 @@ function SourceLayers({ source }: { source: Source }) {
     return () => { live = false; };
   }, [source]);
   const groups = new Map(info?.groups.map((group) => [group.id, group]));
+  const presets = info ? layerPresets(source, info) : [];
+  const selected = presets.find(preset => preset.id === presetId);
+  const custom = source.layerPresets?.find(preset => preset.id === presetId);
+  const savePreset = async (overwrite: boolean) => {
+    if (!info) return;
+    const result = await prompt.ask({ title: overwrite ? "表示プリセットを上書き" : "表示プリセットを作成",
+      message: "現在の表示状態を保存します。", fields: [{ key: "name", label: "プリセット名", value: overwrite ? custom?.name : "新しい表示設定" }] });
+    if (!result) return;
+    try {
+      const id = overwrite ? presetId : `custom:${uid()}`;
+      documentStore.execute(saveLayerPreset(source.id, result.name, info, id));
+      setPresetId(id); setError("");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "プリセットを保存できません。"); }
+  };
   return <section className="source-layers" aria-label={`${source.name}のレイヤー`}>
     <h3 title={source.name}>{source.name}</h3>
     {!info && !error && <p role="status">レイヤーを読み込み中…</p>}
     {error && <p role="alert">{error}</p>}
     {info && !info.groups.length && <p>このPDFにはレイヤーがありません。</p>}
-    {!!info?.presets?.length && <div className="layer-presets">
-      <label>表示プリセット<select aria-label={`${source.name}の表示プリセット`} value={presetId} onChange={event => setPresetId(event.target.value)}>
+    {!!info?.groups.length && <div className="layer-presets">
+      <label>表示プリセット<select aria-label={`${source.name}の表示プリセット`} value={selected ? presetId : ""} onChange={event => setPresetId(event.target.value)}>
         <option value="">選択してください</option>
-        {info.presets.map((preset, index) => <option key={preset.id} value={preset.id} disabled={!!preset.error}>{index + 1}. {preset.name}{preset.error ? "（未対応）" : ""}</option>)}
+        {presets.map((preset, index) => <option key={preset.id} value={preset.id} disabled={!!preset.error}>{index + 1}. {preset.name}{preset.error ? "（未対応）" : ""}</option>)}
       </select></label>
-      <button disabled={!presetId} onClick={() => {
+      <button disabled={!selected || !!selected.error} onClick={() => {
         try { documentStore.execute(applyLayerPreset(source.id, presetId, info)); setError(""); }
         catch (reason) { setError(reason instanceof Error ? reason.message : "プリセットを適用できません。"); }
       }}>プリセットを適用</button>
+      <button onClick={() => void savePreset(false)}>現在の表示をプリセットに保存</button>
+      <button disabled={!custom} onClick={() => void savePreset(true)}>選択プリセットを上書き</button>
+      <button disabled={!custom} onClick={() => void (async () => {
+        const result = await prompt.ask({ title: "表示プリセットを削除", message: `「${custom?.name}」を削除します。`, confirm: "削除", danger: true });
+        if (!result) return;
+        documentStore.execute(deleteLayerPreset(source.id, presetId)); setPresetId(""); setError("");
+      })()}>選択プリセットを削除</button>
       <p className="hint">表示状態を一括変更します。ロック・排他設定と現在の階層を保持します。</p>
-      {info.presets.filter(preset => preset.error).map(preset => <p className="hint" key={preset.id}>{preset.name}: {preset.error}</p>)}
+      <p className="hint">作成したプリセットは上書き・削除できます。元PDFのプリセットは保持します。</p>
+      {presets.filter(preset => preset.error).map(preset => <p className="hint" key={preset.id}>{preset.name}: {preset.error}</p>)}
     </div>}
     {info?.rows.map((row, index) => {
       if (!row.id) return <div className="layer-heading" key={index} style={{ paddingLeft: row.depth * 12 }}>{row.name}</div>;

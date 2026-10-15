@@ -152,6 +152,13 @@ const schema = z.object({
     name: z.string().min(1).max(1000),
     created: number,
     sources: z.record(id, z.object({ ...asset,
+      layerPresets: z.array(z.object({
+        id: z.string().regex(/^custom:[\w-]{1,100}$/),
+        name: z.string().min(1).max(1000).refine(value => !!value.trim()),
+        visibility: z.record(z.string().regex(/^[1-9]\d*R(?:[1-9]\d*)?$/), z.boolean())
+          .refine(items => Object.keys(items).length <= 10000),
+      })).max(100).refine(items => new Set(items.map(item => item.id)).size === items.length &&
+        items.reduce((total, item) => total + Object.keys(item.visibility).length, 0) <= 100000).optional(),
       layerNames: z.record(z.string().regex(/^[1-9]\d*R(?:[1-9]\d*)?$/), z.string().min(1).max(1000).refine(value => !!value.trim()))
         .refine(items => Object.keys(items).length <= 10000).optional(),
       layerVisibility: z.record(z.string().regex(/^[1-9]\d*R(?:[1-9]\d*)?$/), z.boolean())
@@ -321,6 +328,7 @@ export async function saveProject(model: DocumentModel): Promise<Uint8Array> {
       sha256: await hash(s.bytes),
       layerVisibility: s.layerVisibility,
       layerNames: s.layerNames,
+      layerPresets: s.layerPresets,
     };
   }
   for (const [i, s] of Object.values(model.images).entries()) {
@@ -432,7 +440,7 @@ export async function openProject(bytes: Uint8Array): Promise<DocumentModel> {
       const data = files[s.file];
       if (key !== s.id || !data || (await hash(data)) !== s.sha256)
         throw Error("元PDFの整合性エラー");
-      model.sources[key] = { id: s.id, name: s.name, bytes: data, layerVisibility: s.layerVisibility, layerNames: s.layerNames };
+      model.sources[key] = { id: s.id, name: s.name, bytes: data, layerVisibility: s.layerVisibility, layerNames: s.layerNames, layerPresets: s.layerPresets };
     }
     for (const [key, s] of Object.entries(d.images)) {
       const data = files[s.file];

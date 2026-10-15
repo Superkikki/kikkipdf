@@ -650,6 +650,19 @@ async function verifyObjectContext(page, root) {
   await page.getByLabel("native-fixture.pdfの表示プリセット", { exact: true }).selectOption("1");
   await page.getByRole("button", { name: "プリセットを適用", exact: true }).click();
   await expect(smokeLayer).not.toBeChecked();
+  await page.getByRole("button", { name: "現在の表示をプリセットに保存", exact: true }).click();
+  await page.getByRole("textbox", { name: "プリセット名", exact: true }).fill("Native 表示設定");
+  await page.getByRole("dialog").getByRole("button", { name: "適用", exact: true }).click();
+  await smokeLayer.check();
+  await page.getByRole("button", { name: "プリセットを適用", exact: true }).click();
+  await expect(smokeLayer).not.toBeChecked();
+  await page.getByRole("button", { name: "選択プリセットを上書き", exact: true }).click();
+  await page.getByRole("textbox", { name: "プリセット名", exact: true }).fill("Native 非表示設定");
+  await page.getByRole("dialog").getByRole("button", { name: "適用", exact: true }).click();
+  await page.getByRole("button", { name: "選択プリセットを削除", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "削除", exact: true }).click();
+  await page.getByRole("button", { name: /^元に戻す/ }).click();
+  await expect(page.getByLabel("native-fixture.pdfの表示プリセット", { exact: true }).locator("option")).toHaveCount(4);
   await page.getByRole("button", { name: "ページ", exact: true }).click();
   await page.getByRole("button", { name: "ページ管理", exact: true }).click();
   await page.getByRole("button", { name: "回転", exact: true }).click();
@@ -739,6 +752,9 @@ async function verifyObjectContext(page, root) {
   await fs.mkdir(path.join(root, ".tools"), { recursive: true });
   const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf");
   const pdf = await PDFDocument.load(await fs.readFile(fixture));
+  const layerConfigs = pdf.catalog.lookup(PDFName.of("OCProperties"), PDFDict).lookup(PDFName.of("Configs"), PDFArray);
+  if (!layerConfigs.asArray().some(value => pdf.context.lookup(value, PDFDict).lookup(PDFName.of("Name")).decodeText() === "Native 非表示設定"))
+    throw Error("Created layer preset was not saved in the native PDF");
   const customFont = pdf.context
     .enumerateIndirectObjects()
     .find(
@@ -1016,6 +1032,7 @@ async function verifyObjectContext(page, root) {
   await page.getByRole("button", { name: "比較するPDFを選ぶ", exact: true }).click();
   await comparisonPicker;
   const comparison = page.getByRole("dialog", { name: "PDF比較" });
+  await comparison.getByLabel("文字差分も比較する", { exact: true }).check();
   await expect(comparison.getByRole("button", { name: "比較を実行", exact: true })).toBeEnabled();
   await comparison.getByRole("button", { name: "比較を実行", exact: true }).click();
   await expect(comparison.getByRole("status")).toContainText("比較完了：3ページ中", { timeout: 60000 });
@@ -1029,6 +1046,8 @@ async function verifyObjectContext(page, root) {
   await reportPicker;
   await expect.poll(() => fs.stat(comparisonReport).then(stat => stat.size).catch(() => 0), { timeout: 30000 }).toBeGreaterThan(0);
   const report = JSON.parse(await fs.readFile(comparisonReport, "utf8"));
+  if (!report.textComparison || !report.pages.every(item => item.text && Array.isArray(item.text.changes)))
+    throw Error("Native comparison report did not include extracted text differences");
   if (report.format !== "kikki-pdf-visual-comparison" || report.pages.length !== 3 || !report.pages.some(item => item.status === "changed"))
     throw Error("Native PDF comparison report did not contain the expected three-page difference");
   await comparison.getByTitle("閉じる").click();

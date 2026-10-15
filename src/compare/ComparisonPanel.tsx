@@ -7,10 +7,11 @@ import { checkAbort, comparePdfs, renderPair, type ComparedPage } from "./engine
 import { pixelChanged } from "./pixels";
 
 const labels = { same: "変更なし", changed: "変更あり", added: "追加", removed: "削除" };
-interface Session { tasks: PDFDocumentLoadingTask[]; threshold: number; dpi: number; leftName: string; rightName: string }
+interface Session { tasks: PDFDocumentLoadingTask[]; threshold: number; dpi: number; compareText: boolean; leftName: string; rightName: string }
 export function ComparisonPanel({ model }: { model: DocumentModel }) {
   const [file, setFile] = useState<LocalFile | null>(null);
   const [threshold, setThreshold] = useState(24), [dpi, setDpi] = useState(72);
+  const [compareText, setCompareText] = useState(false);
   const [busy, setBusy] = useState(false), [progress, setProgress] = useState("");
   const [error, setError] = useState("");
   const [results, setResults] = useState<ComparedPage[]>([]), [selected, setSelected] = useState(0);
@@ -37,7 +38,7 @@ export function ComparisonPanel({ model }: { model: DocumentModel }) {
     setPreviewBusy(true);
     void (async () => {
       const [left, right] = await Promise.all(current.tasks.map(task => task.promise));
-      const { result, pixels } = await renderPair(left, right, selected, { ...current, signal: abort.signal });
+      const { result, pixels } = await renderPair(left, right, selected, { ...current, compareText: false, signal: abort.signal });
       checkAbort(abort.signal);
       const difference = new Uint8ClampedArray(pixels[0].length);
       for (let offset = 0; offset < difference.length; offset += 4) {
@@ -74,7 +75,7 @@ export function ComparisonPanel({ model }: { model: DocumentModel }) {
     if (!file) return;
     release();
     const abort = new AbortController(); controller.current = abort;
-    const current: Session = { tasks: [], threshold, dpi, leftName: model.name, rightName: file.name };
+    const current: Session = { tasks: [], threshold, dpi, compareText, leftName: model.name, rightName: file.name };
     session.current = current;
     setBusy(true); setResults([]); setError(""); setProgress("編集中の文書を準備しています…");
     try {
@@ -87,7 +88,7 @@ export function ComparisonPanel({ model }: { model: DocumentModel }) {
       current.tasks.push(getDocument({ data: file.bytes.slice(), ...resources }));
       const [left, right] = await Promise.all(current.tasks.map(task => task.promise));
       checkAbort(abort.signal);
-      const pages = await comparePdfs(left, right, { threshold, dpi, signal: abort.signal, onProgress: (done, total) => setProgress(`${done} / ${total} ページを比較中`) });
+      const pages = await comparePdfs(left, right, { threshold, dpi, compareText, signal: abort.signal, onProgress: (done, total) => setProgress(`${done} / ${total} ページを比較中`) });
       checkAbort(abort.signal);
       setSelected(pages.find(page => page.status !== "same")?.index ?? 0);
       setChangedOnly(false); setResults(pages); setProgress("比較完了");
@@ -102,7 +103,7 @@ export function ComparisonPanel({ model }: { model: DocumentModel }) {
   const report = async () => {
     const current = session.current; if (!current) return;
     try {
-      const bytes = new TextEncoder().encode(JSON.stringify({ format: "kikki-pdf-visual-comparison", version: 1, createdAt: new Date().toISOString(), left: current.leftName, right: current.rightName, threshold: current.threshold, dpi: current.dpi, pageMatching: "position", pageSizeUnits: "pt", regionUnits: "pixels", regionLimit: 200, maxPixels: 2_000_000, maxEdge: 4096, pages: results }, null, 2));
+      const bytes = new TextEncoder().encode(JSON.stringify({ format: "kikki-pdf-visual-comparison", version: 1, createdAt: new Date().toISOString(), left: current.leftName, right: current.rightName, threshold: current.threshold, dpi: current.dpi, textComparison: current.compareText, textCountUnits: "unicode-code-points", pageMatching: "position", pageSizeUnits: "pt", regionUnits: "pixels", regionLimit: 200, maxPixels: 2_000_000, maxEdge: 4096, pages: results }, null, 2));
       await saveBytes(bytes, `${current.leftName.replace(/\.pdf$/i, "")}-比較.json`);
     } catch (reason) { if (!disposed.current) setError(String(reason instanceof Error ? reason.message : reason)); }
   };
@@ -113,10 +114,12 @@ export function ComparisonPanel({ model }: { model: DocumentModel }) {
       <button disabled={busy} onClick={() => void choose()}>比較するPDFを選ぶ</button><span>{file?.name ?? "未選択"}</span>
       <label>感度 <select aria-label="感度" value={threshold} disabled={busy} onChange={e => { clearResults(); setThreshold(Number(e.target.value)); }}><option value={8}>高い（8）</option><option value={24}>標準（24）</option><option value={48}>低い（48）</option></select></label>
       <label>比較解像度 <select aria-label="比較解像度" value={dpi} disabled={busy} onChange={e => { clearResults(); setDpi(Number(e.target.value)); }}><option value={72}>72 dpi</option><option value={144}>144 dpi</option></select></label>
+      <label><input type="checkbox" checked={compareText} disabled={busy} onChange={e => { clearResults(); setCompareText(e.target.checked); }} />文字差分も比較する</label>
       <button className="primary" disabled={!file || busy} onClick={() => void run()}>比較を実行</button>
       {busy && <button onClick={() => { release(); setBusy(false); setProgress("比較を中止しました"); }}>キャンセル</button>}
     </div>
     <p className="comparison-hint">各文書500ページまで。描画は1ページ200万画素・一辺4096画素以内に縮小します。文字の意味・メタデータ・添付ファイルは比較しません。途中のページ挿入は、後続ページの差分としても検出されます。</p>
+    {compareText && <p className="comparison-hint">文字はPDFから抽出した順序で比較します。改行・空白・不可視の文字も対象です。スキャン画像の文字認識は行いません。各ページ・各文書側20,000文字、両文書合計1,000,000文字まで。レポートに抽出文字を含めます。</p>}
     <p role="status" aria-live="polite">{progress}{results.length > 0 && `：${results.length}ページ中${changed}ページに変更`}</p>
     {error && <p role="alert" className="comparison-error">{error}</p>}
     {!!results.length && <>
@@ -131,6 +134,15 @@ export function ComparisonPanel({ model }: { model: DocumentModel }) {
             { label: "差分", ref: canvasDiff, missing: false },
           ].map(({ label, ref, missing }) => <figure key={label}><figcaption>{label}{missing ? "（ページなし）" : ""}</figcaption><canvas aria-label={label} ref={ref} /></figure>)}</div>
           <p className="comparison-hint">差分の枠は近接した変更をまとめた領域です。大きい領域から最大200件を表示します。数値・枠の座標は縮小後の画像を基準にしています。</p>
+          {page.text && <section className="comparison-text" aria-label="文字差分">
+            <h3>文字差分</h3>
+            <p>{page.text.changed ? `比較対象で追加 ${page.text.added}文字・削除 ${page.text.removed}文字` : "文字の変更はありません。"}</p>
+            {page.text.simplified && <p className="comparison-hint">変更範囲が大きいため、共通の先頭・末尾を除いた範囲をまとめて表示しています。追加・削除の文字数もこの範囲を基準にしています。</p>}
+            <div className="comparison-text-columns">
+              <div><h4>編集中の文書</h4><pre aria-label="編集中の文書の文字差分">{page.text.changes.filter(part => part.kind !== "added").map((part, index) => part.kind === "removed" ? <del key={index}>{part.text}</del> : <span key={index}>{part.text}</span>)}</pre></div>
+              <div><h4>比較対象</h4><pre aria-label="比較対象の文字差分">{page.text.changes.filter(part => part.kind !== "removed").map((part, index) => part.kind === "added" ? <ins key={index}>{part.text}</ins> : <span key={index}>{part.text}</span>)}</pre></div>
+            </div>
+          </section>}
         </div>
       </div>
     </>}

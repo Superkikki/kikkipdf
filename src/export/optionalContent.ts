@@ -3,6 +3,8 @@ import {
   PDFNumber, PDFObject, PDFObjectCopier, PDFRef, PDFString,
   type PDFDocument,
 } from "pdf-lib";
+import type { LayerSnapshot } from "../state/model";
+import { validateLayerSnapshots } from "../layers/presets";
 
 const key = (name: string) => PDFName.of(name);
 const configKeys = ["Name", "Creator", "BaseState", "ON", "OFF", "Intent", "AS", "Order", "ListMode", "RBGroups", "Locked"];
@@ -10,6 +12,7 @@ export interface OptionalContentPart {
   groups: PDFRef[];
   defaultConfig: PDFDict;
   configs?: PDFArray;
+  customConfigs?: PDFArray;
 }
 
 /** Use the page copier's mapping: a second copier would create unrelated OCGs. */
@@ -24,10 +27,11 @@ export class OptionalContentSource {
     private copier: PDFObjectCopier,
     private visibility: Record<string, boolean> = {},
     names: Record<string, string> = {},
+    private presets: LayerSnapshot[] = [],
   ) {
     const properties = input.context.lookup(input.catalog.get(key("OCProperties")));
     if (!(properties instanceof PDFDict)) {
-      if (Object.keys(visibility).length || Object.keys(names).length) throw Error("表示を変更したレイヤーが見つかりません。");
+      if (Object.keys(visibility).length || Object.keys(names).length || presets.length) throw Error("表示を変更したレイヤーが見つかりません。");
       return;
     }
     this.properties = properties;
@@ -36,6 +40,15 @@ export class OptionalContentSource {
     if (groups.size() > 10_000) throw Error("PDFのレイヤー数が保存上限を超えています。");
     const known = new Set(groups.asArray().filter((ref): ref is PDFRef => ref instanceof PDFRef)
       .map((ref) => `${ref.objectNumber}R${ref.generationNumber || ""}`));
+    if (presets.length) {
+      const configs = properties.lookupMaybe(key("Configs"), PDFArray);
+      let references = 0;
+      for (const value of configs?.asArray() ?? []) {
+        const config = input.context.lookup(value, PDFDict);
+        references += (config.lookupMaybe(key("ON"), PDFArray)?.size() ?? 0) + (config.lookupMaybe(key("OFF"), PDFArray)?.size() ?? 0);
+      }
+      validateLayerSnapshots(presets, known, configs?.size(), references);
+    }
     for (const [id, visible] of Object.entries(visibility)) {
       if (!known.has(id) || typeof visible !== "boolean") throw Error("表示を変更したレイヤーの参照が不正です。");
     }
@@ -144,7 +157,15 @@ export class OptionalContentSource {
       for (const [ref, state] of overrides) if (state === visible) refs.push(ref);
       defaultConfig.set(key(name), this.output.context.obj(refs));
     }
-    return { groups, defaultConfig, configs: copiedConfigs };
+    const customConfigs = this.output.context.obj([]);
+    for (const preset of this.presets) {
+      const on: PDFRef[] = [], off: PDFRef[] = [];
+      for (const ref of new Set(this.groups.values()))
+        (preset.visibility[`${ref.objectNumber}R${ref.generationNumber || ""}`] ? on : off).push(this.copier.copy(ref));
+      customConfigs.push(this.output.context.obj({ Name: PDFHexString.fromText(preset.name),
+        Creator: PDFString.of("Kikki PDF"), BaseState: "Unchanged", ON: on, OFF: off, Intent: "View" }));
+    }
+    return { groups, defaultConfig, configs: copiedConfigs, customConfigs };
   }
 }
 
@@ -155,7 +176,8 @@ export function writeOptionalContent(output: PDFDocument, parts: (OptionalConten
   const properties = output.context.obj({ OCGs: groups });
   if (sources.length === 1) {
     properties.set(key("D"), sources[0].defaultConfig);
-    if (sources[0].configs) properties.set(key("Configs"), sources[0].configs);
+    const configs = output.context.obj([...(sources[0].configs?.asArray() ?? []), ...(sources[0].customConfigs?.asArray() ?? [])]);
+    if (configs.size()) properties.set(key("Configs"), configs);
   } else {
     const config = output.context.obj({ BaseState: "ON" });
     const on: PDFRef[] = [], off: PDFRef[] = [];
@@ -192,6 +214,13 @@ export function writeOptionalContent(output: PDFDocument, parts: (OptionalConten
     }
     config.set(key("Intent"), output.context.obj([...intents]));
     properties.set(key("D"), config);
+    const custom = sources.flatMap(part => part.customConfigs?.asArray() ?? []);
+    if (custom.length > 100) throw Error("結合後の表示プリセットは100件までです。");
+    if (custom.reduce((total, value) => {
+      const preset = output.context.lookup(value, PDFDict);
+      return total + preset.lookup(key("ON"), PDFArray).size() + preset.lookup(key("OFF"), PDFArray).size();
+    }, 0) > 100000) throw Error("結合後の表示プリセットの参照数が多すぎます。");
+    if (custom.length) properties.set(key("Configs"), output.context.obj(custom));
   }
   output.catalog.set(key("OCProperties"), properties);
 }

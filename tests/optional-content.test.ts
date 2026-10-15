@@ -361,3 +361,92 @@ it("rejects locked and radio-conflicting presets without changes and isolates un
   }
   releasePdfs();
 });
+
+it("creates, overwrites and deletes layer snapshots with undo, no-op detection and project round trips", async () => {
+  const { saveLayerPreset, deleteLayerPreset, applyLayerPreset } = await import("../src/layers/presets");
+  const fixture = await layeredPdf({ off: [1], configs: false });
+  const model = await importPdf({ name: "snapshots.pdf", bytes: fixture.bytes });
+  const source = Object.values(model.sources)[0], info = await readLayers(source), history = new History(model);
+  history.execute(saveLayerPreset(source.id, "表示設定・日本語", info, "custom:one"));
+  const captured = history.current.document;
+  expect(captured.sources[source.id].bytes).toBe(source.bytes);
+  history.execute(saveLayerPreset(source.id, "表示設定・日本語", info, "custom:one"));
+  expect(history.current.document).toBe(captured);
+  history.execute(setLayerVisibility(source.id, info.groups[0].id, false, info));
+  history.execute(saveLayerPreset(source.id, "非表示", info, "custom:one"));
+  expect(history.current.document.sources[source.id].layerPresets?.[0].name).toBe("非表示");
+  history.undo();
+  expect(history.current.document.sources[source.id].layerPresets?.[0].name).toBe("表示設定・日本語");
+  history.execute(applyLayerPreset(source.id, "custom:one", info));
+  expect(history.current.document.sources[source.id].layerVisibility).toEqual({});
+  const restored = await openProject(await saveProject(history.current.document));
+  expect(restored.sources[source.id].layerPresets).toEqual(captured.sources[source.id].layerPresets);
+  history.execute(deleteLayerPreset(source.id, "custom:one"));
+  expect(history.current.document.sources[source.id].layerPresets).toEqual([]);
+  history.undo(); expect(history.current.document.sources[source.id].layerPresets).toHaveLength(1);
+  history.redo(); expect(history.current.document.sources[source.id].layerPresets).toEqual([]);
+  releasePdfs();
+});
+
+it("exports snapshots with remapped OCG references, preserves original presets and reloads their state", async () => {
+  const { saveLayerPreset, applyLayerPreset } = await import("../src/layers/presets");
+  const fixture = await layeredPdf({ off: [1] });
+  const model = await importPdf({ name: "snapshots.pdf", bytes: fixture.bytes });
+  const source = Object.values(model.sources)[0], info = await readLayers(source);
+  let changed = setLayerVisibility(source.id, info.groups[0].id, false, info).apply(model);
+  changed = saveLayerPreset(source.id, "全て非表示", info, "custom:hidden").apply(changed);
+  changed = setLayerVisibility(source.id, info.groups[0].id, true, info).apply(changed);
+  const output = await loadExport(changed), { oc, groups } = catalog(output);
+  const configs = oc.lookup(N("Configs"), PDFArray);
+  expect(configs.size()).toBe(2);
+  const snapshot = output.context.lookup(configs.get(1), PDFDict);
+  expect(snapshot.lookup(N("OFF"), PDFArray).asArray()).toEqual(groups.asArray());
+  expect(snapshot.lookup(N("ON"), PDFArray).size()).toBe(0);
+  expect(snapshot.get(N("BaseState"))).toBe(N("Unchanged"));
+  const reloaded = await importPdf({ name: "saved.pdf", bytes: await output.save() });
+  const reloadedSource = Object.values(reloaded.sources)[0], reloadedInfo = await readLayers(reloadedSource);
+  expect(reloadedInfo.presets?.[1].name).toBe("全て非表示");
+  expect(reloadedInfo.presets?.[1].error).toBeUndefined();
+  const applied = applyLayerPreset(reloadedSource.id, "1", reloadedInfo).apply(reloaded);
+  expect(applied.sources[reloadedSource.id].layerVisibility).toEqual({ [reloadedInfo.groups[0].id]: false });
+  releasePdfs();
+});
+
+it("retains source-scoped snapshots when merging and extracting without changing other sources", async () => {
+  const { saveLayerPreset, applyLayerPreset } = await import("../src/layers/presets");
+  const fixture = await layeredPdf({ off: [1], configs: false });
+  const first = await importPdf({ name: "first.pdf", bytes: fixture.bytes });
+  const second = await importPdf({ name: "second.pdf", bytes: fixture.bytes.slice() });
+  const source = Object.values(first.sources)[0], info = await readLayers(source);
+  let changed = setLayerVisibility(source.id, info.groups[0].id, false, info).apply(first);
+  changed = saveLayerPreset(source.id, "First hidden", info, "custom:first").apply(changed);
+  changed = setLayerVisibility(source.id, info.groups[0].id, true, info).apply(changed);
+  const merged = mergeDocuments(second).apply(changed);
+  const saved = await importPdf({ name: "merged.pdf", bytes: await exportPdf(merged) });
+  const savedSource = Object.values(saved.sources)[0], savedInfo = await readLayers(savedSource);
+  expect(savedInfo.presets).toHaveLength(1);
+  const applied = applyLayerPreset(savedSource.id, "0", savedInfo).apply(saved);
+  expect(Object.keys(applied.sources[savedSource.id].layerVisibility!)).toHaveLength(1);
+  const extracted = await PDFDocument.load(await exportPdf(merged, undefined, { indices: [1] }));
+  expect(catalog(extracted).oc.has(N("Configs"))).toBe(false);
+  releasePdfs();
+});
+
+it("rejects invalid snapshot names, references, IDs and budgets atomically", async () => {
+  const { saveLayerPreset, applyLayerPreset, validateLayerSnapshots } = await import("../src/layers/presets");
+  const fixture = await layeredPdf({ off: [1], configs: false });
+  const model = await importPdf({ name: "invalid.pdf", bytes: fixture.bytes });
+  const source = Object.values(model.sources)[0], info = await readLayers(source), history = new History(model);
+  for (const name of ["   ", "x".repeat(1001)])
+    expect(() => history.execute(saveLayerPreset(source.id, name, info))).toThrow("プリセット名");
+  expect(history.current.document).toBe(model); expect(history.canUndo).toBe(false);
+  const invalid = { id: "custom:bad", name: "Bad", visibility: { "999999R": true } };
+  const corrupt = { ...model, sources: { ...model.sources, [source.id]: { ...source, layerPresets: [invalid] } } };
+  expect(() => applyLayerPreset(source.id, invalid.id, info).apply(corrupt)).toThrow("参照");
+  await expect(exportPdf(corrupt)).rejects.toThrow("参照");
+  const valid = { id: "custom:one", name: "One", visibility: { "1R": true } };
+  expect(() => validateLayerSnapshots([valid, valid], new Set(["1R"]))).toThrow("ID");
+  expect(() => validateLayerSnapshots([valid], new Set(["1R"]), 100)).toThrow("100件");
+  expect(() => validateLayerSnapshots([valid], new Set(["1R"]), 0, 100000)).toThrow("参照数");
+  releasePdfs();
+});

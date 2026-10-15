@@ -108,6 +108,11 @@ export interface PageModel {
   formWidgetEdits?: Record<string, Box>;
   crop?: Box;
 }
+export interface LayerSnapshot {
+  id: string;
+  name: string;
+  visibility: Record<string, boolean>;
+}
 export interface Source {
   id: string;
   name: string;
@@ -115,6 +120,7 @@ export interface Source {
   /** User visibility overrides, scoped to original PDF optional-content refs. */
   layerVisibility?: Record<string, boolean>;
   layerNames?: Record<string, string>;
+  layerPresets?: LayerSnapshot[];
 }
 export interface ImageAsset {
   id: string;

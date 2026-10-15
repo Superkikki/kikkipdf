@@ -108,7 +108,7 @@ export async function exportPdf(
   for (const source of Object.values(model.sources)) {
     const input = await PDFDocument.load(source.bytes);
     const sharedCopier = PDFObjectCopier.for(input.context, output.context);
-    copiers.set(source.id, new PageCopier(input, output, attachments, model.images, sharedCopier, source.layerVisibility, source.layerNames));
+    copiers.set(source.id, new PageCopier(input, output, attachments, model.images, sharedCopier, source.layerVisibility, source.layerNames, source.layerPresets));
     attachments.prepare(input, source.id);
     if (input.catalog.getAcroForm()?.dict.has(PDFName.of("XFA")))
       throw Error(
