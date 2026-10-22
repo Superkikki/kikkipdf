@@ -1974,3 +1974,10 @@ progress {
 .comment-bulk legend { font-size: 12px; }
 .comment-bulk label { display: grid; gap: 5px; font-size: 12px; }
 .comment-bulk .hint { margin: 0; }
+
+.layer-order-editor { margin: 12px 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.layer-order-editor summary { cursor: pointer; font-size: 12px; }
+.layer-order-editor label { display: grid; gap: 5px; margin: 10px 0; font-size: 12px; }
+.layer-order-editor select { width: 100%; min-width: 0; }
+.layer-order-editor button { margin: 4px 0; }
+.layer-order-buttons { display: flex; gap: 8px; }

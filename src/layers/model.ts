@@ -1,8 +1,9 @@
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRef } from "pdf-lib";
 import type { PDFDocumentProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { Command } from "../commands/history";
-import type { Source } from "../state/model";
+import type { LayerOrderNode, Source } from "../state/model";
 import { sourcePdf } from "../viewer/pdf";
+import { readLayerOrder } from "./pdfOrder";
 import { readLayerPresets, type LayerPreset } from "./presets";
 
 export interface LayerGroup {
@@ -13,7 +14,7 @@ export interface LayerGroup {
   radioGroups: string[][];
 }
 export interface LayerRow { id?: string; name: string; depth: number }
-export interface LayerInfo { groups: LayerGroup[]; rows: LayerRow[]; presets?: LayerPreset[] }
+export interface LayerInfo { groups: LayerGroup[]; rows: LayerRow[]; presets?: LayerPreset[]; order?: LayerOrderNode[]; orderError?: string }
 export const layerRefId = (ref: PDFRef) => `${ref.objectNumber}R${ref.generationNumber || ""}`;
 const cache = new WeakMap<Uint8Array, Promise<LayerInfo>>();
 
@@ -48,7 +49,10 @@ export function readLayers(source: Source): Promise<LayerInfo> {
       }
       walk(config.getOrder(), 0);
       for (const group of groups) if (!seen.has(group.id)) rows.push({ id: group.id, name: group.name, depth: 0 });
-      return { groups, rows, presets: readLayerPresets(raw, new Set(groups.map(group => group.id))) };
+      let order: LayerOrderNode[] | undefined, orderError: string | undefined;
+      try { order = readLayerOrder(raw, new Set(groups.map(group => group.id))); }
+      catch (reason) { orderError = reason instanceof Error ? reason.message : "元のレイヤー順序を確認できません。"; }
+      return { groups, rows, order, orderError, presets: readLayerPresets(raw, new Set(groups.map(group => group.id))) };
     })();
     cache.set(source.bytes, ready);
     ready.catch(() => cache.delete(source.bytes));

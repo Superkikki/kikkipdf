@@ -152,6 +152,37 @@ export const moveBookmark = (
     };
   });
 
+/** Duplicate a subtree with new identities; destinations and appearance remain independent. */
+export function duplicateBookmark(id: string, rootId: string = uid()) {
+  return change("しおりと子のしおりを複製", document => {
+    const tree = document.bookmarks ?? [], known = new Set<string>();
+    const queue = tree.map(node => ({ node, depth: 1 })); let count = 0;
+    while (queue.length) {
+      const { node, depth } = queue.pop()!;
+      if (++count > 10000 || depth > 24) throw Error("しおりの複製は合計10000件・24階層までです。");
+      if (known.has(node.id)) throw Error("しおりのIDが重複しています。");
+      known.add(node.id); for (const child of node.children) queue.push({ node: child, depth: depth + 1 });
+    }
+    const found = locateBookmark(tree, id);
+    if (!found) throw Error("複製するしおりが見つかりません。");
+    if (!/^[\w-]{1,200}$/.test(rootId) || ["__proto__", "constructor", "prototype"].includes(rootId) || known.has(rootId))
+      throw Error("複製先のしおりIDが不正です。");
+    const title = `${found.node.title}（コピー）`;
+    if (title.length > 1000000) throw Error("しおりの名前が長すぎて複製できません。");
+    const clone = (node: BookmarkModel, root = false): BookmarkModel => {
+      if (++count > 10000) throw Error("しおりの複製は合計10000件までです。");
+      let key = root ? rootId : uid();
+      while (!root && known.has(key)) key = uid();
+      known.add(key);
+      return { ...node, id: key, ...(root ? { title } : {}),
+        ...(node.destination ? { destination: { ...node.destination } } : {}), children: node.children.map(child => clone(child)) };
+    };
+    const copy = clone(found.node, true);
+    const siblings = [...found.siblings.slice(0, found.index + 1), copy, ...found.siblings.slice(found.index + 1)];
+    return { ...document, bookmarks: found.parentId ? mapBookmarks(tree, found.parentId, parent => ({ ...parent, children: siblings })) : siblings };
+  });
+}
+
 export function filterBookmarks(
   nodes: BookmarkModel[],
   query: string,

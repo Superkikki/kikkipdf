@@ -3,7 +3,8 @@ import {
   PDFNumber, PDFObject, PDFObjectCopier, PDFRef, PDFString,
   type PDFDocument,
 } from "pdf-lib";
-import type { LayerSnapshot } from "../state/model";
+import type { LayerOrderNode, LayerSnapshot } from "../state/model";
+import { parseLayerOrder } from "../layers/order";
 import { validateLayerSnapshots } from "../layers/presets";
 
 const key = (name: string) => PDFName.of(name);
@@ -28,10 +29,11 @@ export class OptionalContentSource {
     private visibility: Record<string, boolean> = {},
     names: Record<string, string> = {},
     private presets: LayerSnapshot[] = [],
+    private order?: LayerOrderNode[],
   ) {
     const properties = input.context.lookup(input.catalog.get(key("OCProperties")));
     if (!(properties instanceof PDFDict)) {
-      if (Object.keys(visibility).length || Object.keys(names).length || presets.length) throw Error("表示を変更したレイヤーが見つかりません。");
+      if (Object.keys(visibility).length || Object.keys(names).length || presets.length || order !== undefined) throw Error("表示を変更したレイヤーが見つかりません。");
       return;
     }
     this.properties = properties;
@@ -40,6 +42,7 @@ export class OptionalContentSource {
     if (groups.size() > 10_000) throw Error("PDFのレイヤー数が保存上限を超えています。");
     const known = new Set(groups.asArray().filter((ref): ref is PDFRef => ref instanceof PDFRef)
       .map((ref) => `${ref.objectNumber}R${ref.generationNumber || ""}`));
+    if (order !== undefined) this.order = parseLayerOrder(order, known);
     if (presets.length) {
       const configs = properties.lookupMaybe(key("Configs"), PDFArray);
       let references = 0;
@@ -147,6 +150,13 @@ export class OptionalContentSource {
       for (let i = 0; i < configs.size(); i++) copiedConfigs.push(this.config(configs.get(i)));
     }
     const defaultConfig = this.config(this.properties.get(key("D")));
+    if (this.order) {
+      const refs = new Map([...new Set(this.groups.values())].map(ref => [`${ref.objectNumber}R${ref.generationNumber || ""}`, ref]));
+      const writeOrder = (nodes: LayerOrderNode[]): PDFArray => this.output.context.obj(nodes.map(node => node.groupId
+        ? this.copier.copy(refs.get(node.groupId)!)
+        : this.output.context.obj([PDFHexString.fromText(node.title!), ...writeOrder(node.children).asArray()])));
+      defaultConfig.set(key("Order"), writeOrder(this.order));
+    }
     const overrides = new Map([...new Set(this.groups.values())].flatMap((ref) => {
       const visible = this.visibility[`${ref.objectNumber}R${ref.generationNumber || ""}`];
       return visible === undefined ? [] : [[this.copier.copy(ref), visible] as const];

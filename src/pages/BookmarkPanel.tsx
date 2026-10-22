@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import {
   Bookmark,
+  Copy,
   ChevronDown,
   ChevronRight,
   Plus,
@@ -18,6 +19,7 @@ import { BookmarkLocationEditor } from "./BookmarkLocationEditor";
 import { documentStore } from "../state/store";
 import {
   addBookmark,
+  duplicateBookmark,
   updateBookmark,
   removeBookmark,
   moveBookmark,
@@ -261,6 +263,10 @@ export function BookmarkPanel({
             </>
           )}
           <div className="form-kind-buttons">
+            <button title="しおりと子のしおりを複製" aria-label="しおりと子のしおりを複製" onClick={() => {
+              try { const id = uid(); documentStore.execute(duplicateBookmark(selected, id)); setSelected(id); setCaptureError(""); }
+              catch (reason) { setCaptureError(reason instanceof Error ? reason.message : "しおりを複製できません。"); }
+            }}><Copy size={14} /></button>
             <button
               title="しおりを上へ"
               disabled={!found.index}

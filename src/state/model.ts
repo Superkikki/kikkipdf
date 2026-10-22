@@ -113,6 +113,12 @@ export interface LayerSnapshot {
   name: string;
   visibility: Record<string, boolean>;
 }
+export interface LayerOrderNode {
+  key: string;
+  groupId?: string;
+  title?: string;
+  children: LayerOrderNode[];
+}
 export interface Source {
   id: string;
   name: string;
@@ -121,6 +127,7 @@ export interface Source {
   layerVisibility?: Record<string, boolean>;
   layerNames?: Record<string, string>;
   layerPresets?: LayerSnapshot[];
+  layerOrder?: LayerOrderNode[];
 }
 export interface ImageAsset {
   id: string;

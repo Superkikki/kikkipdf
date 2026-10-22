@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { uid, type DocumentModel, type Source } from "../state/model";
 import { documentStore } from "../state/store";
 import { usePrompt } from "../components/Prompt";
+import { LayerOrderEditor } from "./LayerOrderEditor";
+import { layerOrderRows, parseLayerOrder } from "./order";
 import { setAllLayerVisibility } from "./bulk";
 import { renameLayer, resetLayerNames } from "./commands";
 import { applyLayerPreset, deleteLayerPreset, layerPresets, saveLayerPreset } from "./presets";
@@ -21,6 +23,11 @@ function SourceLayers({ source }: { source: Source }) {
   }, [source]);
   const groups = new Map(info?.groups.map((group) => [group.id, group]));
   const presets = info ? layerPresets(source, info) : [];
+  let rows = info?.rows ?? [];
+  if (info && (source.layerOrder || info.order)) {
+    try { rows = layerOrderRows(parseLayerOrder(source.layerOrder ?? info.order, new Set(info.groups.map(group => group.id))), info); }
+    catch { /* Preserve the source listing if an unsupported order cannot be reconstructed. */ }
+  }
   const selected = presets.find(preset => preset.id === presetId);
   const custom = source.layerPresets?.find(preset => preset.id === presetId);
   const savePreset = async (overwrite: boolean) => {
@@ -67,7 +74,8 @@ function SourceLayers({ source }: { source: Source }) {
         }}>{label}</button>)}
       <p className="hint">ロックされたレイヤーは保持します。排他設定と競合する場合は全件を中止します。</p>
     </div>}
-    {info?.rows.map((row, index) => {
+    {!!info?.groups.length && <LayerOrderEditor source={source} info={info} onError={setError} />}
+    {info && rows.map((row, index) => {
       if (!row.id) return <div className="layer-heading" key={index} style={{ paddingLeft: row.depth * 12 }}>{row.name}</div>;
       const group = groups.get(row.id)!;
       const name = source.layerNames?.[group.id] ?? group.name;

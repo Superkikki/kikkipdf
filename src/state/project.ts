@@ -14,6 +14,8 @@ import { checkFontBudget, MAX_FONT_BYTES } from "../fonts/budget";
 import { directReferences, directImageEdits } from "../direct/model";
 import { bookmarkDestinationSchema } from "../pages/bookmarkDestination";
 import { validPageLabel, MAX_PAGE_LABEL_LENGTH } from "../pages/labels";
+import { parseLayerOrder } from "../layers/order";
+import { validateSourceLayerOrder } from "../layers/pdfOrder";
 import { importedMarkupsSchema } from "../annotations/importedMarkup";
 
 const id = z
@@ -152,6 +154,10 @@ const schema = z.object({
     name: z.string().min(1).max(1000),
     created: number,
     sources: z.record(id, z.object({ ...asset,
+      layerOrder: z.unknown().transform((value, context) => {
+        try { return parseLayerOrder(value); }
+        catch (reason) { context.addIssue({ code: "custom", message: reason instanceof Error ? reason.message : "レイヤー順序が不正です。" }); return z.NEVER; }
+      }).optional(),
       layerPresets: z.array(z.object({
         id: z.string().regex(/^custom:[\w-]{1,100}$/),
         name: z.string().min(1).max(1000).refine(value => !!value.trim()),
@@ -318,6 +324,7 @@ export async function saveProject(model: DocumentModel): Promise<Uint8Array> {
       if (o.font === "custom" && (!o.fontId || !fonts[o.fontId]))
         throw Error("参照フォントがありません。");
   for (const [i, s] of Object.values(model.sources).entries()) {
+    await validateSourceLayerOrder(s);
     const file = `sources/${i}.pdf`;
     files[file] = s.bytes;
     total += s.bytes.length;
@@ -329,6 +336,7 @@ export async function saveProject(model: DocumentModel): Promise<Uint8Array> {
       layerVisibility: s.layerVisibility,
       layerNames: s.layerNames,
       layerPresets: s.layerPresets,
+      layerOrder: s.layerOrder,
     };
   }
   for (const [i, s] of Object.values(model.images).entries()) {
@@ -440,7 +448,8 @@ export async function openProject(bytes: Uint8Array): Promise<DocumentModel> {
       const data = files[s.file];
       if (key !== s.id || !data || (await hash(data)) !== s.sha256)
         throw Error("元PDFの整合性エラー");
-      model.sources[key] = { id: s.id, name: s.name, bytes: data, layerVisibility: s.layerVisibility, layerNames: s.layerNames, layerPresets: s.layerPresets };
+      model.sources[key] = { id: s.id, name: s.name, bytes: data, layerVisibility: s.layerVisibility, layerNames: s.layerNames, layerPresets: s.layerPresets, layerOrder: s.layerOrder };
+      await validateSourceLayerOrder(model.sources[key]);
     }
     for (const [key, s] of Object.entries(d.images)) {
       const data = files[s.file];

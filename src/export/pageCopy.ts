@@ -11,7 +11,7 @@ import {
   PDFString,
   type PDFDocument,
 } from "pdf-lib";
-import type { PageModel, LinkTarget, ImageAsset, LayerSnapshot } from "../state/model";
+import type { PageModel, LinkTarget, ImageAsset, LayerSnapshot, LayerOrderNode } from "../state/model";
 import { setLinkTarget } from "../links/pdfLinks";
 import { importedLinkUrl } from "../links/target";
 import type { AttachmentWriter } from "../attachments/pdfAttachments";
@@ -94,9 +94,10 @@ export class PageCopier {
     visibility?: Record<string, boolean>,
     names?: Record<string, string>,
     presets?: LayerSnapshot[],
+    order?: LayerOrderNode[],
   ) {
     this.copier = copier ?? PDFObjectCopier.for(input.context, output.context);
-    this.optionalContent = new OptionalContentSource(input, output, this.copier, visibility, names, presets);
+    this.optionalContent = new OptionalContentSource(input, output, this.copier, visibility, names, presets, order);
   }
   getOptionalContent() {
     return this.exported.size ? this.optionalContent.finish() : undefined;

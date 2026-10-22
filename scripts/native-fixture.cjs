@@ -1,6 +1,19 @@
 const { PDFDocument, StandardFonts, PDFOperator, PDFName, PDFDict, PDFHexString, PDFString, degrees } = require("pdf-lib");
 const { writeFile, readFile } = require("node:fs/promises");
 (async () => {
+  if (process.argv[3] === "organization") {
+    const pdf = await PDFDocument.create(), page = pdf.addPage([420, 595]), c = pdf.context;
+    page.drawText("Organization fixture", { x: 40, y: 550, size: 14 });
+    const groups = ["A", "B"].map(name => c.register(c.obj({ Type: "OCG", Name: PDFString.of(name) })));
+    pdf.catalog.set(PDFName.of("OCProperties"), c.obj({ OCGs: groups, D: { Order: groups, OFF: [groups[1]], Locked: [groups[0]] } }));
+    const outline = c.obj({ Type: "Outlines", Count: 1 }), outlineRef = c.register(outline);
+    const root = c.obj({ Title: PDFString.of("Root"), Parent: outlineRef, Count: -1 }), rootRef = c.register(root);
+    const leaf = c.obj({ Title: PDFString.of("Leaf"), Parent: rootRef, Dest: [page.ref, "Fit"] }), leafRef = c.register(leaf);
+    root.set(PDFName.of("First"), leafRef); root.set(PDFName.of("Last"), leafRef);
+    outline.set(PDFName.of("First"), rootRef); outline.set(PDFName.of("Last"), rootRef);
+    pdf.catalog.set(PDFName.of("Outlines"), outlineRef);
+    await writeFile(process.argv[2], await pdf.save()); return;
+  }
   if (process.argv[3] === "review-images") {
     const pdf = await PDFDocument.create(), page = pdf.addPage([420, 595]);
     const image = await pdf.embedPng(await readFile(require("node:path").join(__dirname, "..", "src-tauri", "icons", "32x32.png")));

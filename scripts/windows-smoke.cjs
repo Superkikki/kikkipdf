@@ -86,6 +86,42 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_ORGANIZATION_ONLY === "1") {
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "レイヤー", exact: true }).click();
+    const panel = page.locator(".layer-panel"), editor = panel.locator(".layer-order-editor");
+    await editor.locator("summary").click(); await editor.getByRole("button", { name: "見出しを作成", exact: true }).click();
+    await page.getByLabel("見出し名", { exact: true }).fill("Native 資料");
+    await page.getByRole("dialog").getByRole("button", { name: "適用", exact: true }).click();
+    const selection = panel.getByLabel("native-fixture.pdfの編集するレイヤー項目", { exact: true });
+    const heading = await selection.inputValue();
+    const options = await selection.locator("option").evaluateAll(nodes => nodes.filter(n => n.textContent.trim() === "B").map(n => n.value));
+    await selection.selectOption(options[0]); await panel.getByLabel("native-fixture.pdfの移動先の見出し", { exact: true }).selectOption(heading);
+    await page.getByTitle("元に戻す (Ctrl+Z)", { exact: true }).click();
+    await page.getByTitle("やり直す (Ctrl+Y)", { exact: true }).click();
+    await expect(panel.getByRole("checkbox", { name: "A", exact: true })).toBeDisabled();
+    await expect(panel.getByRole("checkbox", { name: "B", exact: true })).not.toBeChecked();
+    await page.screenshot({ path: path.join(process.env.KIKKI_SMOKE_DIR, "organization-layers.png") });
+    await page.getByRole("button", { name: "しおり", exact: true }).click();
+    const bookmarks = page.locator(".bookmark-panel"); await bookmarks.getByRole("button", { name: "Root", exact: true }).click();
+    await bookmarks.getByRole("button", { name: "しおりと子のしおりを複製", exact: true }).click();
+    await expect(bookmarks.getByRole("button", { name: "Root（コピー）", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "保存", exact: true }).click(); await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf"), saved = await PDFDocument.load(await fs.readFile(fixture));
+    const n = PDFName.of, config = saved.catalog.lookup(n("OCProperties"), PDFDict).lookup(n("D"), PDFDict);
+    const order = config.lookup(n("Order"), PDFArray), nested = order.lookup(1, PDFArray);
+    if (nested.lookup(0, PDFHexString).decodeText() !== "Native 資料" || nested.size() !== 2) throw Error("Layer heading not persisted");
+    if (config.lookup(n("OFF"), PDFArray).size() !== 1 || config.lookup(n("Locked"), PDFArray).size() !== 1) throw Error("Layer state changed");
+    const root = saved.catalog.lookup(n("Outlines"), PDFDict).lookup(n("First"), PDFDict), copy = root.lookup(n("Next"), PDFDict);
+    if (copy.lookup(n("Title"), PDFHexString).decodeText() !== "Root（コピー）" || !copy.has(n("First"))) throw Error("Bookmark subtree missing");
+    const picking = pickNativeFile(fixture); await page.keyboard.press("Control+o"); await picking;
+    await page.getByRole("button", { name: "レイヤー", exact: true }).click(); await expect(page.locator(".layer-panel")).toContainText("Native 資料");
+    await page.getByRole("button", { name: "しおり", exact: true }).click();
+    await expect(page.locator(".bookmark-panel").getByRole("button", { name: "Root（コピー）", exact: true })).toBeVisible();
+    await page.screenshot({ path: path.join(process.env.KIKKI_SMOKE_DIR, "organization-bookmarks.png") });
+    if (errors.length) throw Error(JSON.stringify(errors));
+    console.log(JSON.stringify({ ok: true, organization: true, errors, elapsedMs: Date.now() - started })); await browser.close(); return;
+  }
   if (process.env.KIKKI_SMOKE_REVIEW_IMAGES_ONLY === "1") {
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "コメント", exact: true }).click();

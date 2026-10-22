@@ -440,3 +440,22 @@ test("clamps bookmark navigation to the cropped target page while preserving out
     await expect(number).toHaveValue("2");
   }
 });
+
+test("duplicates a collapsed bookmark subtree, undoes it and saves independent children", async ({ page }, info) => {
+  await page.goto("/"); await open(page, await fixture());
+  const panel = page.locator(".bookmark-panel"); await panel.getByRole("button", { name: "Root", exact: true }).click();
+  await panel.getByRole("button", { name: "しおりと子のしおりを複製", exact: true }).click();
+  await expect(panel.getByRole("button", { name: "Root（コピー）", exact: true })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Closed chapter", exact: true })).toHaveCount(0);
+  await page.getByTitle("元に戻す (Ctrl+Z)", { exact: true }).click();
+  await expect(panel.getByRole("button", { name: "Root（コピー）", exact: true })).toHaveCount(0);
+  await page.getByTitle("やり直す (Ctrl+Y)", { exact: true }).click();
+  await panel.getByRole("button", { name: "すべて展開", exact: true }).click();
+  await expect(panel.getByRole("button", { name: "Needle 資料", exact: true })).toHaveCount(2);
+  const download = page.waitForEvent("download"); await page.getByRole("button", { name: "保存", exact: true }).click();
+  const output = info.outputPath("duplicated.pdf"); await (await download).saveAs(output);
+  const pdf = await PDFDocument.load(await readFile(output)), outlines = pdf.catalog.lookup(PDFName.of("Outlines"), PDFDict),
+    original = outlines.lookup(PDFName.of("First"), PDFDict), copy = original.lookup(PDFName.of("Next"), PDFDict);
+  expect(copy.lookup(PDFName.of("Title"), PDFHexString).decodeText()).toBe("Root（コピー）");
+  expect(copy.get(PDFName.of("First"))?.toString()).not.toBe(original.get(PDFName.of("First"))?.toString());
+});
