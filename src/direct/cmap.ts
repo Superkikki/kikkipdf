@@ -10,7 +10,7 @@ export function unicodeMap(bytes: Uint8Array): Map<number, string> {
   let decodedBytes = 0;
   const decoder = new TextDecoder("utf-16be", { fatal: true });
   const code = (value: Operand) => {
-    if (!(value instanceof Uint8Array) || value.length < 1 || value.length > 2)
+    if (!(value instanceof Uint8Array) || value.length < 1 || value.length > 4)
       throw Error("文字コードの形式は未対応です。");
     return parseInt(hex(value), 16);
   };

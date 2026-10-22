@@ -1,6 +1,25 @@
 const { PDFDocument, StandardFonts, PDFOperator, PDFName, PDFDict, PDFHexString, PDFString } = require("pdf-lib");
 const { writeFile, readFile } = require("node:fs/promises");
 (async () => {
+  if (process.argv[3] === "cjk") {
+    const pdf = await PDFDocument.create(), page = pdf.addPage([420, 595]);
+    const neighbour = await pdf.embedFont(StandardFonts.Helvetica);
+    const descendant = pdf.context.register(pdf.context.obj({ Type: "Font", Subtype: "CIDFontType0", BaseFont: "HeiseiMin-W3",
+      CIDSystemInfo: { Registry: PDFString.of("Adobe"), Ordering: PDFString.of("Japan1"), Supplement: 0 }, DW: 1000 }));
+    const makeFont = (encoding, unicode) => pdf.context.register(pdf.context.obj({ Type: "Font", Subtype: "Type0", BaseFont: "HeiseiMin-W3",
+      Encoding: encoding, DescendantFonts: [descendant], ...(unicode ? { ToUnicode: pdf.context.register(pdf.context.flateStream(unicode)) } : {}) }));
+    const rksj = makeFont(PDFName.of("90ms-RKSJ-H"));
+    const identity = makeFont(PDFName.of("Identity-H"));
+    const embedded = makeFont(pdf.context.register(pdf.context.flateStream(
+      "1 begincodespacerange <01000000> <010000ff> endcodespacerange 1 begincidrange <01000001> <01000003> 100 endcidrange")),
+      "3 beginbfchar <01000001> <65e5> <01000002> <672c> <01000003> <8a9e> endbfchar");
+    page.node.set(PDFName.of("Resources"), pdf.context.obj({ Font: { F1: rksj, F2: embedded, F3: neighbour.ref, F4: identity } }));
+    page.node.set(PDFName.of("Contents"), pdf.context.register(pdf.context.flateStream(
+      "BT /F1 20 Tf 1 0 0 1 40 520 Tm <93fa967b8cea> Tj /F3 20 Tf ( Neighbour one) Tj ET " +
+      "BT /F2 20 Tf 1 0 0 1 40 460 Tm <010000010100000201000003> Tj /F3 20 Tf ( Neighbour two) Tj ET " +
+      "BT /F4 20 Tf 1 0 0 1 40 400 Tm <0cd40e8a07a0> Tj /F3 20 Tf ( Neighbour three) Tj ET")));
+    await writeFile(process.argv[2], await pdf.save()); return;
+  }
   if (process.argv[3] === "bookmarks") {
     const pdf = await PDFDocument.create(); pdf.addPage([420, 595]);
     const b = pdf.addPage([420, 595]), context = pdf.context;

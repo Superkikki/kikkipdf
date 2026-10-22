@@ -4,10 +4,14 @@ import {
   PDFName,
   PDFNumber,
   PDFRawStream,
+  PDFString,
+  PDFHexString,
   StandardFonts,
   decodePDFRawStream,
 } from "pdf-lib";
 import { unicodeMap } from "./cmap";
+import { embeddedCMap } from "./encodingCMap";
+import { characterCodes, mappedUnicode, predefinedCMap } from "./predefinedCMaps";
 import { glyphUnicode, fontEncoding, standardWidths } from "./simpleFonts";
 const key = (name: string) => PDFName.of(name);
 export function boundedDecode(
@@ -35,11 +39,13 @@ export interface SourceFont {
 /** Read the ORIGINAL font widths, never substitute them when retaining text advance. */
 export async function sourceFonts(
   resources: PDFDict | undefined,
-): Promise<Map<string, SourceFont>> {
+): Promise<Map<string, SourceFont> & { unsupported: Map<string, string> }> {
   const entries = resources?.lookupMaybe(key("Font"), PDFDict)?.entries() ?? [];
   if (entries.length > 4096) throw Error("ページのフォント数が多すぎます。");
-  const result = new Map<string, SourceFont>();
+  const result = Object.assign(new Map<string, SourceFont>(), { unsupported: new Map<string, string>() });
   for (const [resourceName, ref] of entries) {
+    const resource = resourceName.decodeText();
+    result.unsupported.set(resource, "このフォントの文字対応・元の文字幅を確認できません。");
     try {
       const dict = resources!.context.lookup(ref, PDFDict);
       const name =
@@ -48,19 +54,34 @@ export async function sourceFonts(
           ?.decodeText()
           .replace(/^[A-Z]{6}\+/, "") ?? "";
       const type = dict.lookupMaybe(key("Subtype"), PDFName)?.decodeText();
+      result.unsupported.set(resource, `フォント「${name.slice(0, 120) || resource}」（${type ?? "形式不明"}）の文字対応・元の文字幅を確認できません。`);
       const toUnicode = dict.lookup(key("ToUnicode"));
       if (toUnicode && !(toUnicode instanceof PDFRawStream)) continue;
       const map = toUnicode
         ? unicodeMap(boundedDecode(toUnicode, 8 * 1024 * 1024))
         : undefined;
       if (type === "Type0") {
-        const encoding = dict.lookupMaybe(key("Encoding"), PDFName)?.decodeText();
-        if (!["Identity-H", "Identity-V"].includes(encoding ?? "") || !map) continue;
-        const vertical = encoding === "Identity-V";
+        const encoding = dict.lookup(key("Encoding"));
+        const cmap = encoding instanceof PDFName ? await predefinedCMap(encoding.decodeText())
+          : encoding instanceof PDFRawStream ? await embeddedCMap(boundedDecode(encoding, 8 * 1024 * 1024),
+            encoding.dict.lookupMaybe(key("UseCMap"), PDFName)?.decodeText(),
+            encoding.dict.lookupMaybe(key("WMode"), PDFNumber)?.asNumber()) : undefined;
+        if (!cmap) continue;
+        const vertical = cmap.vertical;
         const descendants = dict.lookup(key("DescendantFonts"), PDFArray),
           descendant = descendants.lookup(0, PDFDict);
         const subtype = descendant.lookup(key("Subtype"), PDFName).decodeText();
         if (!["CIDFontType0", "CIDFontType2"].includes(subtype)) continue;
+        const info = descendant.lookupMaybe(key("CIDSystemInfo"), PDFDict);
+        const infoText = (name: string) => {
+          const value = info?.lookup(key(name));
+          return value instanceof PDFString || value instanceof PDFHexString ? value.decodeText() : undefined;
+        };
+        const ordering = infoText("Ordering");
+        const collection = !map && infoText("Registry") === "Adobe" &&
+          ["Japan1", "GB1", "CNS1", "Korea1"].includes(ordering ?? "")
+          ? await predefinedCMap(`Adobe-${ordering}-UCS2`) : undefined;
+        if (!map && !collection) continue;
         const defaultWidth = getNumber(descendant, "DW", 1000),
           widths = new Map<number, number>();
         const w = descendant.lookupMaybe(key("W"), PDFArray);
@@ -133,26 +154,24 @@ export async function sourceFonts(
         result.set(resourceName.decodeText(), {
           name, vertical,
           glyphs(bytes) {
-            if (bytes.length % 2) throw Error("2バイト文字コードが不正です。");
             const glyphs = [];
-            for (let i = 0; i < bytes.length; i += 2) {
-              const code = bytes[i] * 256 + bytes[i + 1],
-                text = map.get(code);
+            for (const { code, cid, length } of characterCodes(cmap, bytes)) {
+              const text = map ? map.get(code) : mappedUnicode(collection?.values.get(cid));
               if (text === undefined)
                 throw Error("文字マップに含まれない文字があります。");
-              const width = widths.get(code) ?? defaultWidth;
+              const width = widths.get(cid) ?? defaultWidth;
               // PDF.js uses DW/2 for the implicit vertical origin. Refuse a
               // differing W entry without explicit W2 rather than guess placement.
-              if (vertical && !vmetrics.has(code) && width !== defaultWidth)
+              if (vertical && !vmetrics.has(cid) && width !== defaultWidth)
                 throw Error("縦書き文字の原点を検証できません。");
-              glyphs.push({ code, text, width, wordSpace: false,
-                ...(vertical ? { vmetric: vmetrics.get(code) ?? [defaultAdvance, width / 2, defaultY] as [number, number, number] } : {}),
+              glyphs.push({ code, text, width, wordSpace: length === 1 && code === 32,
+                ...(vertical ? { vmetric: vmetrics.get(cid) ?? [defaultAdvance, width / 2, defaultY] as [number, number, number] } : {}),
               });
             }
             return glyphs;
           },
         });
-      } else if (type === "Type1" || type === "TrueType") {
+      } else if (type === "Type1" || type === "MMType1" || type === "TrueType") {
         const encoding = dict.lookup(key("Encoding"));
         if (encoding && !(encoding instanceof PDFName) && !(encoding instanceof PDFDict))
           continue;
@@ -167,12 +186,20 @@ export async function sourceFonts(
         const differences = encoding instanceof PDFDict
           ? encoding.lookup(key("Differences"))
           : undefined;
-        const builtin = type === "Type1" && !dict.has(key("FontDescriptor")) &&
+        const descriptor = dict.lookupMaybe(key("FontDescriptor"), PDFDict);
+        const embedded = descriptor && ["FontFile", "FontFile2", "FontFile3"].some(name => descriptor.has(key(name)));
+        const flags = descriptor?.has(key("Flags")) ? getNumber(descriptor, "Flags") : undefined;
+        if (flags !== undefined && (!Number.isInteger(flags) || flags < 0 || flags > 0xffffffff)) continue;
+        const symbolic = !!((flags ?? 0) & 4) || /Symbol|Dingbats|Wingdings/i.test(name);
+        const implicitEncoding = !embedded && !symbolic && type !== "TrueType" ? "StandardEncoding"
+          : type === "TrueType" && flags !== undefined && !symbolic
+            ? flags & 32 ? "StandardEncoding" : "WinAnsiEncoding" : "";
+        const builtin = type === "Type1" && !embedded &&
           Object.values(StandardFonts).includes(name as StandardFonts)
           ? standardWidths(name) : undefined;
         const base = fontEncoding(encodingName ?? (builtin
           ? name === "Symbol" ? "SymbolSetEncoding" : name === "ZapfDingbats"
-            ? "ZapfDingbatsEncoding" : "StandardEncoding" : ""));
+            ? "ZapfDingbatsEncoding" : "StandardEncoding" : implicitEncoding));
         if (encodingName && !base && !map) continue;
         const glyphNames = base ? [...base] : Array<string>(256).fill("");
         if (differences) {
@@ -226,9 +253,11 @@ export async function sourceFonts(
           },
         });
       }
-    } catch {
-      /* Unsupported fonts are excluded; no guessed metrics enter direct edits. */
+    } catch (error) {
+      if (error instanceof Error) result.unsupported.set(resource,
+        `${result.unsupported.get(resource)} ${error.message}`);
     }
   }
+  for (const resource of result.keys()) result.unsupported.delete(resource);
   return result;
 }

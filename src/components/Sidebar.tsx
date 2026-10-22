@@ -203,7 +203,7 @@ export function Sidebar({
         {tab === "comments" && <CommentsPanel model={model} jump={jump} />}
         {tab === "layers" && <LayerPanel model={model} />}
         {tab === "search" && (
-          <SearchPanel search={search} count={model.pages.length} focusRequest={searchRequest} />
+          <SearchPanel search={search} focusRequest={searchRequest} />
         )}
         {tab === "attachments" && <AttachmentPanel model={model} />}
         {tab === "ocr" && (

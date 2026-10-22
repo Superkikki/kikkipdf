@@ -1,0 +1,34 @@
+import { test, expect } from "@playwright/test";
+import { PDFDocument } from "pdf-lib";
+import { readFile } from "node:fs/promises";
+
+test("searches selected pages, exports every result and settings, reports invalid ranges without edits", async ({ page }, info) => {
+  const pdf = await PDFDocument.create();
+  for (let i = 0; i < 3; i++) pdf.addPage([420, 595]).drawText(`needle page ${i + 1}`, { x: 40, y: 520, size: 18 });
+  await page.goto("/"); await page.keyboard.press("Escape");
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "PDFを開く", exact: true }).click();
+  await (await chooser).setFiles({ name: "range.pdf", mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()) });
+  await expect(page.locator(".viewer-scroll .page-view[data-rendered=true]").first()).toBeVisible();
+  await page.keyboard.press("Control+f");
+  await page.getByLabel("PDF内を検索").fill("needle");
+  await expect(page.locator(".search-count")).toContainText("1 / 3 件");
+  const range = page.getByLabel("検索ページ範囲", { exact: true });
+  await range.fill("3,1,1");
+  await expect(page.locator(".search-count")).toContainText("1 / 2 件");
+  await expect(page.locator(".search-results small")).toHaveText(["ページ 1", "ページ 3"]);
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "検索結果をCSV保存", exact: true }).click();
+  const result = await download; expect(result.suggestedFilename()).toBe("range-検索結果.csv");
+  const output = info.outputPath("search.csv"); await result.saveAs(output);
+  const csv = await readFile(output, "utf8");
+  expect(csv).toContain('"1",'); expect(csv).toContain('"3",'); expect(csv).not.toContain('"2",');
+  expect(csv).toContain('"needle","3,1,1"');
+  await range.fill("4");
+  await expect(page.locator(".search-panel")).toContainText("ページは 1〜3 の範囲で指定してください。");
+  await expect(page.getByRole("button", { name: "検索結果をCSV保存", exact: true })).toBeDisabled();
+  await expect(page.locator(".search-results button")).toHaveCount(0);
+  await range.fill(""); await expect(page.locator(".search-count")).toContainText("1 / 3 件");
+  await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+  await expect(page.getByTitle("元に戻す (Ctrl+Z)", { exact: true })).toBeDisabled();
+});

@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, ChevronUp, ChevronDown, X } from "lucide-react";
 import type { DocumentSearch } from "./useDocumentSearch";
+import { saveBytes } from "../platform/files";
+import { searchCsv } from "./searchCsv";
 import { SEARCH_PAGE_SIZE, SEARCH_RESULT_LIMIT } from "./search";
 
-export function SearchPanel({ search, count, focusRequest = 0 }: {
+export function SearchPanel({ search, focusRequest = 0 }: {
   search: DocumentSearch;
-  count: number;
   focusRequest?: number;
 }) {
+  const [saving, setSaving] = useState(false), [saveError, setSaveError] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const [listPage, setListPage] = useState(0);
   const { query, options, hits, current, busy } = search;
@@ -29,6 +31,10 @@ export function SearchPanel({ search, count, focusRequest = 0 }: {
       {query && <button type="button" aria-label="検索をクリア" title="検索をクリア"
         onClick={() => { search.setQuery(""); input.current?.focus(); }}><X size={14} /></button>}
     </label>
+    <label className="search-range">検索ページ範囲
+      <input aria-label="検索ページ範囲" placeholder="全ページ（例: 1-3,5）" value={search.pageRange}
+        onChange={event => search.setPageRange(event.target.value)} />
+    </label>
     <div className="search-options">
       <label><input type="checkbox" checked={options.caseSensitive}
         onChange={(e) => search.setOptions({ ...options, caseSensitive: e.target.checked })} />大文字と小文字を区別</label>
@@ -38,11 +44,20 @@ export function SearchPanel({ search, count, focusRequest = 0 }: {
         onChange={(e) => search.setOptions({ ...options, normalizeWidth: e.target.checked })} />全角と半角を同一視</label>
     </div>
     <div className="search-count">
-      <span role="status" aria-live="polite">{busy ? `検索中… ${search.progress} / ${count} ページ`
+      <span role="status" aria-live="polite">{busy ? `検索中… ${search.progress} / ${search.pageCount} ページ`
         : `${hits.length ? current + 1 : 0} / ${hits.length} 件`}</span>
       <button title="前の検索結果" disabled={busy || !hits.length} onClick={() => search.navigate(-1)}><ChevronUp size={16} /></button>
       <button title="次の検索結果" disabled={busy || !hits.length} onClick={() => search.navigate(1)}><ChevronDown size={16} /></button>
     </div>
+    <button disabled={busy || !hits.length || !!search.error || saving} onClick={() => void (async () => {
+      setSaving(true); setSaveError("");
+      try {
+        await saveBytes(searchCsv(hits, query, options, search.pageRange, search.limited),
+          `${search.documentName.replace(/\.pdf$/i, "")}-検索結果.csv`);
+      } catch (reason) { setSaveError(reason instanceof Error ? reason.message : "検索結果を保存できません。"); }
+      finally { setSaving(false); }
+    })()}>{saving ? "CSVを保存中…" : "検索結果をCSV保存"}</button>
+    {saveError && <p role="alert">{saveError}</p>}
     <p className="hint">Enterで次の結果 · Shift+Enterで前の結果</p>
     {!busy && !search.error && query.trim() && !hits.length && <p className="empty-panel">一致するテキストがありません。</p>}
     {search.error && <p className="warning">{search.error}</p>}

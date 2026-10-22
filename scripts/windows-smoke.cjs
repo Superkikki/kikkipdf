@@ -86,6 +86,73 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_PRODUCTIVITY_ONLY === "1") {
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "レイヤー", exact: true }).click();
+    const layer = page.getByRole("checkbox", { name: "Smoke artwork", exact: true });
+    await expect(layer).not.toBeChecked();
+    await page.getByRole("button", { name: "すべて表示", exact: true }).click(); await expect(layer).toBeChecked();
+    await page.getByRole("button", { name: "表示を反転", exact: true }).click(); await expect(layer).not.toBeChecked();
+    await page.getByRole("button", { name: "すべて非表示", exact: true }).click();
+    await page.keyboard.press("Control+z"); await expect(layer).toBeChecked();
+    await page.keyboard.press("Control+z"); await expect(layer).not.toBeChecked();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+    await page.keyboard.press("Control+f");
+    await page.getByLabel("PDF内を検索").fill("Native Windows fixture");
+    await expect(page.locator(".search-count")).toContainText("1 / 3 件");
+    const range = page.getByLabel("検索ページ範囲", { exact: true });
+    await range.fill("2"); await expect(page.locator(".search-count")).toContainText("1 / 1 件");
+    const csvPath = path.join(process.env.KIKKI_SMOKE_DIR, `native-search-${started}.csv`);
+    const picking = pickNativeFile(csvPath);
+    await page.getByRole("button", { name: "検索結果をCSV保存", exact: true }).click(); await picking;
+    await expect.poll(() => fs.stat(csvPath).then(stat => stat.size).catch(() => 0)).toBeGreaterThan(0);
+    const csv = await fs.readFile(csvPath, "utf8");
+    if (!csv.startsWith("\uFEFF") || !csv.includes('"2",') || csv.includes('"1",') || csv.includes('"3",'))
+      throw Error("Native search CSV did not retain the selected page range");
+    await range.fill("4"); await expect(page.locator(".search-panel")).toContainText("ページは 1〜3 の範囲で指定してください。");
+    await expect(page.getByRole("button", { name: "検索結果をCSV保存", exact: true })).toBeDisabled();
+    await range.fill(""); await expect(page.locator(".search-count")).toContainText("1 / 3 件");
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+    await page.screenshot({ path: path.join(process.env.KIKKI_SMOKE_DIR, "productivity.png") });
+    if (errors.length) throw Error(JSON.stringify(errors));
+    console.log(JSON.stringify({ ok: true, productivity: true, errors, elapsedMs: Date.now() - started }));
+    await browser.close(); return;
+  }
+  if (process.env.KIKKI_SMOKE_CJK_ONLY === "1") {
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".ghost-opening")).toHaveCount(0);
+    const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf");
+    const neighbours = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /Neighbour/ });
+    await expect(neighbours).toHaveCount(3);
+    const before = await Promise.all([0, 1, 2].map(index => neighbours.nth(index).boundingBox()));
+    for (const replacement of ["日本語の変更", "埋め込み文字変更", "文字対応表なし変更"]) {
+      await page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^日本語$/ }).first().click({ position: { x: 3, y: 3 } });
+      const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
+      await expect(input).toHaveValue("日本語"); await input.fill(replacement); await input.press("Enter");
+      await expect(page.locator(".viewer-scroll .editable-text").filter({ hasText: replacement })).toBeVisible();
+    }
+    for (let i = 0; i < 3; i++) {
+      const after = await neighbours.nth(i).boundingBox();
+      expect(after.x).toBeCloseTo(before[i].x, 1); expect(after.y).toBeCloseTo(before[i].y, 1);
+    }
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const saved = await PDFDocument.load(await fs.readFile(fixture));
+    const content = saved.context.enumerateIndirectObjects().flatMap(([, object]) => {
+      if (!(object instanceof PDFRawStream) || object.dict.has(PDFName.of("Subtype"))) return [];
+      try { return [Buffer.from(decodePDFRawStream(object).decode()).toString("latin1")]; } catch { return []; }
+    }).join("\n");
+    if (["93fa967b8cea", "010000010100000201000003", "0cd40e8a07a0"].some(hex => content.toLowerCase().includes(hex))) throw Error("Original source glyph commands remain");
+    const picking = pickNativeFile(fixture);
+    await page.keyboard.press("Control+o"); await picking;
+    for (const replacement of ["日本語の変更", "埋め込み文字変更", "文字対応表なし変更"])
+      await expect(page.locator(".viewer-scroll .textLayer span").filter({ hasText: replacement })).toBeVisible();
+    await expect(page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^日本語$/ })).toHaveCount(0);
+    await page.screenshot({ path: path.join(process.env.KIKKI_SMOKE_DIR, "cjk-saved.png") });
+    if (errors.length) throw Error(JSON.stringify(errors));
+    console.log(JSON.stringify({ ok: true, cjk: true, errors, elapsedMs: Date.now() - started }));
+    await browser.close(); return;
+  }
   if (process.env.KIKKI_SMOKE_UI_ONLY === "1") {
     const dir = process.env.KIKKI_SMOKE_DIR;
     const fixture = path.join(dir, "native-fixture.pdf");

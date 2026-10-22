@@ -1,5 +1,26 @@
 # 検証記録
 
+## 0.23.0のWindows配布物（2026-10-22）
+
+- 標準／埋め込みEncoding CMapの対応拡大、検索結果のCSV保存・検索ページ範囲・レイヤー一括操作、GHOST PROTOCOL起動演出を収録。アプリ内表示・package・Rust・Tauriのバージョンを0.23.0へ統一。
+- `npm run check`でlint・単体テスト300件（40ファイル）・TypeScript・production buildが成功。Rustテスト7件も成功。Viteの依存パッケージ注釈・チャンクサイズ警告あり。
+- `npx playwright test --workers=2`で全138件が成功（5.5分）。検索範囲・CSV保存とレイヤー一括操作、起動演出を含む全機能を回帰確認。通常の画面テストはOSの視差効果軽減設定を使用し、起動演出専用テストでは通常設定も確認。
+- Windows MSVC releaseビルドとNSIS生成が成功。本体・インストーラーのFileVersion／ProductVersionが0.23.0で一致。
+- 最終配布バイナリのWindows WebView2で、レイヤー一括表示・反転・非表示・Undoと、検索範囲・不正範囲の拒否・CSVのネイティブ保存・保存状態の保持を検証（2.2秒、JavaScriptエラー0件）。
+- 最終配布バイナリのWindows WebView2フルnative smokeが成功（165秒、JavaScriptエラー0件）。直接編集と元文字の除去、OCR、暗号化／復号、フォームとXFDF、しおり、添付、リンク、レイヤープリセット、PDF比較、コメントCSV／XFDFなどを確認。開発途中の初回はWebView2のデバッグ接続が開始されず、新しい一時プロファイルで再実行して成功。追加機能を含む最終バイナリでも再検証して成功。
+- 日本語のShift-JIS、4バイトの埋め込みEncoding CMap、ToUnicodeなしのIdentity-HをWindows上でクリック編集。元描画の除去、隣接文字の位置保持、ネイティブ保存と保存PDFの再読み込みが成功（3.7秒、JavaScriptエラー0件）。初回のWindows表示倍率によるクリック位置の重なりは、文字領域の左上を指定するテストへ修正。
+- `npm run assets`でローカル資産を確認。配布物は`Kikki.PDF_0.23.0_x64-setup.exe`（23,120,272 bytes）、同名ZIP（23,080,823 bytes）、`SHA256SUMS-0.23.0.txt`。生成物・配布コピー・ZIP内容の一致、ZIP整合性とSHA-256を確認。
+- 配布物は未署名。新規Windows環境でのインストール／アンインストールと、Acrobat等の他製品との相互運用は未検証。
+
+## 開発中：既存フォントの直接編集の対応拡大（2026-10-17）
+
+- 標準CMapと埋め込みEncoding CMapを追加。Shift-JIS・EUC・UniJIS、日本語のIdentity-HでToUnicodeなし、GBK・Big5・UHC、縦書きRKSJ、1〜4バイト文字コード、CIDと元のW／DWの対応、ToUnicodeの優先、空白への文字間隔指定、標準14書体のFontDescriptor付き辞書、既定の文字対応を確認できるType1・MMType1・TrueTypeを単体検証。
+- 同梱の168個のpacked CMapを読み込み、継承を確認。各ファイルの全エントリ・コード範囲・縦横指定・継承元について、インストール済みPDF.jsの独立したデコーダーの結果と一致することを確認。
+- 元文字の除去、後続文字の位置と縦書き原点、プロジェクト往復、保存PDFの再読み込みを確認。不正・不明・過大な対応表、途切れた文字コード、未知のCIDコレクションは拒否。
+- `npm run check`でlint・単体テスト297件（38ファイル）・TypeScript・production buildが成功。Viteの依存パッケージ注釈・チャンクサイズの警告あり。
+- `npx playwright test tests/e2e/cjk-direct-text.spec.ts tests/e2e/direct-text.spec.ts --workers=2`で19件が成功（5.2分）。Shift-JIS、ToUnicodeなしの日本語Identity-H、4バイトの埋め込みEncoding CMapのクリック編集・日本語入力・元文字の除去・後続文字の位置・PDF保存を検証。既存の直接編集・背景・共有Form・各種文字対応・輪郭線・回転文字も回帰確認。
+- この開発時点では0.22.0インストーラーに未反映。0.23.0で配布物を更新しWindows実機検証を実施（上記）。他製品との相互運用は未検証。
+
 ## 0.22.0のWindows配布物（2026-10-15）
 
 - 文字の直接編集の対応拡大を含むソースを専用の作業ディレクトリでビルド。

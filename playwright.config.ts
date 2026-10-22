@@ -6,6 +6,8 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:1420",
     headless: true,
+    // Editing tests use the OS motion preference; startup.spec covers the full intro.
+    reducedMotion: "reduce",
     viewport: { width: 1440, height: 940 },
     launchOptions: process.env.CHROMIUM_PATH
       ? { executablePath: process.env.CHROMIUM_PATH }

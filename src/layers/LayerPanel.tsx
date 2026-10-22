@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { uid, type DocumentModel, type Source } from "../state/model";
 import { documentStore } from "../state/store";
 import { usePrompt } from "../components/Prompt";
+import { setAllLayerVisibility } from "./bulk";
 import { renameLayer, resetLayerNames } from "./commands";
 import { applyLayerPreset, deleteLayerPreset, layerPresets, saveLayerPreset } from "./presets";
 import { readLayers, resetLayerVisibility, setLayerVisibility, type LayerInfo } from "./model";
@@ -57,6 +58,14 @@ function SourceLayers({ source }: { source: Source }) {
       <p className="hint">表示状態を一括変更します。ロック・排他設定と現在の階層を保持します。</p>
       <p className="hint">作成したプリセットは上書き・削除できます。元PDFのプリセットは保持します。</p>
       {presets.filter(preset => preset.error).map(preset => <p className="hint" key={preset.id}>{preset.name}: {preset.error}</p>)}
+    </div>}
+    {!!info?.groups.length && <div className="layer-bulk" role="group" aria-label="レイヤーの一括表示操作">
+      {([['show', 'すべて表示'], ['hide', 'すべて非表示'], ['invert', '表示を反転']] as const).map(([mode, label]) =>
+        <button key={mode} disabled={info.groups.every(group => group.locked)} onClick={() => {
+          try { documentStore.execute(setAllLayerVisibility(source.id, mode, info)); setError(""); }
+          catch (reason) { setError(reason instanceof Error ? reason.message : "表示を変更できません。"); }
+        }}>{label}</button>)}
+      <p className="hint">ロックされたレイヤーは保持します。排他設定と競合する場合は全件を中止します。</p>
     </div>}
     {info?.rows.map((row, index) => {
       if (!row.id) return <div className="layer-heading" key={index} style={{ paddingLeft: row.depth * 12 }}>{row.name}</div>;

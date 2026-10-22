@@ -1940,3 +1940,24 @@ progress {
   .comparison-text-columns { grid-template-columns: 1fr; }
   .comparison-images canvas { max-width: 380px; }
 }
+
+.search-range {
+  display: grid;
+  gap: 5px;
+  margin: 10px 0;
+  font-size: 12px;
+}
+.search-range input {
+  width: 100%;
+  min-width: 0;
+}
+.layer-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+.layer-bulk .hint {
+  flex-basis: 100%;
+  margin: 0;
+}

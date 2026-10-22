@@ -493,6 +493,7 @@ async function analyzeContent(
         let advance = 0,
           text = "", extractedText = "",
           verified = !!font;
+        let fontFailure: string | undefined;
         try {
           for (const item of items) {
             if (typeof item === "number")
@@ -509,7 +510,7 @@ async function analyzeContent(
                   verticalBoxes.push({ x: m[4] - vx / 1000 * state.size * state.tz * m[0] - base.x,
                     y: baseline - state.size * m[3], width: glyph.width / 1000 * state.size * state.tz * m[0],
                     height: state.size * m[3] * 1.25 });
-                  advance += dy / 1000 * state.size + state.tc;
+                  advance += dy / 1000 * state.size + state.tc + (glyph.wordSpace ? state.tw : 0);
                 } else advance += ((glyph.width / 1000) * state.size + state.tc +
                     (glyph.wordSpace ? state.tw : 0)) * state.tz;
               }
@@ -519,8 +520,9 @@ async function analyzeContent(
               verified = false;
             }
           }
-        } catch {
+        } catch (error) {
           verified = false;
+          if (error instanceof Error) fontFailure = `フォント「${font?.name.slice(0, 120) || state.font}」: ${error.message}`;
         }
         const horizontal =
             Math.abs(m[1]) < 1e-7 &&
@@ -624,8 +626,8 @@ async function analyzeContent(
             text: `${prefix}${state.tc ? "0 Tc " : ""}[${format((-advance * 1000) / (state.size * (vertical ? 1 : state.tz)))}] TJ${state.tc ? ` ${format(state.tc)} Tc` : ""}`,
           });
         } else
-          unsupported ??=
-            "この文字のフォント・文字組み・クリッピングは直接編集の対象外です。";
+          unsupported ??= fonts.unsupported.get(state.font) ?? fontFailure ??
+            "この文字の文字組み・クリッピング・描画効果は直接編集の対象外です。";
         if (!verified) positionValid = false;
         else tm = multiply(tm, [1, 0, 0, 1, vertical ? 0 : advance, vertical ? advance : 0]);
         break;
