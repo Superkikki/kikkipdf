@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { PDFDocument, PDFDict, PDFName, PDFNumber, PDFRawStream, StandardFonts, degrees } from "pdf-lib";
 import { readFile } from "node:fs/promises";
-import { inspectDirectText } from "../src/direct/content";
+import { inspectDirectText, analyzePage } from "../src/direct/content";
 import { directImageEdits, type DirectImageRun } from "../src/direct/model";
 import { emptyDocument, blankPage, newObject, type DocumentModel } from "../src/state/model";
 import { addObject, updateObject, duplicatePage, deleteObject, revertDirectImage } from "../src/commands/document";
@@ -136,7 +136,7 @@ describe("existing PDF image editing", () => {
       await expect(exportPdf(invalid)).rejects.toThrow();
     }
   });
-  it("refuses rotated images and keeps edits inside an enclosing Form's BBox", async () => {
+  it("refuses non-quarter-turn rotations and keeps edits inside an enclosing Form's BBox", async () => {
     expect((await inspect(await fixture(false, true))).images).toHaveLength(1);
     const original = await fixture(true), run = (await inspect(original)).images![0], o = object(run);
     const d = addObject(original.pages[0].id, o).apply(original);
@@ -205,4 +205,65 @@ it("retains named image color spaces from nested resource dictionaries", async (
   expect(copied.dict.get(PDFName.of("ColorSpace"))).toBe(PDFName.of("DeviceRGB"));
   node.resources!.set(PDFName.of("ColorSpace"), input.context.obj({ SharedRGB: "SharedRGB" }));
   await expect(isolatedImagePdf(await input.save(), reference)).rejects.toThrow("循環");
+});
+
+for (const [label, matrix, expected] of [
+  ["normal", [80, 0, 0, 40, 40, 220], [90, 0, 0, 60, 150, 170]],
+  ["90", [0, 80, -40, 0, 100, 200], [0, 60, -90, 0, 240, 170]],
+  ["180", [-80, 0, 0, -40, 120, 220], [-90, 0, 0, -60, 240, 230]],
+  ["270", [0, -80, 40, 0, 40, 280], [0, -60, 90, 0, 150, 230]],
+  ["horizontal reflection", [-80, 0, 0, 40, 120, 220], [-90, 0, 0, 60, 240, 170]],
+  ["vertical reflection", [80, 0, 0, -40, 40, 260], [90, 0, 0, -60, 150, 230]],
+  ["transposed reflection", [0, 80, 40, 0, 40, 180], [0, 60, 90, 0, 150, 170]],
+  ["antitransposed reflection", [0, -80, -40, 0, 120, 260], [0, -60, -90, 0, 240, 230]],
+] as const) {
+  it(`moves and resizes ${label} image placement without changing orientation or source pixels`, async () => {
+    const pdf = await PDFDocument.create(), page = pdf.addPage([420, 400]);
+    const image = await pdf.embedPng(await readFile("src-tauri/icons/32x32.png")); await pdf.flush();
+    page.node.set(PDFName.of("Resources"), pdf.context.obj({ XObject: { Im: image.ref } }));
+    page.node.set(PDFName.of("Contents"), pdf.context.register(pdf.context.flateStream(`q ${matrix.join(" ")} cm /Im Do Q`)));
+    const bytes = await pdf.save(), model = emptyDocument("oriented.pdf");
+    model.sources.s = { id: "s", name: "source.pdf", bytes };
+    model.pages = [{ ...blankPage(), width: 420, height: 400, sourceId: "s", sourceIndex: 0 }];
+    const run = (await inspect(model)).images![0]; expect(run).toBeDefined();
+    const o = object(run); Object.assign(o, { x: 150, y: 170, width: 90, height: 60 }); model.pages[0].objects = [o];
+    const restored = await openProject(await saveProject(model));
+    const saved = await exportPdf(restored), output = await PDFDocument.load(saved);
+    const analysis = await analyzePage(output.getPage(0), 0);
+    expect(analysis.images).toHaveLength(1);
+    analysis.images[0].matrix.forEach((value, index) => expect(value).toBeCloseTo(expected[index], 5));
+    expect((await inspectDirectText(saved, 0)).images![0]).toMatchObject({ x: 150, y: 170, width: 90, height: 60 });
+    const pixels = (doc: typeof pdf) => doc.context.enumerateIndirectObjects().flatMap(([, value]) =>
+      value instanceof PDFRawStream && value.dict.get(PDFName.of("Subtype")) === PDFName.of("Image") ? [Array.from(value.contents)] : []);
+    expect(pixels(output)).toEqual(pixels(await PDFDocument.load(bytes)));
+  });
+}
+
+it("retains image orientation in a rotated shared nested Form with a nonzero CropBox and rotated output page", async () => {
+  const original = await fixture(true), input = await PDFDocument.load(original.sources.s.bytes);
+  const pdf = await PDFDocument.create(), page = pdf.addPage([800, 800]), form = await pdf.embedPage(input.getPage(0)); await form.embed();
+  page.node.set(PDFName.of("Resources"), pdf.context.obj({ XObject: { Part: form.ref } }));
+  page.node.set(PDFName.of("Contents"), pdf.context.register(pdf.context.flateStream("q 0 1 -1 0 400 0 cm /Part Do Q")));
+  page.setCropBox(10, 20, 700, 700);
+  const model = emptyDocument(); model.sources.s = { id: "s", name: "nested.pdf", bytes: await pdf.save() };
+  model.pages = [{ ...blankPage(), sourceId: "s", sourceIndex: 0, width: 700, height: 700, rotation: 90 }];
+  const before = (await inspect(model)).images!; expect(before).toHaveLength(2);
+  const o = object(before[0]); Object.assign(o, { x: o.x + 5, y: o.y + 5, width: o.width * 0.8, height: o.height * 0.9 });
+  model.pages[0].objects = [o];
+  const output = await PDFDocument.load(await exportPdf(model)), after = (await analyzePage(output.getPage(0), 0)).images;
+  expect(after).toHaveLength(2); expect(output.getPage(0).getRotation().angle).toBe(90);
+  const expected = [0, o.height, -o.width, 0, 10 + o.x + o.width, 20 + 700 - o.y - o.height];
+  after[0].matrix.forEach((value, index) => expect(value).toBeCloseTo(expected[index], 5));
+  for (const key of ["x", "y", "width", "height"] as const) expect(after[1][key]).toBeCloseTo(before[1][key], 6);
+});
+
+it("refuses tiny non-orthogonal and singular image transforms instead of treating small coefficients as axis alignment", async () => {
+  for (const matrix of [[1e-8, 1e-8, -1e-8, 1e-8, 0, 0], [1e-8, 1e-8, 1e-8, 1e-8, 0, 0]]) {
+    const pdf = await PDFDocument.create(), page = pdf.addPage();
+    const image = await pdf.embedPng(await readFile("src-tauri/icons/32x32.png")); await pdf.flush();
+    page.node.set(PDFName.of("Resources"), pdf.context.obj({ XObject: { Im: image.ref } }));
+    page.node.set(PDFName.of("Contents"), pdf.context.register(pdf.context.flateStream(`q ${matrix.map(n => n.toFixed(10)).join(" ")} cm /Im Do Q`)));
+    const result = await inspectDirectText(await pdf.save(), 0);
+    expect(result.images).toHaveLength(0); expect(result.unsupported).toBeTruthy();
+  }
 });

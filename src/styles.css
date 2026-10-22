@@ -1961,3 +1961,16 @@ progress {
   flex-basis: 100%;
   margin: 0;
 }
+
+.comment-bulk {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.comment-bulk legend { font-size: 12px; }
+.comment-bulk label { display: grid; gap: 5px; font-size: 12px; }
+.comment-bulk .hint { margin: 0; }

@@ -104,9 +104,10 @@ const initialState = (): GraphicsState => ({
   rise: 0, render: 0, color: "#000000", opacity: 1, strokeOpacity: 1, strokeColor: "#000000", lineWidth: 1, strokeEffects: false, clip: false, clipBounds: [], effects: false,
 });
 interface AnalysisBudget { bytes: number; operations: number; forms: number; }
+interface AnalyzedImage extends DirectImageRun { matrix: Matrix }
 interface Analyzed extends DirectInspection {
   bytes: Uint8Array;
-  images: DirectImageRun[];
+  images: AnalyzedImage[];
   replacements: Map<number, { start: number; end: number; text: string; metadata?: { start: number; end: number; text: string } }>;
   hash: string;
   resources: PDFDict | undefined;
@@ -175,7 +176,7 @@ async function analyzeContent(
   if (budget.operations > 200000) throw Error("Form XObjectの描画命令が多すぎます。");
   const children: Analyzed["children"] = new Map();
   const base = page.getCropBox();
-  const images: DirectImageRun[] = [];
+  const images: AnalyzedImage[] = [];
   const runs: DirectTextRun[] = [],
     replacements = new Map<
       number,
@@ -362,14 +363,23 @@ async function analyzeContent(
         const subtype = stream.dict.lookupMaybe(key("Subtype"), PDFName)?.decodeText();
         if (subtype === "Image") {
           const [a, b, c, d, e, f] = state.ctm;
-          const box = { x: e - base.x, y: base.y + base.height - f - d, width: a, height: d };
-          if (Math.abs(b) < 1e-7 && Math.abs(c) < 1e-7 && a > 0 && d > 0 &&
-              [a, d, e, f].every(Number.isFinite) && !state.clip && !state.clipBounds.length && !state.effects && state.opacity > 0 &&
+          const xs = [e, e + a, e + c, e + a + c], ys = [f, f + b, f + d, f + b + d];
+          const box = { x: Math.min(...xs) - base.x, y: base.y + base.height - Math.max(...ys),
+            width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
+          const u = Math.hypot(a, b), v = Math.hypot(c, d), determinant = a * d - b * c;
+          // Compare directions, not absolute coefficients: a tiny skew must not
+          // be mistaken for a quarter turn merely because its scale is small.
+          const aligned = u > 0 && v > 0 && (
+            Math.abs(b) <= u * 1e-10 && Math.abs(c) <= v * 1e-10 ||
+            Math.abs(a) <= u * 1e-10 && Math.abs(d) <= v * 1e-10);
+          if (aligned && Number.isFinite(determinant) && determinant !== 0 &&
+              Object.values(box).every(Number.isFinite) && box.width > 0 && box.height > 0 &&
+              state.ctm.every(Number.isFinite) && !state.clip && !state.clipBounds.length && !state.effects && state.opacity > 0 &&
               !marked.some(Boolean) && !stream.dict.has(key("OC")) && !stream.dict.has(key("F")) &&
               bounds.every(limit => containsBox(limit, box)))
-            images.push({ ...box, bounds, reference: { sourceIndex, contentHash: hash,
+            images.push({ ...box, matrix: [...state.ctm], bounds, reference: { sourceIndex, contentHash: hash,
               operatorIndex, resourceName: args[0].name, ...(formPath.length ? { formPath } : {}) } });
-          else unsupported ??= "クリッピング・回転など特殊な既存画像は直接編集できません。";
+          else unsupported ??= "クリッピング・90度単位以外の回転など特殊な既存画像は直接編集できません。";
           break;
         }
         if (subtype !== "Form" || stream.dict.has(key("Group")) ||
@@ -668,7 +678,7 @@ export async function rewrittenPage(
       throw Error("直接編集する元の文字を確認できません。保存を停止しました。");
     selected.add(id);
   }
-  const images = new Map<string, { run: DirectImageRun; edit: DirectImageEdit }>();
+  const images = new Map<string, { run: AnalyzedImage; edit: DirectImageEdit }>();
   for (const edit of imageEdits) {
     const ref = edit.reference, id = textReferenceKey(ref);
     const run = analysis.images.find(r => textReferenceKey(r.reference) === id);
@@ -701,8 +711,17 @@ export async function rewrittenPage(
       const changed = images.get(textReferenceKey(run.reference));
       if (!changed) continue;
       const { edit } = changed, op = operations[run.reference.operatorIndex];
-      const correction = [edit.width / run.width, 0, 0, edit.height / run.height,
-        (edit.x - run.x) / run.width, (run.y + run.height - edit.y - edit.height) / run.height];
+      // Conjugate a page-space box change into this image's local coordinates.
+      // This retains its original rotation/reflection, including nested Form transforms.
+      const [a, b, c, d, e, f] = run.matrix, determinant = a * d - b * c;
+      if (!Number.isFinite(determinant) || determinant === 0) throw Error("画像の変形が不正です。");
+      const inverse: Matrix = [d / determinant, -b / determinant, -c / determinant, a / determinant,
+        (c * f - d * e) / determinant, (b * e - a * f) / determinant];
+      const base = page.getCropBox(), sx = edit.width / run.width, sy = edit.height / run.height;
+      const placement: Matrix = [sx, 0, 0, sy,
+        base.x + edit.x - sx * (base.x + run.x),
+        base.y + base.height - edit.y - edit.height - sy * (base.y + base.height - run.y - run.height)];
+      const correction = multiply(inverse, multiply(placement, run.matrix));
 
       if (resources === node.resources && resources) {
         resources = resources.clone();

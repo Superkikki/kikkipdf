@@ -1,6 +1,19 @@
-const { PDFDocument, StandardFonts, PDFOperator, PDFName, PDFDict, PDFHexString, PDFString } = require("pdf-lib");
+const { PDFDocument, StandardFonts, PDFOperator, PDFName, PDFDict, PDFHexString, PDFString, degrees } = require("pdf-lib");
 const { writeFile, readFile } = require("node:fs/promises");
 (async () => {
+  if (process.argv[3] === "review-images") {
+    const pdf = await PDFDocument.create(), page = pdf.addPage([420, 595]);
+    const image = await pdf.embedPng(await readFile(require("node:path").join(__dirname, "..", "src-tauri", "icons", "32x32.png")));
+    page.drawImage(image, { x: 100, y: 350, width: 80, height: 40, rotate: degrees(90) });
+    page.drawImage(image, { x: 250, y: 350, width: 80, height: 40 });
+    page.drawText("Batch image fixture", { x: 40, y: 550, size: 14 });
+    for (let i = 0; i < 4; i++) page.node.addAnnot(pdf.context.register(pdf.context.obj({
+      Type: "Annot", Subtype: i === 3 ? "Highlight" : "Text", Rect: [30 + i * 30, 30, 50 + i * 30, 50], P: page.ref,
+      Contents: PDFHexString.fromText(`Batch ${i + 1}`), T: PDFString.of("Before"),
+      ...(i === 3 ? { QuadPoints: [120, 50, 140, 50, 120, 30, 140, 30] } : {}),
+    })));
+    await writeFile(process.argv[2], await pdf.save()); return;
+  }
   if (process.argv[3] === "cjk") {
     const pdf = await PDFDocument.create(), page = pdf.addPage([420, 595]);
     const neighbour = await pdf.embedFont(StandardFonts.Helvetica);

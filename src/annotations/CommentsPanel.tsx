@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import type { AnnotationEdit, DocumentModel, ReviewStatus } from "../state/model";
 import { documentStore } from "../state/store";
 import { deleteObject, updateObject } from "../commands/document";
+import { usePrompt } from "../components/Prompt";
+import { batchComments, type CommentBatchAction } from "./bulk";
 import { editAnnotation } from "./commands";
 import { buildComments, filterComments, readComments, commentTypes, reviewStatuses, type ImportedComment } from "./comments";
 import { commentsCsv } from "./commentCsv";
@@ -13,6 +15,8 @@ import { flushInlineText } from "../editor/flushInlineText";
 import { pickFiles, saveBytes } from "../platform/files";
 
 export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id: string) => void }) {
+  const prompt = usePrompt();
+  const [batchReview, setBatchReview] = useState<ReviewStatus>("Accepted");
   const [loaded, setLoaded] = useState<{ sources: DocumentModel["sources"]; comments: ImportedComment[] }>();
   const [error, setError] = useState("");
   const [saveError, setSaveError] = useState("");
@@ -80,6 +84,37 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
       setSaveError(reason instanceof Error ? reason.message : "コメント一覧を保存できませんでした。");
     } finally { setSaving(false); }
   }
+  async function applyBatch(kind: CommentBatchAction["kind"]) {
+    if (!flushInlineText()) return;
+    setSaveError(""); setImportStatus(""); setSaving(true);
+    try {
+      const snapshot = documentStore.document;
+      if (!snapshot || snapshot.id !== model.id || loaded?.sources !== snapshot.sources) throw Error("コメントの読み込み後に再度実行してください。");
+      const all = filterComments(buildComments(snapshot, loaded.comments), { query, author, status, pageId, subtype });
+      const rows = all.filter(row => row.editable && (kind !== "review" || row.reviewable));
+      if (!rows.length) return;
+      if (rows.length > 5000) throw Error("コメントの一括操作は5000件までです。条件を絞り込んでください。");
+      let action: CommentBatchAction;
+      if (kind === "delete") {
+        const result = await prompt.ask({ title: "コメントを一括削除", danger: true, confirm: "削除",
+          message: `絞り込み結果のうち、編集できる${rows.length}件を削除します。Undoで戻せます。` });
+        if (!result) return;
+        action = { kind };
+      } else if (kind === "author") {
+        const common = rows.every(row => row.author === rows[0].author) ? rows[0].author : "";
+        const result = await prompt.ask({ title: "作成者を一括変更", message: `${rows.length}件の作成者を変更します。空欄にすると作成者を解除します。`,
+          fields: [{ key: "author", label: "一括変更する作成者", value: common }] });
+        if (!result) return;
+        action = { kind, author: result.author };
+      } else action = { kind, status: batchReview };
+      documentStore.execute(batchComments(snapshot, rows, action));
+      resetList();
+      setImportStatus(documentStore.document === snapshot ? "変更はありません。" : `${rows.length}件を一括変更しました。Undoで戻せます。`);
+    } catch (reason) { setSaveError(reason instanceof Error ? reason.message : "コメントを一括変更できません。"); }
+    finally { setSaving(false); }
+  }
+  const editableCount = filtered.filter(row => row.editable).length;
+  const reviewableCount = filtered.filter(row => row.editable && row.reviewable).length;
   const cannotExport = loaded?.sources !== sources || !!error || saving;
   return <>
     <div className="comment-filters">
@@ -126,6 +161,18 @@ export function CommentsPanel({ model, jump }: { model: DocumentModel; jump: (id
       <button disabled={cannotExport || !comments.length} onClick={() => void saveComments(false, "xfdf")}>全件をXFDF保存</button>
       <button disabled={cannotExport || !filtered.length} onClick={() => void saveComments(true, "xfdf")}>絞り込み結果をXFDF保存</button>
     </div>
+    <fieldset className="comment-bulk" disabled={cannotExport}>
+      <legend>絞り込み結果を一括変更</legend>
+      <p className="hint">編集できる{editableCount}件が対象です。一覧の次ページも含めます（最大5000件）。</p>
+      <label>一括レビュー状態<select aria-label="一括レビュー状態" value={batchReview}
+        onChange={event => setBatchReview(event.target.value as ReviewStatus)}>
+        {Object.entries(reviewStatuses).map(([value, name]) => <option key={value} value={value}>{name}</option>)}
+      </select></label>
+      <button disabled={!reviewableCount || reviewableCount > 5000} onClick={() => void applyBatch("review")}>メモ注釈{reviewableCount}件を一括レビュー</button>
+      <button disabled={!editableCount || editableCount > 5000} onClick={() => void applyBatch("author")}>作成者を一括変更</button>
+      <button className="danger" disabled={!editableCount || editableCount > 5000} onClick={() => void applyBatch("delete")}>絞り込み結果を一括削除</button>
+    </fieldset>
+    {prompt.dialog}
     {saveError && <p className="warning" role="alert">{saveError}</p>}
     {loaded?.sources !== sources && !error && <p className="empty-panel" role="status">コメントを読み込み中…</p>}
     {filtered.slice(start, start + 100).map((comment) => <button

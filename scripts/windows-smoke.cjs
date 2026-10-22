@@ -86,6 +86,45 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_REVIEW_IMAGES_ONLY === "1") {
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "コメント", exact: true }).click();
+    const cards = page.locator(".comment-card"); await expect(cards).toHaveCount(4);
+    await page.getByLabel("一括レビュー状態", { exact: true }).selectOption("Completed");
+    await page.getByRole("button", { name: "メモ注釈3件を一括レビュー", exact: true }).click();
+    await expect(cards.first()).toContainText("完了");
+    await page.getByRole("button", { name: "作成者を一括変更", exact: true }).click();
+    await page.getByLabel("一括変更する作成者", { exact: true }).fill("Native Team");
+    await page.getByRole("dialog").getByRole("button", { name: "適用", exact: true }).click();
+    await expect(cards.last()).toContainText("Native Team");
+    await page.screenshot({ path: path.join(process.env.KIKKI_SMOKE_DIR, "review-comments.png") });
+    await page.getByRole("button", { name: "絞り込み結果を一括削除", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "削除", exact: true }).click(); await expect(cards).toHaveCount(0);
+    await page.getByTitle("元に戻す (Ctrl+Z)", { exact: true }).click(); await expect(cards).toHaveCount(4);
+    await page.getByRole("button", { name: "ツール", exact: true }).click(); await page.getByRole("button", { name: "既存画像", exact: true }).click();
+    await page.getByRole("button", { name: "既存画像 1", exact: true }).dblclick();
+    for (const [key, value] of Object.entries({ x: 80, y: 185, width: 60, height: 100 })) await page.getByLabel(key, { exact: true }).fill(String(value));
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf");
+    const saved = await PDFDocument.load(await fs.readFile(fixture)), annots = saved.getPage(0).node.Annots();
+    if (annots.size() !== 4) throw Error("Bulk undo lost annotations");
+    for (let i = 0; i < 4; i++) {
+      const annotation = annots.lookup(i, PDFDict);
+      if (annotation.lookup(PDFName.of("T"), PDFHexString).decodeText() !== "Native Team") throw Error("Bulk author missing");
+      if (i < 3 && annotation.lookup(PDFName.of("State"), PDFString).decodeText() !== "Completed") throw Error("Bulk review missing");
+      if (i === 3 && annotation.has(PDFName.of("State"))) throw Error("Review modified a non-Text annotation");
+    }
+    const picking = pickNativeFile(fixture); await page.keyboard.press("Control+o"); await picking;
+    await page.getByRole("button", { name: "ツール", exact: true }).click(); await page.getByRole("button", { name: "既存画像", exact: true }).click();
+    const images = page.locator(".viewer-scroll .existing-image-layer rect"); await expect(images).toHaveCount(2);
+    for (const [key, value] of Object.entries({ x: 80, y: 185, width: 60, height: 100 }))
+      await expect.poll(async () => Number(await images.first().getAttribute(key))).toBeCloseTo(value, 5);
+    await page.screenshot({ path: path.join(process.env.KIKKI_SMOKE_DIR, "review-images.png") });
+    if (errors.length) throw Error(JSON.stringify(errors));
+    console.log(JSON.stringify({ ok: true, reviewImages: true, errors, elapsedMs: Date.now() - started }));
+    await browser.close(); return;
+  }
   if (process.env.KIKKI_SMOKE_PRODUCTIVITY_ONLY === "1") {
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "レイヤー", exact: true }).click();
