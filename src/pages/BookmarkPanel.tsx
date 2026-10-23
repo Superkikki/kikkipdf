@@ -15,6 +15,7 @@ import {
 import { validatedLinkUrl } from "../links/target";
 import { uid, type BookmarkModel, type DocumentModel, type BookmarkDestination } from "../state/model";
 import { captureBookmarkLocation } from "../viewer/bookmarkNavigation";
+import { BookmarkFileActions } from "./BookmarkFileActions";
 import { BookmarkLocationEditor } from "./BookmarkLocationEditor";
 import { documentStore } from "../state/store";
 import {
@@ -151,6 +152,7 @@ export function BookmarkPanel({
           placeholder="名前で絞り込み"
         />
       </label>
+      <BookmarkFileActions model={model} query={query} />
       <div className="form-kind-buttons">
         <button
           disabled={!nodes.some((b) => b.children.length) || !!query.trim()}

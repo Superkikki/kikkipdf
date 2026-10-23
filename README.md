@@ -2,9 +2,19 @@
 
 Tauri 2 / React / TypeScript / Vite / Rust で作った、ローカル処理のPDF編集デスクトップアプリです。Windows 11を第一対象とし、画面のデザイン・アプリの編集モデル・操作コマンドは独自実装です。PDFの解釈・描画・書き出しにはOSSを使用しています。
 
-**バージョン0.25.0は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
+**バージョン0.26.0は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
 
-Windows配布物は [0.25.0インストーラー](artifacts/windows/Kikki.PDF_0.25.0_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.25.0_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.25.0.txt)も同梱します。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.25.0)からもダウンロードできます。
+Windows配布物は [0.26.0インストーラー](artifacts/windows/Kikki.PDF_0.26.0_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.26.0_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.26.0.txt)も同梱します。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.26.0)からもダウンロードできます。
+
+## 0.26.0：しおりJSONの入出力と検索結果の一括削除
+
+「しおり」→「しおりの入出力・一括削除」で、全件をJSONに書き出して別のPDFへ読み込めます。階層・ページ内の表示位置／倍率・URL・文字色・太字・斜体・折りたたみを保持します。読み込みは既存しおりの後ろへ追加し、各項目に新しいIDを付けます。「ページ番号の補正」に1を指定すると、JSON内の2ページ目は現在の文書の3ページ目に移ります。ページは表示ラベルではなく1始まりの物理ページ番号、位置・倍率は同じPDF座標です。書き出しは検索条件にかかわらず全件で、文書の保存状態・Undo履歴を変更しません。
+
+しおり名の検索結果を子階層ごと一括削除できます。全角／半角・英字の大小を同一視し、名前の一致件数と子を含む削除総数を確認します。検索欄が空なら全件が対象です。削除後はUndo／Redoで戻せます。
+
+入出力・一括削除は合計10000件・24階層まで、JSONはUTF-8・8MBまでです。不正なJSON・URL・参照先・過大な階層、補正後の範囲外ページは全件を中止します。確認中に文書が変わった場合も変更しません。追加・削除はPDF・編集プロジェクト保存に対応。外部URLは自動で開かず、PDFや元ファイルのパス・内部IDはJSONに含めません。
+
+登録フォントの文字組みが完了してから日本語入力を確定した際、保存が進まなくなる場合も修正しました。
 
 ## 0.25.0：レイヤーの順序・見出し階層としおり複製
 
@@ -198,7 +208,7 @@ npm run desktop:build
 通常のWindows/MSVCビルドでは以下を生成します。
 
 - `src-tauri/target/release/kikki-pdf.exe`
-- `src-tauri/target/release/bundle/nsis/Kikki PDF_0.25.0_x64-setup.exe`
+- `src-tauri/target/release/bundle/nsis/Kikki PDF_0.26.0_x64-setup.exe`
 
 NSISはユーザー単位でインストールする日本語・英語対応のインストーラーです。OSSのライセンス本文も同梱します。現時点ではコード署名していません。WebView2未導入の環境ではインストーラーがRuntimeの取得を必要とするため、オフラインでインストールするときは事前にRuntimeを用意してください。
 

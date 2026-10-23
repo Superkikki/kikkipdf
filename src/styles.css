@@ -1981,3 +1981,7 @@ progress {
 .layer-order-editor select { width: 100%; min-width: 0; }
 .layer-order-editor button { margin: 4px 0; }
 .layer-order-buttons { display: flex; gap: 8px; }
+
+.bookmark-file-actions { margin: 10px 0; padding: 8px; border: 1px solid var(--border); border-radius: 8px; }
+.bookmark-file-actions summary { cursor: pointer; }
+.bookmark-file-actions > button { display: block; width: 100%; margin-top: 8px; }

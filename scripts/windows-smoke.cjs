@@ -86,6 +86,40 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_BOOKMARK_FILES_ONLY === "1") {
+    await page.keyboard.press("Escape"); await page.getByRole("button", { name: "しおり", exact: true }).click();
+    const panel = page.locator(".bookmark-panel"), actions = panel.locator(".bookmark-file-actions");
+    await actions.locator("summary").click();
+    const jsonPath = path.join(process.env.KIKKI_SMOKE_DIR, `native-bookmarks-${started}.json`);
+    const savePick = pickNativeFile(jsonPath); await actions.getByRole("button", { name: "しおりJSONを書き出す", exact: true }).click(); await savePick;
+    await expect(actions.getByRole("status")).toContainText("JSONへ書き出しました");
+    const data = JSON.parse(await fs.readFile(jsonPath, "utf8"));
+    if (data.format !== "kikki-pdf-bookmarks" || data.bookmarks[0].children[0].children[0].page !== 2 || data.bookmarks[0].id) throw Error("Bookmark JSON export failed");
+    await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+    const importPick = pickNativeFile(jsonPath); await actions.getByRole("button", { name: "しおりJSONを読み込む", exact: true }).click(); await importPick;
+    await page.getByLabel("ページ番号の補正", { exact: true }).fill("1");
+    await page.getByRole("dialog").getByRole("button", { name: "追加", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "Root", exact: true })).toHaveCount(2);
+    await panel.getByRole("button", { name: "すべて展開", exact: true }).click();
+    await panel.getByRole("button", { name: "Needle", exact: true }).nth(1).click(); await expect(page.getByLabel("ページ番号", { exact: true })).toHaveValue("3");
+    const search = panel.getByLabel("しおりを検索", { exact: true }); await search.fill("needle");
+    await actions.getByRole("button", { name: "絞り込んだしおりを一括削除", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "削除", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "Needle", exact: true })).toHaveCount(0);
+    await page.getByTitle("元に戻す (Ctrl+Z)", { exact: true }).click(); await expect(panel.getByRole("button", { name: "Needle", exact: true })).toHaveCount(2); await search.fill("");
+    await page.getByRole("button", { name: "保存", exact: true }).click(); await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf"), pdf = await PDFDocument.load(await fs.readFile(fixture)), n = PDFName.of;
+    const root = pdf.catalog.lookup(n("Outlines"), PDFDict).lookup(n("First"), PDFDict), imported = root.lookup(n("Next"), PDFDict);
+    const leaf = imported.lookup(n("First"), PDFDict).lookup(n("First"), PDFDict), destination = leaf.lookup(n("Dest"), PDFArray);
+    if (destination.get(0).toString() !== pdf.getPage(2).ref.toString()) throw Error("Imported bookmark offset not saved");
+    const recents = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("recent_documents"));
+    if (recents.some(value => value.toLowerCase().endsWith(".json"))) throw Error("JSON entered recent PDF list");
+    const openPick = pickNativeFile(fixture); await page.keyboard.press("Control+o"); await openPick;
+    await page.getByRole("button", { name: "しおり", exact: true }).click(); await expect(page.locator(".bookmark-panel").getByRole("button", { name: "Root", exact: true })).toHaveCount(2);
+    await page.screenshot({ path: path.join(process.env.KIKKI_SMOKE_DIR, "bookmark-files.png") });
+    if (errors.length) throw Error(JSON.stringify(errors));
+    console.log(JSON.stringify({ ok: true, bookmarkFiles: true, errors, elapsedMs: Date.now() - started })); await browser.close(); return;
+  }
   if (process.env.KIKKI_SMOKE_ORGANIZATION_ONLY === "1") {
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "レイヤー", exact: true }).click();

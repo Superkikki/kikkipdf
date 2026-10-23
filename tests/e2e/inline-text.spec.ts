@@ -305,6 +305,8 @@ test("font errors and IME retain drafts through page navigation, object clicks a
   await editor(page).dispatchEvent("compositionstart");
   await editor(page).fill("Composed retained text");
   await retainedAfterNavigation("Composed retained text");
+  // Ensure composition ends after the custom-font layout has already settled.
+  await expect(editor(page)).toHaveAttribute("data-layout-ready", "true");
   await editor(page).dispatchEvent("compositionend", { data: "Composed retained text" });
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "保存", exact: true }).click();

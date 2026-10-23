@@ -209,9 +209,12 @@ export function InlineTextEditor({
       onCompositionStart={() => { composing.current = true; }}
       onCompositionEnd={e => {
         composing.current = false;
+        const textChanged = latest.current.draft.text !== e.currentTarget.value;
         setValue(e.currentTarget.value);
         latest.current.draft.text = e.currentTarget.value;
-        if (latest.current.draft.font === "custom") latest.current.pending = true;
+        // A final IME input event may already have produced this exact layout.
+        // Marking it pending again without a state change would never resolve.
+        if (latest.current.draft.font === "custom" && textChanged) latest.current.pending = true;
         if (latest.current.draft.font !== "custom" &&
           /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303f\uff00-\uffef]/u.test(e.currentTarget.value)) {
           latest.current.draft.font = "japanese";
