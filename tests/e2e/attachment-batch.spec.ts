@@ -1,0 +1,53 @@
+import { test, expect } from "@playwright/test";
+import { PDFDocument } from "pdf-lib";
+import { unzipSync } from "fflate";
+import { readFile } from "node:fs/promises";
+import { attachmentEntries } from "../../src/attachments/pdfAttachments";
+import { openProject, saveProject } from "../../src/state/project";
+import { emptyDocument, blankPage } from "../../src/state/model";
+
+test("filters mixed attachments, exports a unique ZIP without edits, deletes/restores atomically and saves", async ({ page }, info) => {
+  const pdf = await PDFDocument.create(); pdf.addPage();
+  await pdf.attach(Buffer.from("Original"), "file.txt", { description: "Team資料" }); await pdf.attach(Buffer.from("Other"), "other.txt");
+  const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+  await page.goto("/"); await page.keyboard.press("Escape");
+  let chooser = page.waitForEvent("filechooser"); await page.getByRole("button", { name: "PDFを開く", exact: true }).click();
+  await (await chooser).setFiles({ name: "attachments.pdf", mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()) });
+  await page.getByRole("button", { name: "添付ファイル", exact: true }).click();
+  const panel = page.locator(".attachment-panel"), search = panel.getByLabel("添付を検索", { exact: true }), state = panel.getByLabel("添付の表示", { exact: true });
+  await expect(panel.locator(".attachment-item")).toHaveCount(2);
+  await expect.poll(() => page.locator(".side-scroll").evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+  await search.fill("team"); await expect(panel.locator(".attachment-item")).toHaveCount(1); await search.fill("");
+  chooser = page.waitForEvent("filechooser"); await panel.getByRole("button", { name: "添付ファイルを追加", exact: true }).click();
+  await (await chooser).setFiles({ name: "FILE.txt", mimeType: "text/plain", buffer: Buffer.from("Added") }); await expect(panel.locator(".attachment-item")).toHaveCount(3);
+  let download = page.waitForEvent("download"); await page.getByRole("button", { name: "保存", exact: true }).click(); await (await download).saveAs(info.outputPath("before.pdf"));
+  await expect(page.locator(".unsaved-dot")).toHaveCount(0); await search.fill("ｆｉｌｅ"); await expect(panel.locator(".attachment-item")).toHaveCount(2);
+  download = page.waitForEvent("download"); await panel.getByRole("button", { name: "絞り込んだ添付をZIPで取り出す", exact: true }).click();
+  const output = info.outputPath("files.zip"); await (await download).saveAs(output);
+  const files = unzipSync(new Uint8Array(await readFile(output))); expect(Object.keys(files)).toEqual(["file.txt", "FILE (2).txt"]); expect(Buffer.from(files["file.txt"]).toString()).toBe("Original"); expect(Buffer.from(files["FILE (2).txt"]).toString()).toBe("Added");
+  await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+  await panel.getByRole("button", { name: "絞り込んだ添付を一括削除", exact: true }).click(); await page.getByRole("dialog").getByRole("button", { name: "キャンセル", exact: true }).click(); await expect(panel.locator(".attachment-item")).toHaveCount(2);
+  await panel.getByRole("button", { name: "絞り込んだ添付を一括削除", exact: true }).click(); await page.getByRole("dialog").getByRole("button", { name: "削除", exact: true }).click(); await expect(panel.locator(".attachment-item")).toHaveCount(0);
+  await page.getByTitle("元に戻す (Ctrl+Z)", { exact: true }).click(); await expect(panel.locator(".attachment-item")).toHaveCount(2);
+  await page.getByTitle("やり直す (Ctrl+Y)", { exact: true }).click(); await state.selectOption("deleted"); await expect(panel.locator(".attachment-item")).toHaveCount(2);
+  download = page.waitForEvent("download"); await page.locator("summary").filter({ hasText: "ファイル" }).click(); await page.getByRole("button", { name: "編集プロジェクトを保存", exact: true }).click(); const project = info.outputPath("deleted.kpdf"); await (await download).saveAs(project);
+  const restored = await openProject(new Uint8Array(await readFile(project))); expect(Object.values(restored.attachmentEdits!).filter(e => e.deleted)).toHaveLength(2);
+  await panel.getByRole("button", { name: "絞り込んだ添付を一括復元", exact: true }).click(); await page.getByRole("dialog").getByRole("button", { name: "復元", exact: true }).click(); await expect(panel.locator(".attachment-item")).toHaveCount(0);
+  await state.selectOption("active"); await search.fill(""); await expect(panel.locator(".attachment-item")).toHaveCount(3);
+  await panel.locator(".attachment-item").filter({ hasText: /^file\.txt/ }).click(); await panel.getByRole("button", { name: "添付を削除", exact: true }).click();
+  await state.selectOption("deleted"); await panel.locator(".attachment-item").click(); await expect(panel.getByRole("button", { name: "添付を取り出す", exact: true })).toBeDisabled();
+  await panel.getByRole("button", { name: "添付を復元", exact: true }).click(); await state.selectOption("active");
+  download = page.waitForEvent("download"); await page.getByRole("button", { name: "保存", exact: true }).click(); const saved = info.outputPath("restored.pdf"); await (await download).saveAs(saved);
+  expect(attachmentEntries(await PDFDocument.load(await readFile(saved)), "saved")).toHaveLength(3); expect(errors).toEqual([]);
+});
+
+test("batches the entire filtered list beyond the first 100 attachment cards", async ({ page }) => {
+  const d = emptyDocument(); d.pages = [blankPage()]; d.attachments = Array.from({ length: 105 }, (_, i) => ({ id: `a${i}`, name: `item-${i}.txt`, description: "Batch", bytes: new TextEncoder().encode(String(i)) }));
+  await page.goto("/"); await page.keyboard.press("Escape"); const chooser = page.waitForEvent("filechooser"); await page.getByRole("button", { name: "PDFを開く", exact: true }).click(); await (await chooser).setFiles({ name: "many.kpdf", mimeType: "application/zip", buffer: Buffer.from(await saveProject(d)) });
+  await page.getByRole("button", { name: "添付ファイル", exact: true }).click(); const panel = page.locator(".attachment-panel");
+  await expect(panel.locator(".attachment-item")).toHaveCount(100); await panel.getByRole("button", { name: "次の100件を表示", exact: true }).click(); await expect(panel.locator(".attachment-item")).toHaveCount(105);
+  await panel.getByLabel("添付を検索", { exact: true }).fill("batch"); await expect(panel.locator(".attachment-item")).toHaveCount(100);
+  await panel.getByRole("button", { name: "絞り込んだ添付を一括削除", exact: true }).click(); await expect(page.getByRole("dialog")).toContainText("105件"); await page.getByRole("dialog").getByRole("button", { name: "削除", exact: true }).click(); await expect(panel.locator(".attachment-item")).toHaveCount(0);
+  await panel.getByLabel("添付の表示", { exact: true }).selectOption("deleted"); await expect(panel.locator(".attachment-item")).toHaveCount(100);
+  await panel.getByRole("button", { name: "絞り込んだ添付を一括復元", exact: true }).click(); await page.getByRole("dialog").getByRole("button", { name: "復元", exact: true }).click(); await panel.getByLabel("添付の表示", { exact: true }).selectOption("active"); await expect(panel.locator(".attachment-item")).toHaveCount(100);
+});

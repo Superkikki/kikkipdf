@@ -1,6 +1,11 @@
 const { PDFDocument, StandardFonts, PDFOperator, PDFName, PDFDict, PDFHexString, PDFString, degrees } = require("pdf-lib");
 const { writeFile, readFile } = require("node:fs/promises");
 (async () => {
+  if (process.argv[3] === "attachments") {
+    const pdf = await PDFDocument.create(); pdf.addPage([420, 595]);
+    await pdf.attach(Buffer.from("Original"), "file.txt", { description: "Team" }); await pdf.attach(Buffer.from("Other"), "other.txt");
+    await writeFile(process.argv[2], await pdf.save()); return;
+  }
   if (process.argv[3] === "organization") {
     const pdf = await PDFDocument.create(), page = pdf.addPage([420, 595]), c = pdf.context;
     page.drawText("Organization fixture", { x: 40, y: 550, size: 14 });

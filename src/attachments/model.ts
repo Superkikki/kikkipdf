@@ -17,8 +17,8 @@ export function attachmentName(name: string) {
     // Strip control bytes in names supplied by untrusted PDF metadata.
     // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f<>:"|?*\u007f]/g, "_")
-    .replace(/[ .]+$/g, "")
-    .slice(0, 180);
+    .slice(0, 180)
+    .replace(/[ .]+$/g, "");
   if (!result || /^\.+$/.test(result)) result = "attachment.bin";
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(result))
     result = "_" + result;

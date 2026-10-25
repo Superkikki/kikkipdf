@@ -1,4 +1,4 @@
-param([string]$Mode = 'release', [string]$Target = 'x86_64-pc-windows-msvc', [switch]$ContextOnly, [switch]$NavigationOnly, [switch]$FormOnly, [switch]$ImageOnly, [switch]$VerticalOnly, [switch]$ChoiceOnly, [switch]$BookmarkOnly, [switch]$InlineOnly, [switch]$UiOnly, [switch]$CjkOnly, [switch]$ProductivityOnly, [switch]$ReviewImagesOnly, [switch]$OrganizationOnly, [switch]$BookmarkFilesOnly)
+param([string]$Mode = 'release', [string]$Target = 'x86_64-pc-windows-msvc', [switch]$ContextOnly, [switch]$NavigationOnly, [switch]$FormOnly, [switch]$ImageOnly, [switch]$VerticalOnly, [switch]$ChoiceOnly, [switch]$BookmarkOnly, [switch]$InlineOnly, [switch]$UiOnly, [switch]$CjkOnly, [switch]$ProductivityOnly, [switch]$ReviewImagesOnly, [switch]$OrganizationOnly, [switch]$BookmarkFilesOnly, [switch]$AttachmentsOnly)
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
 $Exe = Join-Path $Root "src-tauri\target\$Target\$Mode\kikki-pdf.exe"
@@ -14,10 +14,11 @@ $Profile = Join-Path $TestDir ('profile-' + [guid]::NewGuid().ToString('N'))
 $env:WEBVIEW2_USER_DATA_FOLDER = $Profile
 $Fixture = Join-Path $TestDir 'native-fixture.pdf'
 Copy-Item (Join-Path $Root 'public\assets\pdfjs\standard_fonts\LiberationSans-Regular.ttf') (Join-Path $TestDir 'local-test-font.ttf') -Force
-& 'C:\Program Files\nodejs\node.exe' (Join-Path $PSScriptRoot 'native-fixture.cjs') $Fixture $(if ($BookmarkFilesOnly) {'bookmarks'} elseif ($OrganizationOnly) {'organization'} elseif ($ReviewImagesOnly) {'review-images'} elseif ($CjkOnly) {'cjk'} elseif ($FormOnly) {'form'} elseif ($ImageOnly) {'images'} elseif ($VerticalOnly) {'vertical'} elseif ($ChoiceOnly) {'choices'} elseif ($BookmarkOnly) {'bookmarks'} elseif ($InlineOnly) {'inline'} else {'full'})
+& 'C:\Program Files\nodejs\node.exe' (Join-Path $PSScriptRoot 'native-fixture.cjs') $Fixture $(if ($AttachmentsOnly) {'attachments'} elseif ($BookmarkFilesOnly) {'bookmarks'} elseif ($OrganizationOnly) {'organization'} elseif ($ReviewImagesOnly) {'review-images'} elseif ($CjkOnly) {'cjk'} elseif ($FormOnly) {'form'} elseif ($ImageOnly) {'images'} elseif ($VerticalOnly) {'vertical'} elseif ($ChoiceOnly) {'choices'} elseif ($BookmarkOnly) {'bookmarks'} elseif ($InlineOnly) {'inline'} else {'full'})
 if ($LASTEXITCODE -ne 0) { throw 'Could not create test PDF' }
 Copy-Item (Join-Path $Root 'src-tauri\icons\128x128.png') (Join-Path $TestDir 'replacement.png') -Force
 $env:KIKKI_SMOKE_DIR = $TestDir
+$env:KIKKI_SMOKE_ATTACHMENTS_ONLY = if ($AttachmentsOnly) {'1'} else {''}
 $env:KIKKI_SMOKE_BOOKMARK_FILES_ONLY = if ($BookmarkFilesOnly) {'1'} else {''}
 $env:KIKKI_SMOKE_ORGANIZATION_ONLY = if ($OrganizationOnly) {'1'} else {''}
 $env:KIKKI_SMOKE_PRODUCTIVITY_ONLY = if ($ProductivityOnly) {'1'} else {''}

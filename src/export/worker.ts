@@ -21,6 +21,8 @@ import {
   inspectAttachments,
   extractAttachment,
 } from "../attachments/pdfAttachments";
+import { attachmentsZip } from "../attachments/archive";
+import type { AttachmentModel } from "../attachments/batch";
 import { BinaryStore, restoreBinaries, type BinaryValue } from "../state/binaryStore";
 export interface WorkerMessage {
   request: BinaryValue<WorkerRequest>;
@@ -50,6 +52,7 @@ export type WorkerRequest =
       indices: number[];
       groupSize: number;
     }
+  | { id: number; type: "attachmentZip"; model: AttachmentModel; attachmentIds: string[] }
   | { id: number; type: "attachments"; model: Pick<DocumentModel, "sources"> }
   | {
       id: number;
@@ -130,6 +133,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             );
     } else if (req.type === "attachments")
       result = await inspectAttachments(req.model);
+    else if (req.type === "attachmentZip")
+      result = await attachmentsZip(req.model, req.attachmentIds, progress => postMessage({ id: req.id, progress }));
     else if (req.type === "attachmentExtract")
       result = await extractAttachment(req.model, req.attachmentId);
     else if (req.type === "projectSave") result = await saveProject(req.model);

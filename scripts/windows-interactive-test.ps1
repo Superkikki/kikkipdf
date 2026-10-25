@@ -1,6 +1,6 @@
 # Runs only this project's smoke test in the current user's interactive desktop.
 # The temporary task is deleted in finally; no elevated run level is requested.
-param([string]$Mode = 'release', [switch]$ContextOnly, [switch]$NavigationOnly, [switch]$FormOnly, [switch]$ImageOnly, [switch]$VerticalOnly, [switch]$ChoiceOnly, [switch]$BookmarkOnly, [switch]$InlineOnly, [switch]$UiOnly, [switch]$CjkOnly, [switch]$ProductivityOnly, [switch]$ReviewImagesOnly, [switch]$OrganizationOnly, [switch]$BookmarkFilesOnly)
+param([string]$Mode = 'release', [switch]$ContextOnly, [switch]$NavigationOnly, [switch]$FormOnly, [switch]$ImageOnly, [switch]$VerticalOnly, [switch]$ChoiceOnly, [switch]$BookmarkOnly, [switch]$InlineOnly, [switch]$UiOnly, [switch]$CjkOnly, [switch]$ProductivityOnly, [switch]$ReviewImagesOnly, [switch]$OrganizationOnly, [switch]$BookmarkFilesOnly, [switch]$AttachmentsOnly)
 $ErrorActionPreference='Stop'
 $Root=Split-Path $PSScriptRoot -Parent
 $Dir=Join-Path $env:TEMP 'kikki-pdf-interactive-test'
@@ -10,7 +10,7 @@ $Done=Join-Path $Dir 'done.txt'
 Remove-Item $Log,$Done -ErrorAction SilentlyContinue
 $Runner=Join-Path $Dir 'run.ps1'
 $Smoke=Join-Path $PSScriptRoot 'windows-smoke.ps1'
-$ContextArgument=if ($BookmarkFilesOnly) {' -BookmarkFilesOnly'} elseif ($OrganizationOnly) {' -OrganizationOnly'} elseif ($ReviewImagesOnly) {' -ReviewImagesOnly'} elseif ($ProductivityOnly) {' -ProductivityOnly'} elseif ($CjkOnly) {' -CjkOnly'} elseif ($UiOnly) {' -UiOnly'} elseif ($ContextOnly) {' -ContextOnly'} elseif ($NavigationOnly) {' -NavigationOnly'} elseif ($FormOnly) {' -FormOnly'} elseif ($ImageOnly) {' -ImageOnly'} elseif ($VerticalOnly) {' -VerticalOnly'} elseif ($ChoiceOnly) {' -ChoiceOnly'} elseif ($BookmarkOnly) {' -BookmarkOnly'} elseif ($InlineOnly) {' -InlineOnly'} else {''}
+$ContextArgument=if ($AttachmentsOnly) {' -AttachmentsOnly'} elseif ($BookmarkFilesOnly) {' -BookmarkFilesOnly'} elseif ($OrganizationOnly) {' -OrganizationOnly'} elseif ($ReviewImagesOnly) {' -ReviewImagesOnly'} elseif ($ProductivityOnly) {' -ProductivityOnly'} elseif ($CjkOnly) {' -CjkOnly'} elseif ($UiOnly) {' -UiOnly'} elseif ($ContextOnly) {' -ContextOnly'} elseif ($NavigationOnly) {' -NavigationOnly'} elseif ($FormOnly) {' -FormOnly'} elseif ($ImageOnly) {' -ImageOnly'} elseif ($VerticalOnly) {' -VerticalOnly'} elseif ($ChoiceOnly) {' -ChoiceOnly'} elseif ($BookmarkOnly) {' -BookmarkOnly'} elseif ($InlineOnly) {' -InlineOnly'} else {''}
 $Body=@"
 try {
  & '$Smoke' -Mode '$Mode'$ContextArgument *>&1 | Out-File -Encoding utf8 '$Log'

@@ -2,9 +2,17 @@
 
 Tauri 2 / React / TypeScript / Vite / Rust で作った、ローカル処理のPDF編集デスクトップアプリです。Windows 11を第一対象とし、画面のデザイン・アプリの編集モデル・操作コマンドは独自実装です。PDFの解釈・描画・書き出しにはOSSを使用しています。
 
-**バージョン0.26.0は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
+**バージョン0.27.0は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
 
-Windows配布物は [0.26.0インストーラー](artifacts/windows/Kikki.PDF_0.26.0_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.26.0_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.26.0.txt)も同梱します。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.26.0)からもダウンロードできます。
+Windows配布物は [0.27.0インストーラー](artifacts/windows/Kikki.PDF_0.27.0_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.27.0_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.27.0.txt)も同梱します。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.27.0)からもダウンロードできます。
+
+## 0.27.0：添付の検索・ZIP一括取り出し・削除と復元
+
+「添付」で名前・説明を検索できます。全角／半角・英字の大小を同一視し、「現在の添付」と「削除した添付」を切り替えられます。一覧は100件ずつ追加表示します。
+
+「絞り込んだ添付をZIPで取り出す」は、元PDFの添付と追加した添付をまとめて保存します。変更後の名前を使い、パスやWindowsで使えない名前を整え、大小文字だけの違いを含む同名には番号を付けます。画面の次ページも含む絞り込み結果全体が対象です。Workerで処理し、進行表示・キャンセルに対応。1000件・1件128MB・展開後合計とZIP自体が256MBまでで、取り出しはPDFや編集状態を変更しません。
+
+一括削除・一括復元は確認後にまとめて実行し、Undo／Redo・PDF・編集プロジェクト保存に対応します。「削除した添付」では1件ずつの復元もできます。変更した名前・説明・元データは復元時に保持します。処理や確認の途中で文書が変わった場合は一括変更・ZIP保存を中止します。復元は元データが残る編集中または編集プロジェクト内で可能です。削除したPDFを開き直した場合、除去済みの添付をそこから復元することはできません。
 
 ## 0.26.0：しおりJSONの入出力と検索結果の一括削除
 
@@ -208,7 +216,7 @@ npm run desktop:build
 通常のWindows/MSVCビルドでは以下を生成します。
 
 - `src-tauri/target/release/kikki-pdf.exe`
-- `src-tauri/target/release/bundle/nsis/Kikki PDF_0.26.0_x64-setup.exe`
+- `src-tauri/target/release/bundle/nsis/Kikki PDF_0.27.0_x64-setup.exe`
 
 NSISはユーザー単位でインストールする日本語・英語対応のインストーラーです。OSSのライセンス本文も同梱します。現時点ではコード署名していません。WebView2未導入の環境ではインストーラーがRuntimeの取得を必要とするため、オフラインでインストールするときは事前にRuntimeを用意してください。
 

@@ -1985,3 +1985,9 @@ progress {
 .bookmark-file-actions { margin: 10px 0; padding: 8px; border: 1px solid var(--border); border-radius: 8px; }
 .bookmark-file-actions summary { cursor: pointer; }
 .bookmark-file-actions > button { display: block; width: 100%; margin-top: 8px; }
+
+.attachment-panel > label { display: grid; gap: 5px; min-width: 0; margin: 0; }
+.attachment-panel > label input, .attachment-panel > label select { width: 100%; min-width: 0; }
+.attachment-panel, .attachment-bulk { grid-template-columns: minmax(0, 1fr); }
+.attachment-bulk { display: grid; gap: 6px; min-width: 0; }
+.attachment-bulk > button { width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }

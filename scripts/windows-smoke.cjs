@@ -11,6 +11,7 @@ const {
   decodePDFRawStream,
   rgb,
 } = require("pdf-lib");
+const { unzipSync } = require("fflate");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
@@ -86,6 +87,35 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_ATTACHMENTS_ONLY === "1") {
+    await page.keyboard.press("Escape"); await page.getByRole("button", { name: "添付ファイル", exact: true }).click();
+    const panel = page.locator(".attachment-panel"), search = panel.getByLabel("添付を検索", { exact: true }), state = panel.getByLabel("添付の表示", { exact: true });
+    await expect(panel.locator(".attachment-item")).toHaveCount(2);
+    await expect.poll(() => page.locator(".side-scroll").evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+    await search.fill("team"); await expect(panel.locator(".attachment-item")).toHaveCount(1); await search.fill("");
+    const input = path.join(process.env.KIKKI_SMOKE_DIR, "FILE.txt"); await fs.writeFile(input, "Added");
+    const addPick = pickNativeFile(input); await panel.getByRole("button", { name: "添付ファイルを追加", exact: true }).click(); await addPick;
+    await expect(panel.locator(".attachment-item")).toHaveCount(3); await search.fill("file");
+    const zipPath = path.join(process.env.KIKKI_SMOKE_DIR, `native-attachments-${started}.zip`), savePick = pickNativeFile(zipPath);
+    await panel.getByRole("button", { name: "絞り込んだ添付をZIPで取り出す", exact: true }).click(); await savePick;
+    const files = unzipSync(new Uint8Array(await fs.readFile(zipPath)));
+    if (Object.keys(files).join("|") !== "file.txt|FILE (2).txt" || Buffer.from(files["file.txt"]).toString() !== "Original" || Buffer.from(files["FILE (2).txt"]).toString() !== "Added") throw Error("Attachment ZIP incorrect");
+    await expect(page.locator(".unsaved-dot")).toHaveCount(1);
+    await panel.getByRole("button", { name: "絞り込んだ添付を一括削除", exact: true }).click(); await page.getByRole("dialog").getByRole("button", { name: "削除", exact: true }).click();
+    await expect(panel.locator(".attachment-item")).toHaveCount(0); await page.getByTitle("元に戻す (Ctrl+Z)", { exact: true }).click(); await expect(panel.locator(".attachment-item")).toHaveCount(2);
+    await page.getByTitle("やり直す (Ctrl+Y)", { exact: true }).click(); await state.selectOption("deleted"); await expect(panel.locator(".attachment-item")).toHaveCount(2);
+    await panel.getByRole("button", { name: "絞り込んだ添付を一括復元", exact: true }).click(); await page.getByRole("dialog").getByRole("button", { name: "復元", exact: true }).click();
+    await state.selectOption("active"); await search.fill(""); await expect(panel.locator(".attachment-item")).toHaveCount(3);
+    await page.getByRole("button", { name: "保存", exact: true }).click(); await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf"), saved = await PDFDocument.load(await fs.readFile(fixture)), n = PDFName.of;
+    const names = saved.catalog.lookup(n("Names"), PDFDict).lookup(n("EmbeddedFiles"), PDFDict).lookup(n("Names"), PDFArray);
+    if (names.size() !== 6) throw Error("Restored attachments were not saved");
+    const openPick = pickNativeFile(fixture); await page.keyboard.press("Control+o"); await openPick;
+    await page.getByRole("button", { name: "添付ファイル", exact: true }).click(); await expect(page.locator(".attachment-panel .attachment-item")).toHaveCount(3);
+    await page.screenshot({ path: path.join(process.env.KIKKI_SMOKE_DIR, "attachment-batch.png") });
+    if (errors.length) throw Error(JSON.stringify(errors));
+    console.log(JSON.stringify({ ok: true, attachments: true, errors, elapsedMs: Date.now() - started })); await browser.close(); return;
+  }
   if (process.env.KIKKI_SMOKE_BOOKMARK_FILES_ONLY === "1") {
     await page.keyboard.press("Escape"); await page.getByRole("button", { name: "しおり", exact: true }).click();
     const panel = page.locator(".bookmark-panel"), actions = panel.locator(".bookmark-file-actions");
