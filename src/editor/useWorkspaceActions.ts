@@ -101,6 +101,7 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
         });
         return;
       }
+      if (a === "batchPdf") { setModal("batchPdf"); return; }
       if (!doc || !page) return;
       if (
         [
@@ -122,6 +123,9 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
         );
       }
       switch (a) {
+        case "optimize":
+          setModal("optimize");
+          return;
         case "compare":
           setModal("compare");
           return;

@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { processPdf, type ProcessingOptions } from "../optimization/engine";
 import { saveProject, openProject, zipFiles } from "../state/project";
 import { exportPdf, inspectForms, imagesToPdf } from "./engine";
 import type { DocumentModel } from "../state/model";
@@ -30,6 +31,7 @@ export interface WorkerMessage {
   retain: string[];
 }
 export type WorkerRequest =
+  | { id: number; type: "processPdf"; bytes: Uint8Array; options: ProcessingOptions }
   | {
       id: number;
       type: "imageExtract";
@@ -75,7 +77,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
     binaries.retain(new Set(e.data.retain));
     const req = restoreBinaries<WorkerRequest>(e.data.request, binaries.get);
     let result: unknown;
-    if (req.type === "imageExtract")
+    if (req.type === "processPdf") result = await processPdf(req.bytes, req.options, progress => postMessage({ id, progress }));
+    else if (req.type === "imageExtract")
       result = await isolatedImagePdf(req.bytes, req.reference);
     else if (req.type === "directInspect")
       result = await inspectDirectText(req.bytes, req.index);
@@ -149,7 +152,11 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       const output = binaries.owns(result.buffer) ? result.slice() : result;
       postMessage({ id: req.id, result: output }, [output.buffer]);
     }
-    else postMessage({ id: req.id, result });
+    else if (req.type === "processPdf") {
+      const output = result as import("../optimization/engine").OptimizationResult;
+      const bytes = binaries.owns(output.bytes.buffer) ? output.bytes.slice() : output.bytes;
+      postMessage({ id, result: { ...output, bytes } }, [bytes.buffer]);
+    } else postMessage({ id: req.id, result });
   } catch (error) {
     postMessage({
       id,

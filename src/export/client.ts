@@ -116,3 +116,6 @@ export const extractImagePdf = (
 
 export const exportAttachmentZip = (model: import("../attachments/batch").AttachmentModel, attachmentIds: string[], progress?: (value: number) => void, signal?: AbortSignal) =>
   run<Uint8Array>({ type: "attachmentZip", model: { sources: model.sources, attachments: model.attachments, attachmentEdits: model.attachmentEdits, pages: model.pages.map(page => ({ sourceId: page.sourceId, sourceIndex: page.sourceIndex })) }, attachmentIds }, progress, signal);
+
+export const optimizePdf = (bytes: Uint8Array, options: import("../optimization/engine").ProcessingOptions, progress?: (n: number) => void, signal?: AbortSignal) =>
+  run<import("../optimization/engine").OptimizationResult>({ type: "processPdf", bytes, options }, progress, signal);

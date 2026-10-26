@@ -1999,3 +1999,17 @@ progress {
 .page-order-editor textarea, .page-order-editor select, .page-order-editor input[type=number] { width: 100%; min-width: 0; }
 .page-order-preview table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .page-order-preview th, .page-order-preview td { padding: 5px; text-align: left; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+
+.processing-panel label { display: grid; gap: 6px; margin: 12px 0; }
+.processing-panel label.check { display: flex; align-items: center; }
+.processing-panel select { width: 100%; }
+.processing-panel table { width: 100%; table-layout: fixed; }
+.processing-panel td { overflow-wrap: anywhere; padding: 6px; }
+.batch-file-list { max-height: 160px; overflow-y: auto; padding-left: 20px; overflow-wrap: anywhere; }
+.batch-file-list li { margin: 5px 0; }
+.processing-panel progress { width: 100%; }
+.detection-preview { position: relative; width: 100%; max-width: 440px; margin: 12px auto; background: white; }
+.detection-preview img, .detection-preview svg { position: absolute; width: 100%; height: 100%; inset: 0; }
+.detected-field { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.detected-field input:not([type=checkbox]) { min-width: 0; flex: 1; }
+.detected-field label { margin: 0; }

@@ -87,6 +87,32 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_PROCESSING_ONLY === "1") {
+    await page.keyboard.press("Escape");
+    const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf");
+    const menu = async title => { await page.locator("summary").filter({ hasText: /^ファイル$/ }).click(); await page.getByRole("button", { name: title, exact: true }).click(); };
+    await menu("PDF圧縮・最適化"); let dialog = page.getByRole("dialog", { name: "PDF圧縮・最適化", exact: true });
+    await dialog.getByRole("button", { name: "圧縮結果を作成", exact: true }).click(); await expect(dialog.getByRole("status")).toContainText("画像の再圧縮: 1件");
+    const optimized = path.join(process.env.KIKKI_SMOKE_DIR, `native-optimized-${started}.pdf`), savePick = pickNativeFile(optimized);
+    await dialog.getByRole("button", { name: "圧縮PDFを保存", exact: true }).click(); await savePick; await expect(dialog.getByText("保存しました。", { exact: true })).toBeVisible();
+    const output = await PDFDocument.load(await fs.readFile(optimized)); if (output.getForm().getTextField("Existing").getText() !== "Kept") throw Error("Compression lost form");
+    const image = output.context.enumerateIndirectObjects().map(([, o]) => o).find(o => o instanceof PDFRawStream && o.dict.get(PDFName.of("Subtype")) === PDFName.of("Image"));
+    if (!image || image.dict.get(PDFName.of("Filter")) !== PDFName.of("DCTDecode") || image.contents.length > 500000) throw Error("Image not compressed");
+    await dialog.getByTitle("閉じる", { exact: true }).click(); await menu("複数PDFを一括処理"); dialog = page.getByRole("dialog", { name: "複数PDFを一括処理", exact: true });
+    const filePick = pickNativeFile(fixture); await dialog.getByRole("button", { name: "処理するPDFを選択", exact: true }).click(); await filePick;
+    await dialog.getByLabel("全ページの回転").selectOption("90"); await dialog.getByLabel("文書情報（Info・文書レベルXMP）を削除").check(); await dialog.getByRole("button", { name: "一括処理を実行", exact: true }).click(); await expect(dialog.getByRole("status")).toContainText("1件成功 / 0件失敗");
+    const zipPath = path.join(process.env.KIKKI_SMOKE_DIR, `native-processed-${started}.zip`), zipPick = pickNativeFile(zipPath);
+    await dialog.getByRole("button", { name: "結果をZIP保存", exact: true }).click(); await zipPick; await expect(dialog.getByText("保存しました。", { exact: true })).toBeVisible();
+    const zip = unzipSync(new Uint8Array(await fs.readFile(zipPath))), batch = await PDFDocument.load(zip["native-fixture-processed.pdf"], { updateMetadata: false });
+    if (batch.getPage(0).getRotation().angle !== 90 || batch.getTitle() !== undefined || !zip["report.json"]) throw Error("Batch output incorrect");
+    await dialog.getByTitle("閉じる", { exact: true }).click(); await page.getByRole("button", { name: "ツール", exact: true }).click(); await page.getByRole("button", { name: "フォーム入力", exact: true }).click(); dialog = page.getByRole("dialog", { name: "フォーム入力", exact: true });
+    await dialog.getByRole("button", { name: "入力枠を自動検出", exact: true }).click(); await dialog.getByRole("button", { name: "現在のページから入力枠を検出", exact: true }).click(); await expect(dialog.getByRole("status")).toContainText("2件の候補");
+    await page.screenshot({ path: path.join(process.env.KIKKI_SMOKE_DIR, "native-form-detection.png") });
+    await dialog.getByRole("button", { name: "選択した候補をフォームに追加（2件）", exact: true }).click(); await dialog.getByRole("button", { name: "完了", exact: true }).click();
+    await page.getByTitle("元に戻す (Ctrl+Z)", { exact: true }).click(); await page.getByTitle("やり直す (Ctrl+Y)", { exact: true }).click(); await page.getByRole("button", { name: "保存", exact: true }).click(); await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    if ((await PDFDocument.load(await fs.readFile(fixture))).getForm().getFields().length !== 3) throw Error("Detected forms not saved");
+    if (errors.length) throw Error(JSON.stringify(errors)); console.log(JSON.stringify({ ok: true, processing: true, errors, elapsedMs: Date.now() - started })); await browser.close(); return;
+  }
   if (process.env.KIKKI_SMOKE_PAGE_ORDER_ONLY === "1") {
     await page.keyboard.press("Escape"); await page.getByRole("button", { name: "ページ管理", exact: true }).click();
     await page.getByRole("button", { name: "ページ順序", exact: true }).click();

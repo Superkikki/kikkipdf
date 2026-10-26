@@ -39,6 +39,8 @@ import {
 import { APP_NAME } from "../config";
 import type { Tool } from "../viewer/PageView";
 export type Action =
+  | "optimize"
+  | "batchPdf"
   | "compare"
   | "pageOrder"
   | "pageLabels"
@@ -188,6 +190,8 @@ export function Toolbar({
               ["rename", "名前を変更", "F2"],
               ["merge", "PDFを結合 / 追加", ""],
               ["imagesPdf", "画像からPDFを作成", ""],
+              ["optimize", "PDF圧縮・最適化", ""],
+              ["batchPdf", "複数PDFを一括処理", ""],
               ["png", "現在のページをPNGへ", ""],
               ["jpeg", "現在のページをJPEGへ", ""],
               ["batchImages", "ページを一括画像出力（ZIP）", ""],
@@ -198,7 +202,7 @@ export function Toolbar({
                 key={id}
                 disabled={
                   !hasDocument &&
-                  !["open", "new", "projectOpen", "imagesPdf"].includes(id)
+                  !["open", "new", "projectOpen", "imagesPdf", "batchPdf"].includes(id)
                 }
                 onClick={(e) => {
                   e.currentTarget.closest("details")?.removeAttribute("open");
@@ -396,6 +400,8 @@ export function Toolbar({
               <div className="tool-group">
                 {[
                   { id: "ocr", label: "OCR", icon: ScanText },
+                  { id: "optimize", label: "PDF圧縮", icon: Download },
+                  { id: "batchPdf", label: "複数PDF", icon: FileStack },
                   { id: "compare", label: "PDF比較", icon: FileText },
                   { id: "forms", label: "フォーム入力", icon: FormInput },
                   { id: "links", label: "リンク管理", icon: Link2 },

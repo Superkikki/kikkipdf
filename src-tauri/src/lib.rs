@@ -23,11 +23,13 @@ async fn select_files(
     kind: String,
     multiple: bool,
 ) -> Result<Vec<String>, String> {
-    let remember_documents = kind != "attachment" && kind != "font" && kind != "xfdf" && kind != "csv" && kind != "json";
+    let remember_documents = kind != "batchPdf" && kind != "attachment" && kind != "font" && kind != "xfdf" && kind != "csv" && kind != "json";
     let paths = tauri::async_runtime::spawn_blocking(move || {
         let dialog = rfd::FileDialog::new();
         let dialog = if kind == "image" {
             dialog.add_filter("Images", &["png", "jpg", "jpeg"])
+        } else if kind == "batchPdf" {
+            dialog.add_filter("PDF", &["pdf"])
         } else if kind == "project" {
             dialog.add_filter("Kikki PDF Project", &["kpdf"])
         } else if kind == "font" {

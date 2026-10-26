@@ -1,6 +1,20 @@
 const { PDFDocument, StandardFonts, PDFOperator, PDFName, PDFDict, PDFHexString, PDFString, degrees } = require("pdf-lib");
 const { writeFile, readFile } = require("node:fs/promises");
 (async () => {
+  if (process.argv[3] === "processing") {
+    const pdf = await PDFDocument.create(), page = pdf.addPage([400, 500]);
+    pdf.setTitle("Native batch title"); page.drawText("Processing fixture", { x: 30, y: 460, size: 14 });
+    page.drawRectangle({ x: 30, y: 380, width: 180, height: 26, borderWidth: 1, borderColor: require("pdf-lib").rgb(0, 0, 0) });
+    page.drawRectangle({ x: 30, y: 330, width: 18, height: 18, borderWidth: 1, borderColor: require("pdf-lib").rgb(0, 0, 0) });
+    const pixels = new Uint8Array(800 * 600 * 3); let seed = 1;
+    for (let i = 0; i < pixels.length; i++) { seed = (seed * 1664525 + 1013904223) >>> 0; pixels[i] = seed >>> 24; }
+    const image = pdf.context.register(pdf.context.flateStream(pixels, { Type: "XObject", Subtype: "Image", Width: 800, Height: 600, ColorSpace: "DeviceRGB", BitsPerComponent: 8 }));
+    page.node.Resources().set(PDFName.of("XObject"), pdf.context.obj({ Photo: image }));
+    page.node.addContentStream(pdf.context.register(pdf.context.stream(Buffer.from("q 160 0 0 120 220 30 cm /Photo Do Q"))));
+    const field = pdf.getForm().createTextField("Existing"); field.addToPage(page, { x: 30, y: 250, width: 180, height: 25 }); field.setText("Kept");
+    await pdf.attach(Buffer.from("Original"), "keep.txt");
+    await writeFile(process.argv[2], await pdf.save()); return;
+  }
   if (process.argv[3] === "page-order") {
     const pdf = await PDFDocument.create(), c = pdf.context;
     const pages = Array.from({ length: 6 }, (_, i) => { const page = pdf.addPage([420+i,595]); page.drawText(`Page ${i+1}`, { x: 40, y: 540, size: 16 }); return page; });

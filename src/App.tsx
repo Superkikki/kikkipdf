@@ -22,6 +22,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Properties } from "./components/Properties";
 import { Viewer } from "./viewer/Viewer";
 import { useDocumentSearch } from "./viewer/useDocumentSearch";
+import { ProcessingPanel } from "./optimization/ProcessingPanel";
 import { PageOrderEditor } from "./pages/PageOrderEditor";
 import { PageLabelEditor } from "./pages/PageLabelEditor";
 import { PageLabelNavigation } from "./pages/PageLabelNavigation";
@@ -316,6 +317,11 @@ export function App() {
         </div>
       )}
       {w.dialog}
+      {(w.modal === "optimize" || w.modal === "batchPdf") && (
+        <Dialog title={w.modal === "batchPdf" ? "複数PDFを一括処理" : "PDF圧縮・最適化"} onClose={() => w.setModal(null)}>
+          <ProcessingPanel key={`${w.modal}:${doc?.id ?? "none"}`} model={doc ?? undefined} batch={w.modal === "batchPdf"} />
+        </Dialog>
+      )}
       {w.modal === "compare" && doc && (
         <Dialog title="PDF比較" wide className="comparison-dialog" onClose={() => w.setModal(null)}>
           <ComparisonPanel key={doc.id} model={doc} />

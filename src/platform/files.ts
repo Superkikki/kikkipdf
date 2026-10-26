@@ -6,11 +6,22 @@ export interface LocalFile {
   bytes: Uint8Array;
 }
 export async function pickFiles(
-  kind: "pdf" | "image" | "project" | "attachment" | "font" | "xfdf" | "csv" | "json" = "pdf",
+  kind: "pdf" | "batchPdf" | "image" | "project" | "attachment" | "font" | "xfdf" | "csv" | "json" = "pdf",
   multiple = false,
 ): Promise<LocalFile[]> {
   if (isTauri()) {
     const paths = await invoke<string[]>("select_files", { kind, multiple });
+    if (kind === "batchPdf") {
+      if (paths.length > 50) throw Error("一括処理は50ファイルまでです。");
+      const files: LocalFile[] = []; let total = 0;
+      for (const path of paths) {
+        const file = await readPath(path, { maxBytes: 32 * 1024 * 1024 });
+        total += file.bytes.length;
+        if (total > 256 * 1024 * 1024) throw Error("入力の合計は256MBまでです。");
+        files.push(file);
+      }
+      return files;
+    }
     return Promise.all(
       paths.map((path) =>
         readPath(
@@ -26,7 +37,9 @@ export async function pickFiles(
     input.type = "file";
     input.multiple = multiple;
     input.accept =
-      kind === "pdf"
+      kind === "batchPdf"
+        ? ".pdf"
+        : kind === "pdf"
         ? ".pdf,.kpdf"
         : kind === "project"
           ? ".kpdf"
@@ -42,6 +55,12 @@ export async function pickFiles(
                 ? ""
                 : ".png,.jpg,.jpeg";
     input.onchange = () => {
+      if (kind === "batchPdf") {
+        const selected = Array.from(input.files ?? []);
+        if (selected.length > 50 || selected.some(f => f.size > 32 * 1024 * 1024) || selected.reduce((sum, f) => sum + f.size, 0) > 256 * 1024 * 1024) {
+          reject(Error("一括処理は50件、1件32MB、合計256MBまでです。")); return;
+        }
+      }
       void Promise.all(
         Array.from(input.files ?? []).map(async (f) => {
           if (kind === "font" && f.size > 32 * 1024 * 1024)

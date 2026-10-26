@@ -1,3 +1,4 @@
+import { FormDetection } from "./FormDetection";
 import { useState } from "react";
 import type { DocumentModel, FieldValue } from "../state/model";
 import { useImportedForms } from "./useImportedForms";
@@ -70,6 +71,7 @@ export function FormPanel({
         >
           フォームを作成・編集
         </button>
+        <button className={tab === "detect" ? "active" : ""} onClick={() => setTab("detect")}>入力枠を自動検出</button>
       </div>
       <label className="form-flatten">
         <input
@@ -86,7 +88,7 @@ export function FormPanel({
         />
         固定して保存（保存後は再入力不可）
       </label>
-      {tab === "design" ? (
+      {tab === "detect" ? <FormDetection model={model} active={active} fields={fields} disabled={loading || !!error} /> : tab === "design" ? (
         <>
           {loading && <p>フォームを読み込み中…</p>}
           {error && <p className="warning">{error}</p>}
