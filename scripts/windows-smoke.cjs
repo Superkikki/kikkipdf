@@ -87,6 +87,17 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_BATES_ONLY === "1") {
+    await page.keyboard.press("Escape"); await page.getByRole("button", { name: "ページ管理", exact: true }).click(); await page.getByRole("button", { name: "ベイツ番号", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "ベイツ番号を追加", exact: true }); await dialog.getByLabel("ベイツ番号を付けるページ範囲").fill("1-2"); await dialog.getByLabel("ベイツ番号の接頭辞").fill("CASE-"); await dialog.getByLabel("ベイツ番号の開始番号").fill("98"); await dialog.getByLabel("ベイツ番号の桁数").fill("3");
+    await expect(dialog.locator("tbody tr")).toHaveText(["1CASE-098", "2CASE-099"]); await expect(dialog.getByRole("button", { name: "番号を追加", exact: true })).toBeInViewport();
+    await page.screenshot({ path: path.join(process.env.KIKKI_SMOKE_DIR, "bates-preview.png") }); await dialog.getByRole("button", { name: "番号を追加", exact: true }).click();
+    await page.getByTitle("元に戻す (Ctrl+Z)", { exact: true }).click(); await page.getByTitle("やり直す (Ctrl+Y)", { exact: true }).click(); await page.getByRole("button", { name: "保存", exact: true }).click(); await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf"), saved = await PDFDocument.load(await fs.readFile(fixture)); if (saved.getPageCount() !== 6 || saved.getForm().getTextField("Name").getText() !== "Kept") throw Error("PDF contents changed");
+    const picking = pickNativeFile(fixture); await page.keyboard.press("Control+o"); await picking;
+    await expect(page.locator(".viewer-scroll .page-view .textLayer").first()).toContainText("CASE-098");
+    if (errors.length) throw Error(JSON.stringify(errors)); console.log(JSON.stringify({ ok: true, bates: true, errors, elapsedMs: Date.now() - started })); await browser.close(); return;
+  }
   if (process.env.KIKKI_SMOKE_PROCESSING_ONLY === "1") {
     await page.keyboard.press("Escape");
     const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf");

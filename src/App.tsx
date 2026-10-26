@@ -23,6 +23,7 @@ import { Properties } from "./components/Properties";
 import { Viewer } from "./viewer/Viewer";
 import { useDocumentSearch } from "./viewer/useDocumentSearch";
 import { ProcessingPanel } from "./optimization/ProcessingPanel";
+import { BatesEditor } from "./pages/BatesEditor";
 import { PageOrderEditor } from "./pages/PageOrderEditor";
 import { PageLabelEditor } from "./pages/PageLabelEditor";
 import { PageLabelNavigation } from "./pages/PageLabelNavigation";
@@ -325,6 +326,11 @@ export function App() {
       {w.modal === "compare" && doc && (
         <Dialog title="PDF比較" wide className="comparison-dialog" onClose={() => w.setModal(null)}>
           <ComparisonPanel key={doc.id} model={doc} />
+        </Dialog>
+      )}
+      {w.modal === "bates" && doc && (
+        <Dialog title="ベイツ番号を追加" onClose={() => w.setModal(null)}>
+          <BatesEditor model={doc} close={() => w.setModal(null)} />
         </Dialog>
       )}
       {w.modal === "pageOrder" && doc && (

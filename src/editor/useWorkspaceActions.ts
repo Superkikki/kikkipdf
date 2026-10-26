@@ -123,6 +123,9 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
         );
       }
       switch (a) {
+        case "bates":
+          setModal("bates");
+          return;
         case "optimize":
           setModal("optimize");
           return;

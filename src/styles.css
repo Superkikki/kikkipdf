@@ -2013,3 +2013,9 @@ progress {
 .detected-field { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .detected-field input:not([type=checkbox]) { min-width: 0; flex: 1; }
 .detected-field label { margin: 0; }
+
+.bates-editor label { display: grid; gap: 5px; margin: 10px 0; }
+.bates-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.bates-grid input, .bates-grid select { width: 100%; min-width: 0; }
+.bates-preview table { width: 100%; table-layout: fixed; }
+.bates-preview td { padding: 5px; overflow-wrap: anywhere; }

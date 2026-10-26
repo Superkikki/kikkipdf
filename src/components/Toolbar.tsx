@@ -39,6 +39,7 @@ import {
 import { APP_NAME } from "../config";
 import type { Tool } from "../viewer/PageView";
 export type Action =
+  | "bates"
   | "optimize"
   | "batchPdf"
   | "compare"
@@ -381,6 +382,7 @@ export function Toolbar({
                   { id: "splitZip", label: "分割ZIP", icon: FileStack },
                   { id: "pageBatch", label: "一括操作", icon: Copy },
                   { id: "pageLabels", label: "ページラベル", icon: FileText },
+                  { id: "bates", label: "ベイツ番号", icon: FileText },
                   { id: "pageOrder", label: "ページ順序", icon: FileStack },
                   { id: "crop", label: "トリミング", icon: Square },
                 ].map((t) => (
