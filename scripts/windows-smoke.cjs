@@ -87,6 +87,31 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_PAGE_ORDER_ONLY === "1") {
+    await page.keyboard.press("Escape"); await page.getByRole("button", { name: "ページ管理", exact: true }).click();
+    await page.getByRole("button", { name: "ページ順序", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "ページ順序を編集", exact: true }), mode = dialog.getByLabel("ページの並べ方", { exact: true });
+    await mode.selectOption("evenOdd"); await expect(dialog.locator("tbody tr").first()).toHaveText("12P2");
+    await mode.selectOption("interleave"); await expect(dialog.locator("tbody tr").nth(1)).toHaveText("26P6");
+    await expect(dialog.getByRole("button", { name: "この順序を適用", exact: true })).toBeInViewport();
+    await page.screenshot({ path: path.join(process.env.KIKKI_SMOKE_DIR, "page-order-preview.png") });
+    await dialog.getByRole("button", { name: "この順序を適用", exact: true }).click();
+    const labels = page.locator(".thumbnail-page-label"); await expect(labels).toHaveText(["P1","P6","P2","P5","P3","P4"]);
+    await page.getByTitle("元に戻す (Ctrl+Z)", { exact: true }).click(); await expect(labels).toHaveText(["P1","P2","P3","P4","P5","P6"]);
+    await page.getByTitle("やり直す (Ctrl+Y)", { exact: true }).click(); await expect(labels).toHaveText(["P1","P6","P2","P5","P3","P4"]);
+    await page.getByRole("button", { name: "保存", exact: true }).click(); await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf"), saved = await PDFDocument.load(await fs.readFile(fixture)), n = PDFName.of;
+    if (saved.getPages().map(p => p.getWidth()).join(",") !== "420,425,421,424,422,423") throw Error("Page order not saved");
+    const destination = saved.catalog.lookup(n("Outlines"), PDFDict).lookup(n("First"), PDFDict).lookup(n("Dest"), PDFArray);
+    if (destination.get(0).toString() !== saved.getPage(3).ref.toString()) throw Error("Bookmark target changed");
+    if (saved.getForm().getTextField("Name").acroField.getWidgets()[0].P().toString() !== saved.getPage(3).ref.toString()) throw Error("Widget target changed");
+    const link = saved.getPage(0).node.Annots().lookup(0, PDFDict).lookup(n("Dest"), PDFArray);
+    if (link.get(0).toString() !== saved.getPage(3).ref.toString()) throw Error("Link target changed");
+    const picking = pickNativeFile(fixture); await page.keyboard.press("Control+o"); await picking;
+    await expect(page.locator(".thumbnail-page-label")).toHaveText(["P1","P6","P2","P5","P3","P4"]);
+    if (errors.length) throw Error(JSON.stringify(errors));
+    console.log(JSON.stringify({ ok: true, pageOrder: true, errors, elapsedMs: Date.now() - started })); await browser.close(); return;
+  }
   if (process.env.KIKKI_SMOKE_ATTACHMENTS_ONLY === "1") {
     await page.keyboard.press("Escape"); await page.getByRole("button", { name: "添付ファイル", exact: true }).click();
     const panel = page.locator(".attachment-panel"), search = panel.getByLabel("添付を検索", { exact: true }), state = panel.getByLabel("添付の表示", { exact: true });

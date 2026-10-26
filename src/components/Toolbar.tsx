@@ -40,6 +40,7 @@ import { APP_NAME } from "../config";
 import type { Tool } from "../viewer/PageView";
 export type Action =
   | "compare"
+  | "pageOrder"
   | "pageLabels"
   | "pageBatch"
   | "splitZip"
@@ -222,6 +223,7 @@ export function Toolbar({
               ["split", "1ページずつ分割"],
               ["splitZip", "分割してZIPに保存"],
               ["pageBatch", "ページを一括操作"],
+              ["pageOrder", "ページ順序を編集"],
               ["crop", "トリミング"],
             ].map(([id, label]) => (
               <button
@@ -375,6 +377,7 @@ export function Toolbar({
                   { id: "splitZip", label: "分割ZIP", icon: FileStack },
                   { id: "pageBatch", label: "一括操作", icon: Copy },
                   { id: "pageLabels", label: "ページラベル", icon: FileText },
+                  { id: "pageOrder", label: "ページ順序", icon: FileStack },
                   { id: "crop", label: "トリミング", icon: Square },
                 ].map((t) => (
                   <button

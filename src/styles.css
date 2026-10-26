@@ -1991,3 +1991,11 @@ progress {
 .attachment-panel, .attachment-bulk { grid-template-columns: minmax(0, 1fr); }
 .attachment-bulk { display: grid; gap: 6px; min-width: 0; }
 .attachment-bulk > button { width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+
+.page-order-editor { display: grid; min-width: 0; }
+.page-order-fields { display: grid; gap: 12px; min-width: 0; max-height: 55vh; }
+.page-order-fields > label { display: grid; gap: 5px; min-width: 0; margin: 0; }
+.page-order-fields > .check { display: flex; align-items: center; }
+.page-order-editor textarea, .page-order-editor select, .page-order-editor input[type=number] { width: 100%; min-width: 0; }
+.page-order-preview table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.page-order-preview th, .page-order-preview td { padding: 5px; text-align: left; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }

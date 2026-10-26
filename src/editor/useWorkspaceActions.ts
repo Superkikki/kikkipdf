@@ -125,6 +125,9 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
         case "compare":
           setModal("compare");
           return;
+        case "pageOrder":
+          setModal("pageOrder");
+          return;
         case "pageLabels":
           setModal("pageLabels");
           return;

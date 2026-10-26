@@ -22,6 +22,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Properties } from "./components/Properties";
 import { Viewer } from "./viewer/Viewer";
 import { useDocumentSearch } from "./viewer/useDocumentSearch";
+import { PageOrderEditor } from "./pages/PageOrderEditor";
 import { PageLabelEditor } from "./pages/PageLabelEditor";
 import { PageLabelNavigation } from "./pages/PageLabelNavigation";
 import { Dialog } from "./components/Dialog";
@@ -318,6 +319,11 @@ export function App() {
       {w.modal === "compare" && doc && (
         <Dialog title="PDF比較" wide className="comparison-dialog" onClose={() => w.setModal(null)}>
           <ComparisonPanel key={doc.id} model={doc} />
+        </Dialog>
+      )}
+      {w.modal === "pageOrder" && doc && (
+        <Dialog title="ページ順序を編集" onClose={() => w.setModal(null)}>
+          <PageOrderEditor model={doc} close={() => w.setModal(null)} />
         </Dialog>
       )}
       {w.modal === "pageLabels" && doc && (

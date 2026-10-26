@@ -1,6 +1,17 @@
 const { PDFDocument, StandardFonts, PDFOperator, PDFName, PDFDict, PDFHexString, PDFString, degrees } = require("pdf-lib");
 const { writeFile, readFile } = require("node:fs/promises");
 (async () => {
+  if (process.argv[3] === "page-order") {
+    const pdf = await PDFDocument.create(), c = pdf.context;
+    const pages = Array.from({ length: 6 }, (_, i) => { const page = pdf.addPage([420+i,595]); page.drawText(`Page ${i+1}`, { x: 40, y: 540, size: 16 }); return page; });
+    const field = pdf.getForm().createTextField("Name"); field.addToPage(pages[4], { x: 30, y: 300, width: 150, height: 25 }); field.setText("Kept");
+    pdf.catalog.set(PDFName.of("PageLabels"), c.obj({ Nums: [0, { S: "D", P: PDFString.of("P"), St: 1 }] }));
+    const outlines = c.obj({ Type: "Outlines", Count: 1 }), outlineRef = c.register(outlines);
+    const bookmark = c.register(c.obj({ Title: PDFString.of("Target"), Parent: outlineRef, Dest: [pages[4].ref, "Fit"] }));
+    outlines.set(PDFName.of("First"), bookmark); outlines.set(PDFName.of("Last"), bookmark); pdf.catalog.set(PDFName.of("Outlines"), outlineRef);
+    pages[0].node.addAnnot(c.register(c.obj({ Type: "Annot", Subtype: "Link", Rect: [20, 20, 80, 40], Dest: [pages[4].ref, "Fit"] })));
+    await writeFile(process.argv[2], await pdf.save()); return;
+  }
   if (process.argv[3] === "attachments") {
     const pdf = await PDFDocument.create(); pdf.addPage([420, 595]);
     await pdf.attach(Buffer.from("Original"), "file.txt", { description: "Team" }); await pdf.attach(Buffer.from("Other"), "other.txt");
