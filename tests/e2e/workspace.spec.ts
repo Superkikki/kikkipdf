@@ -128,39 +128,63 @@ test("300-page rendering stays bounded and search jumps to final page", async ({
   await expect(page.getByLabel("ページ番号")).toHaveValue("299");
   expect(errors).toEqual([]);
 });
-test("OCR runs with local assets and creates a searchable text layer", async ({
-  page,
-}) => {
-  test.setTimeout(120000);
-  const external: string[] = [];
-  const errors: string[] = [];
-  page.on("request", (r) => {
-    if (
-      /^https?:/.test(r.url()) &&
-      !r.url().startsWith("http://127.0.0.1:1420")
-    )
-      external.push(r.url());
+for (const fallback of [false, true]) {
+  test(`OCR runs offline with ${fallback ? "non-SIMD" : "SIMD"} LSTM assets and creates a searchable text layer`, async ({
+    page,
+    context,
+  }) => {
+    test.setTimeout(120000);
+    const external: string[] = [];
+    const errors: string[] = [];
+    const cores: string[] = [];
+    if (fallback) {
+      // Feature detection happens inside the OCR worker, not the window.
+      // Simulate a CPU without SIMD while still executing the real WASM core.
+      await context.route("**/assets/ocr/worker.min.js", async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({
+          response,
+          body: "WebAssembly.validate = () => false;\n" + (await response.text()),
+        });
+      });
+    }
+    context.on("request", (r) => {
+      if (r.url().includes("/assets/ocr/tesseract-core"))
+        cores.push(new URL(r.url()).pathname);
+      if (
+        /^https?:/.test(r.url()) &&
+        !r.url().startsWith("http://127.0.0.1:1420")
+      )
+        external.push(r.url());
+    });
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto("/");
+    await open(page, await fixture(1));
+    await page.getByRole("button", { name: "ツール", exact: true }).click();
+    await page.getByRole("button", { name: "OCR", exact: true }).click();
+    await page
+      .getByLabel("言語", { exact: true })
+      .selectOption(fallback ? "jpn+eng" : "eng");
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "適用", exact: true })
+      .click();
+    await expect(page.locator(".status-message")).toContainText("OCR完了", {
+      timeout: 90000,
+    });
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    const f = await download;
+    expect(await f.failure()).toBeNull();
+    expect(cores).toEqual([
+      `/assets/ocr/tesseract-core-${fallback ? "" : "simd-"}lstm.wasm.js`,
+    ]);
+    await page.getByRole("button", { name: "OCR校正", exact: true }).click();
+    await expect(page.locator(".ocr-row").first()).toContainText(/fixture/i);
+    expect(external).toEqual([]);
+    expect(errors).toEqual([]);
   });
-  page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
-  await open(page, await fixture(1));
-  await page.getByRole("button", { name: "ツール", exact: true }).click();
-  await page.getByRole("button", { name: "OCR", exact: true }).click();
-  await page.getByLabel("言語", { exact: true }).selectOption("eng");
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "適用", exact: true })
-    .click();
-  await expect(page.locator(".status-message")).toContainText("OCR完了", {
-    timeout: 90000,
-  });
-  const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "保存", exact: true }).click();
-  const f = await download;
-  expect(await f.failure()).toBeNull();
-  expect(external).toEqual([]);
-  expect(errors).toEqual([]);
-});
+}
 test("redaction reconstructs a fresh PDF without source text", async ({
   page,
 }, info) => {

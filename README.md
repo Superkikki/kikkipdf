@@ -2,9 +2,13 @@
 
 Tauri 2 / React / TypeScript / Vite / Rust で作った、ローカル処理のPDF編集デスクトップアプリです。Windows 11を第一対象とし、画面のデザイン・アプリの編集モデル・操作コマンドは独自実装です。PDFの解釈・描画・書き出しにはOSSを使用しています。
 
-**バージョン0.32.0は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
+**バージョン0.32.1は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
 
-Windows配布物は [0.32.0インストーラー](artifacts/windows/Kikki.PDF_0.32.0_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.32.0_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.32.0.txt)も同梱します。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.32.0)からもダウンロードできます。
+Windows配布物は [0.32.1インストーラー](artifacts/windows/Kikki.PDF_0.32.1_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.32.1_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.32.1.txt)も同梱します。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.32.1)からもダウンロードできます。
+
+## 0.32.1：20MB以下のWindowsインストーラー
+
+インストーラーを23.13MBから**15.85MB（15,853,075 bytes）**に削減しました。ZIPも15.81MBです（MBは1,000,000 bytes）。未使用の旧方式OCRエンジンと重複したWASMを配布対象から外し、日本語・英語のオフラインOCR、SIMD対応／非対応の両エンジン、編集機能を保持しています。
 
 ## 0.32.0：既存Type 3フォントの直接編集
 

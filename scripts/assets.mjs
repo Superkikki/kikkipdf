@@ -31,14 +31,26 @@ await copyFile(
   new URL("../node_modules/tesseract.js/dist/worker.min.js", import.meta.url),
   new URL("ocr/worker.min.js", root),
 );
-for (const f of await readdir(
-  new URL("../node_modules/tesseract.js-core/", import.meta.url),
-)) {
-  if (/\.wasm(\.js)?$/.test(f))
-    await copyFile(
-      new URL(`../node_modules/tesseract.js-core/${f}`, import.meta.url),
-      new URL(`ocr/${f}`, root),
-    );
+// createWorker uses LSTM_ONLY. Each browser .wasm.js embeds its own WASM;
+// separate .wasm files and the legacy OCR engines are never requested.
+// Keep both LSTM variants so browsers without SIMD still work offline.
+const ocrCores = [
+  "tesseract-core-lstm.wasm.js",
+  "tesseract-core-simd-lstm.wasm.js",
+];
+for (const f of ocrCores) {
+  await copyFile(
+    new URL(`../node_modules/tesseract.js-core/${f}`, import.meta.url),
+    new URL(`ocr/${f}`, root),
+  );
+}
+// Clean generated assets from earlier builds as well as fresh installations.
+for (const f of await readdir(new URL("ocr/", root))) {
+  if (
+    /^tesseract-core(?:-simd)?(?:-lstm)?\.wasm(?:\.js)?$/.test(f) &&
+    !ocrCores.includes(f)
+  )
+    await unlink(new URL(`ocr/${f}`, root));
 }
 const downloads = {
   "NotoSansJP-Regular.otf":
