@@ -127,7 +127,7 @@ export async function extractPageTexts(
             .join(""),
       );
       totalCharacters += parts[parts.length - 1].length;
-      if (totalCharacters > maxCharacters) throw Error("Wordへの書き出しは文字数合計1000万文字までです。");
+      if (totalCharacters > maxCharacters) throw Error("文字数の合計が1000万文字を超えました。");
       page.cleanup();
       progress((i + 1) / indices.length);
     }

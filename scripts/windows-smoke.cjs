@@ -124,8 +124,28 @@ async function verifyObjectContext(page, root) {
     await expect(page.locator(".status-message")).toContainText("Word形式でテキストを保存", { timeout: 30000 });
     const documentXml = Buffer.from(unzipSync(await fs.readFile(docx))["word/document.xml"]).toString("utf8");
     if (!documentXml.includes("KIKKI POWERPOINT TEST 456")) throw Error("Word document does not contain expected text");
+    for (const [format, name, outputName, status] of [
+      ["excel", "Excel形式で書き出し（テキスト）", "exported-text.xlsx", "Excel形式でテキストを保存"],
+      ["ppt", "PowerPoint形式で書き出し（画像）", "exported-image.pptx", "PowerPoint形式で画像を保存"],
+    ]) {
+      await page.locator(".menu > summary").filter({ hasText: "ファイル" }).click();
+      await page.getByRole("button", { name, exact: true }).click();
+      const panel = page.getByRole("dialog", { name });
+      const output = path.join(process.env.KIKKI_SMOKE_DIR, outputName);
+      const pickingSave = pickNativeFile(output);
+      await panel.getByRole("button", { name: "書き出し", exact: true }).click();
+      await pickingSave;
+      await expect(page.locator(".status-message")).toContainText(status, { timeout: 30000 });
+      const files = unzipSync(await fs.readFile(output));
+      if (format === "excel") {
+        const sheet = Buffer.from(files["xl/worksheets/sheet1.xml"]).toString("utf8");
+        if (!sheet.includes("KIKKI POWERPOINT TEST 456") || !sheet.includes('t="inlineStr"')) throw Error("Excel text missing");
+      } else {
+        if (!files["ppt/slides/slide1.xml"] || !Object.keys(files).some(n => n.startsWith("ppt/media/image"))) throw Error("PowerPoint slide image missing");
+      }
+    }
     if (errors.length) throw Error(JSON.stringify(errors));
-    console.log(JSON.stringify({ officeWord: true, officeExcel: true, officePowerPoint: true, savedPdf: true, wordTextExport: true, sourcePreserved: true, errors, elapsedMs: Date.now() - started }));
+    console.log(JSON.stringify({ officeWord: true, officeExcel: true, officePowerPoint: true, savedPdf: true, wordTextExport: true, excelTextExport: true, powerpointImageExport: true, sourcePreserved: true, errors, elapsedMs: Date.now() - started }));
     await browser.close(); return;
   }
   if (process.env.KIKKI_SMOKE_TYPE3_ONLY === "1") {

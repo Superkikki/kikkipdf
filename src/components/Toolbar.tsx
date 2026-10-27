@@ -41,6 +41,8 @@ import type { Tool } from "../viewer/PageView";
 export type Action =
   | "officeImport"
   | "officeExportWord"
+  | "officeExportExcel"
+  | "officeExportPowerPoint"
   | "bates"
   | "optimize"
   | "batchPdf"
@@ -195,6 +197,8 @@ export function Toolbar({
               ["imagesPdf", "画像からPDFを作成", ""],
               ["officeImport", "OfficeからPDFを作成", ""],
               ["officeExportWord", "Word形式で書き出し（テキスト）", ""],
+              ["officeExportExcel", "Excel形式で書き出し（テキスト）", ""],
+              ["officeExportPowerPoint", "PowerPoint形式で書き出し（画像）", ""],
               ["optimize", "PDF圧縮・最適化", ""],
               ["batchPdf", "複数PDFを一括処理", ""],
               ["png", "現在のページをPNGへ", ""],

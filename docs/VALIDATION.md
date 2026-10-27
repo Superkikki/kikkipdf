@@ -1,5 +1,14 @@
 # 検証記録
 
+## 0.34.0：Excelテキスト・PowerPoint画像出力（2026-10-27）
+
+- 選択ページを逆順でExcel・PowerPointに出力し、Excelのページ番号付きシート・日本語を含む編集内容・XML特殊文字・文字列セル、PowerPointのスライド順・埋め込まれたJPEGを検証。外部リクエスト0件。未適用の墨消し候補がある場合は両形式とも出力を拒否。
+- 生成物をMicrosoft ExcelとPowerPointで開き、Excelで `=1+1` が数式ではなく文字列であること、PowerPointの2スライドにそれぞれ画像があることを確認。PowerPointからPDFに戻し、2ページとも画像を含むことを確認。
+- Windows版の画面からWord・Excel・PowerPointの読み込みとPDF保存、Word・ExcelテキストおよびPowerPoint画像出力を確認（最終ビルド24.1秒、JavaScriptエラー0件）。同じ方式でWindows版から出力したファイルもExcelとPowerPointで開き、セルと画像を検証。
+- `npm run check`でlint・単体テスト359件（54ファイル）・TypeScript・production buildが成功。更新後のOffice関連画面テスト6件が成功。実行時依存関係の `npm audit --omit=dev` は既知の脆弱性0件。Zod 4.6.7に更新し、PptxGenJSの画像解析依存は修正版2.0.4に固定。開発用依存関係を含む監査では別途4件が残る。
+- Windows MSVC release・NSIS生成が成功。本体とインストーラーのFileVersion／ProductVersionは0.34.0で一致。配布EXEは15,991,751 bytes、ZIPは15,950,511 bytesでいずれも20,000,000 bytes未満。ZIP内のバイト一致・SHA-256を確認。配布物は未署名。新規Windows環境でのインストール／アンインストールは未検証。
+- 修正を含む最終Windows版の総合native smokeが成功（152秒、JavaScriptエラー0件）。日英OCR、既存文字編集、保存、暗号化／復号、フォーム／XFDF、添付・しおり、比較などを確認。
+
 ## 0.33.0：Office変換とWordテキスト出力（2026-10-27）
 
 - WindowsのMicrosoft OfficeでWord・Excel・PowerPointの実ファイルをPDFへ変換し、変換後の文字を確認。アプリ画面のファイル選択・変換・PDF保存と、元ファイルのSHA-256不変を3形式で確認（22.6秒、JavaScriptエラー0件）。

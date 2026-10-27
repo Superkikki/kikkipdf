@@ -1,7 +1,7 @@
 {
   "name": "kikki-pdf",
   "private": true,
-  "version": "0.33.0",
+  "version": "0.34.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -25,10 +25,11 @@
     "lucide-react": "^0.468.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.3.289",
+    "pptxgenjs": "4.0.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "tesseract.js": "^6.0.1",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.34.0",
@@ -45,5 +46,8 @@
     "typescript-eslint": "^8.40.0",
     "vite": "^6.3.6",
     "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "image-size": "2.0.4"
   }
 }

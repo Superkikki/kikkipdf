@@ -22,7 +22,9 @@ if ($OfficeOnly) {
         Copy-Item (Join-Path $Root ('tests\fixtures\' + $Name)) (Join-Path $TestDir $Name) -Force
         Remove-Item (Join-Path $TestDir ($Name + '.pdf')) -Force -ErrorAction SilentlyContinue
     }
-    Remove-Item (Join-Path $TestDir 'exported-text.docx') -Force -ErrorAction SilentlyContinue
+    foreach ($Name in @('exported-text.docx', 'exported-text.xlsx', 'exported-image.pptx')) {
+        Remove-Item (Join-Path $TestDir $Name) -Force -ErrorAction SilentlyContinue
+    }
 }
 $env:KIKKI_SMOKE_DIR = $TestDir
 $env:KIKKI_SMOKE_OFFICE_ONLY = if ($OfficeOnly) {'1'} else {''}

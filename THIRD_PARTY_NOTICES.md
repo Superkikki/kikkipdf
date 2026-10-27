@@ -40,7 +40,24 @@ Kikki PDF includes the following open-source components. Application source lice
 | webidl-conversions | 3.0.1 | BSD-2-Clause |
 | whatwg-url | 5.0.0 | MIT |
 | zlibjs | 0.3.1 | MIT |
-| zod | 4.6.5 | MIT |
+| zod | 4.6.7 | MIT |
+| core-util-is | 1.0.3 | MIT |
+| https | 1.0.0 | ISC |
+| image-size | 2.0.4 | MIT |
+| immediate | 3.0.6 | MIT |
+| inherits | 2.0.4 | ISC |
+| isarray | 1.0.0 | MIT |
+| jszip | 3.10.2 | (MIT OR GPL-3.0-or-later) |
+| lie | 3.3.0 | MIT |
+| pptxgenjs | 4.0.1 | MIT |
+| @types/node | 22.20.5 | MIT |
+| undici-types | 6.21.0 | MIT |
+| process-nextick-args | 2.0.1 | MIT |
+| readable-stream | 2.3.8 | MIT |
+| safe-buffer | 5.1.2 | MIT |
+| setimmediate | 1.0.5 | MIT |
+| string_decoder | 1.1.1 | MIT |
+| util-deprecate | 1.0.2 | MIT |
 
 ## Rust dependencies (including platform-specific/build dependencies)
 

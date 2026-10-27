@@ -7,6 +7,7 @@ import { isTauri, pickFiles, saveBytes } from "../platform/files";
 import { transformPdf } from "../platform/pdfSecurity";
 import { convertOffice, type OfficeInput } from "../platform/office";
 import { createTextDocx } from "../office/docx";
+import { createTextXlsx } from "../office/xlsx";
 import { importPdf, releasePdfs } from "../viewer/pdf";
 import { exportProject, exportDocument, createImagePdf, exportSplitZip } from "../export/client";
 import { exportPageImages, exportText, extractPageTexts } from "../export/batch";
@@ -144,6 +145,8 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
           "jpeg",
           "encrypt",
           "officeExportWord",
+          "officeExportExcel",
+          "officeExportPowerPoint",
         ].includes(a) &&
         doc.pages.some((p) => p.objects.some((o) => o.kind === "redaction"))
       ) {
@@ -152,6 +155,42 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
         );
       }
       switch (a) {
+        case "officeExportExcel": {
+          const result = await ask({
+            title: "Excel形式で書き出し（テキスト）",
+            message: "選択した各ページの文字を別々のシートに出力し、1行を1つの文字列セルにします。元の表の列・数値・数式・画像・書式は再現しません。スキャン画像は先にOCRを実行してください。200ページ・1000万文字まで。",
+            fields: [{ key: "range", label: "ページ範囲（空欄は全ページ）" }],
+            confirm: "書き出し",
+          });
+          if (!result) break;
+          const indices = parseRange(result.range, doc.pages.length);
+          if (indices.length > 200) throw Error("Excelへの書き出しは200ページまでです。");
+          await work("Excel形式へ書き出し中", async (signal) => {
+            const texts = await extractPageTexts(doc, indices, progress, signal, 10_000_000);
+            if (signal.aborted) throw new DOMException("キャンセル", "AbortError");
+            const bytes = createTextXlsx(texts, indices.map(i => i + 1));
+            if (await saveBytes(bytes, doc.name.replace(/\.pdf$/i, "") + ".xlsx")) setStatus("Excel形式でテキストを保存しました");
+          });
+          break;
+        }
+        case "officeExportPowerPoint": {
+          const result = await ask({
+            title: "PowerPoint形式で書き出し（画像）",
+            message: "選択したページを画像化し、1ページずつスライドにします。文字・図形は画像のため個別編集できません。スライドの大きさは最初のページの比率を基準とし、異なる比率のページには余白が入ります。144dpi・最大100ページ・画像合計48MiBまで。",
+            fields: [{ key: "range", label: "ページ範囲（空欄は全ページ）" }],
+            confirm: "書き出し",
+          });
+          if (!result) break;
+          const indices = parseRange(result.range, doc.pages.length);
+          if (indices.length > 100) throw Error("PowerPointへの書き出しは100ページまでです。");
+          await work("PowerPoint形式へ書き出し中", async (signal) => {
+            const { exportImagePptx } = await import("../office/pptxExport");
+            const bytes = await exportImagePptx(doc, indices, progress, signal);
+            if (signal.aborted) throw new DOMException("キャンセル", "AbortError");
+            if (await saveBytes(bytes, doc.name.replace(/\.pdf$/i, "") + ".pptx")) setStatus("PowerPoint形式で画像を保存しました");
+          });
+          break;
+        }
         case "officeExportWord": {
           const confirmed = await ask({
             title: "Word形式で書き出し（テキスト）",
