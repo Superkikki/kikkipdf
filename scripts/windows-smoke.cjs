@@ -87,6 +87,19 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_TYPE3_ONLY === "1") {
+    await page.keyboard.press("Escape"); const before = await page.locator(".viewer-scroll .textLayer span").filter({ hasText: "Neighbour" }).first().boundingBox();
+    const original = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^AB$/ }).first(); await expect(original).toBeVisible();
+    const originalBox = await original.boundingBox(); if (!before || !originalBox) throw Error("Text selection bounds unavailable");
+    console.log(JSON.stringify({ type3Before: originalBox, neighbourBefore: before }));
+    await original.click({ position: { x: 2, y: Math.max(1, originalBox.height / 2) } });
+    const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true }); await expect(input).toBeFocused(); await input.fill("Changed"); await input.press("Enter");
+    await page.getByRole("button", { name: "保存", exact: true }).click(); await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+    const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf"), picking = pickNativeFile(fixture); await page.keyboard.press("Control+o"); await picking;
+    await expect(page.locator(".viewer-scroll .textLayer").first()).toContainText("Changed"); const after = await page.locator(".viewer-scroll .textLayer span").filter({ hasText: "Neighbour" }).first().boundingBox();
+    if (!before || !after || Math.abs(before.x - after.x) > 1 || Math.abs(before.y - after.y) > 1) throw Error("Following text position changed");
+    if (errors.length) throw Error(JSON.stringify(errors)); console.log(JSON.stringify({ ok: true, type3: true, errors, elapsedMs: Date.now() - started })); await browser.close(); return;
+  }
   if (process.env.KIKKI_SMOKE_UNICODE_ONLY === "1") {
     await page.keyboard.press("Escape"); await page.getByRole("button", { name: "ページ管理", exact: true }).click(); await page.getByRole("button", { name: "ベイツ番号", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "ベイツ番号を追加", exact: true }); await dialog.getByLabel("ベイツ番号を付けるページ範囲").fill("1"); await dialog.getByLabel("ベイツ番号の接頭辞").fill("案件-"); await dialog.getByLabel("ベイツ番号の開始番号").fill("98"); await dialog.getByLabel("ベイツ番号の桁数").fill("3");

@@ -10,6 +10,7 @@ import {
   decodePDFRawStream,
 } from "pdf-lib";
 import { unicodeMap } from "./cmap";
+import { parseContent } from "./parser";
 import { embeddedCMap } from "./encodingCMap";
 import { characterCodes, mappedUnicode, predefinedCMap } from "./predefinedCMaps";
 import { glyphUnicode, fontEncoding, standardWidths } from "./simpleFonts";
@@ -171,7 +172,21 @@ export async function sourceFonts(
             return glyphs;
           },
         });
-      } else if (type === "Type1" || type === "MMType1" || type === "TrueType") {
+      } else if (type === "Type1" || type === "MMType1" || type === "TrueType" || type === "Type3") {
+        // Type 3 widths are in glyph space. Only the standard matrix is safe
+        // for the existing horizontal advance and selection-box calculation.
+        let charProcs: PDFDict | undefined;
+        if (type === "Type3") {
+          const matrix = dict.lookupMaybe(key("FontMatrix"), PDFArray);
+          if (!matrix || matrix.size() !== 6) throw Error("Type 3のフォント変換行列がありません。");
+          const values = Array.from({ length: 6 }, (_, i) => matrix.lookup(i, PDFNumber).asNumber());
+          const expected = [0.001, 0, 0, 0.001, 0, 0];
+          if (values.some((value, i) => !Number.isFinite(value) || Math.abs(value - expected[i]) > 1e-10))
+            throw Error("標準以外のType 3フォント変換行列は未対応です。");
+          charProcs = dict.lookupMaybe(key("CharProcs"), PDFDict);
+          if (!charProcs || !dict.has(key("Encoding")) || !dict.has(key("Widths")) || !dict.has(key("FirstChar")) || !dict.has(key("LastChar")))
+            throw Error("Type 3の字形・文字対応・幅情報を確認できません。");
+        }
         const encoding = dict.lookup(key("Encoding"));
         if (encoding && !(encoding instanceof PDFName) && !(encoding instanceof PDFDict))
           continue;
@@ -183,6 +198,11 @@ export async function sourceFonts(
               : undefined;
         const first = getNumber(dict, "FirstChar", 0),
           widths = dict.lookupMaybe(key("Widths"), PDFArray);
+        if (type === "Type3") {
+          const last = getNumber(dict, "LastChar");
+          if (!Number.isInteger(first) || !Number.isInteger(last) || first < 0 || last > 255 || last < first || !widths || widths.size() !== last - first + 1)
+            throw Error("Type 3の文字コードと幅の範囲が一致しません。");
+        }
         const differences = encoding instanceof PDFDict
           ? encoding.lookup(key("Differences"))
           : undefined;
@@ -191,7 +211,7 @@ export async function sourceFonts(
         const flags = descriptor?.has(key("Flags")) ? getNumber(descriptor, "Flags") : undefined;
         if (flags !== undefined && (!Number.isInteger(flags) || flags < 0 || flags > 0xffffffff)) continue;
         const symbolic = !!((flags ?? 0) & 4) || /Symbol|Dingbats|Wingdings/i.test(name);
-        const implicitEncoding = !embedded && !symbolic && type !== "TrueType" ? "StandardEncoding"
+        const implicitEncoding = type === "Type3" ? "" : !embedded && !symbolic && type !== "TrueType" ? "StandardEncoding"
           : type === "TrueType" && flags !== undefined && !symbolic
             ? flags & 32 ? "StandardEncoding" : "WinAnsiEncoding" : "";
         const builtin = type === "Type1" && !embedded &&
@@ -228,11 +248,26 @@ export async function sourceFonts(
           continue;
         if (!widths && !builtin) continue;
         if (!base && !differences && !map) continue;
+        const type3Widths = new Map<string, number>(); let decodedType3Bytes = 0;
         result.set(resourceName.decodeText(), {
           name,
           glyphs(bytes) {
             return Array.from(bytes, (code) => {
               const glyphName = glyphNames[code];
+              if (type === "Type3") {
+                if (!glyphName || glyphName === ".notdef") throw Error("Type 3の字形名を確認できません。");
+                const procedure = charProcs?.lookup(key(glyphName));
+                if (!(procedure instanceof PDFRawStream)) throw Error("Type 3の字形データを確認できません。");
+                if (!type3Widths.has(glyphName)) {
+                  const decoded = boundedDecode(procedure, 1024 * 1024); decodedType3Bytes += decoded.length;
+                  if (decodedType3Bytes > 16 * 1024 * 1024) throw Error("Type 3の字形データが大きすぎます。");
+                  const firstOp = parseContent(decoded)[0];
+                  if (!firstOp || !["d0", "d1"].includes(firstOp.operator) || firstOp.args.length !== (firstOp.operator === "d0" ? 2 : 6) ||
+                    !firstOp.args.every(value => typeof value === "number" && Number.isFinite(value)) || firstOp.args[1] !== 0)
+                    throw Error("Type 3の字形幅を検証できません。");
+                  type3Widths.set(glyphName, firstOp.args[0] as number);
+                }
+              }
               const text = map ? map.get(code) : glyphUnicode(glyphName);
               if (text === undefined || !text)
                 throw Error("文字コードに対応するUnicodeを検証できません。");
@@ -243,6 +278,8 @@ export async function sourceFonts(
                 : builtin && Object.hasOwn(builtin, glyphName) ? builtin[glyphName] : NaN;
               if (!Number.isFinite(width) || width < 0 || width > 100000)
                 throw Error("文字幅が不正です。");
+              if (type === "Type3" && Math.abs(type3Widths.get(glyphName)! - width) > 1e-7)
+                throw Error("Type 3の字形幅とフォント幅が一致しません。");
               return { code, text, width, wordSpace: code === 32,
                 // PDF.js falls back to the byte value for unnamed Dingbats
                 // Unicode extraction, even though the rendered glyph is known.

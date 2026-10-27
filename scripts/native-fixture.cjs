@@ -1,6 +1,14 @@
 const { PDFDocument, StandardFonts, PDFOperator, PDFName, PDFDict, PDFHexString, PDFString, degrees } = require("pdf-lib");
 const { writeFile, readFile } = require("node:fs/promises");
 (async () => {
+  if (process.argv[3] === "type3") {
+    const pdf = await PDFDocument.create(), page = pdf.addPage([420, 400]), c = pdf.context;
+    const a = c.register(c.flateStream("500 0 0 0 500 700 d1 0 0 500 700 re f")), b = c.register(c.flateStream("600 0 d0 0 0 600 700 re f"));
+    const type3 = c.register(c.obj({ Type: "Font", Subtype: "Type3", Name: "F3", FontBBox: [0, 0, 600, 700], FontMatrix: [0.001, 0, 0, 0.001, 0, 0], FirstChar: 65, LastChar: 66, Widths: [500, 600], Encoding: { Differences: [65, "A", "B"] }, CharProcs: { A: a, B: b }, Resources: {} }));
+    const neighbour = await pdf.embedFont(StandardFonts.Helvetica); page.node.set(PDFName.of("Resources"), c.obj({ Font: { F3: type3, F2: neighbour.ref } }));
+    page.node.set(PDFName.of("Contents"), c.register(c.flateStream("BT /F3 20 Tf 1 0 0 1 40 300 Tm (A) Tj (B) Tj /F2 20 Tf ( Neighbour) Tj ET")));
+    await writeFile(process.argv[2], await pdf.save()); return;
+  }
   if (process.argv[3] === "processing") {
     const pdf = await PDFDocument.create(), page = pdf.addPage([400, 500]);
     pdf.setTitle("Native batch title"); page.drawText("Processing fixture", { x: 30, y: 460, size: 14 });
