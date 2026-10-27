@@ -1,5 +1,14 @@
 # 検証記録
 
+## 0.33.0：Office変換とWordテキスト出力（2026-10-27）
+
+- WindowsのMicrosoft OfficeでWord・Excel・PowerPointの実ファイルをPDFへ変換し、変換後の文字を確認。アプリ画面のファイル選択・変換・PDF保存と、元ファイルのSHA-256不変を3形式で確認（22.6秒、JavaScriptエラー0件）。
+- 現在の編集内容を含む2ページのPDFをテキストDOCXへ出力し、日本語・XMLの特殊文字・ページ区切りを検証。Windows版で保存したDOCXをMicrosoft Wordで開いてPDFへ戻し、文字が残ることを確認。画像・書式・表・レイアウトの再現は実装していない。
+- WordのPDF直接読み込みはこの環境で待機が解消しなかったため、PDFからWordは独立したテキスト抽出方式とした。Excel・PowerPointへのPDF変換は未対応。Office文書に含まれるすべての外部接続や実マクロ付き文書の動作は未検証。
+- `npm run check`でlint・単体テスト355件（52ファイル）・TypeScript・production buildが成功。Rustテスト8件が成功。画面テスト7件が成功（Word出力・未適用の墨消し候補がある場合の出力拒否・従来のテキスト抽出・保存など）。
+- Windows MSVC release・NSIS生成が成功。本体とインストーラーのFileVersion／ProductVersionは0.33.0で一致。配布EXEは15,875,950 bytes、ZIPは15,834,704 bytesでいずれも20,000,000 bytes未満。ZIP内バイト一致・SHA-256を確認。配布物は未署名。新規Windows環境でのインストール／アンインストールは未検証。
+- 最終Windows版の総合native smokeが成功（153秒、JavaScriptエラー0件）。日英OCR、文字編集、保存、暗号化／復号、フォーム／XFDF、添付・しおり、PDF比較などを確認。
+
 ## 0.32.1：Windows配布サイズの削減（2026-10-27）
 
 - OCRの使用モードがLSTM_ONLYであること、Tesseractのブラウザー用`.wasm.js`にWASM本体が埋め込まれていることを依存パッケージの実装で確認。使用する2種類のLSTMエンジンだけを配置し、旧方式のエンジンと別ファイルのWASMを清掃。ビルドごとに資産準備を実行。

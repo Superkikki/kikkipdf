@@ -39,6 +39,8 @@ import {
 import { APP_NAME } from "../config";
 import type { Tool } from "../viewer/PageView";
 export type Action =
+  | "officeImport"
+  | "officeExportWord"
   | "bates"
   | "optimize"
   | "batchPdf"
@@ -191,6 +193,8 @@ export function Toolbar({
               ["rename", "名前を変更", "F2"],
               ["merge", "PDFを結合 / 追加", ""],
               ["imagesPdf", "画像からPDFを作成", ""],
+              ["officeImport", "OfficeからPDFを作成", ""],
+              ["officeExportWord", "Word形式で書き出し（テキスト）", ""],
               ["optimize", "PDF圧縮・最適化", ""],
               ["batchPdf", "複数PDFを一括処理", ""],
               ["png", "現在のページをPNGへ", ""],
@@ -203,7 +207,7 @@ export function Toolbar({
                 key={id}
                 disabled={
                   !hasDocument &&
-                  !["open", "new", "projectOpen", "imagesPdf", "batchPdf"].includes(id)
+                  !["open", "new", "projectOpen", "imagesPdf", "officeImport", "batchPdf"].includes(id)
                 }
                 onClick={(e) => {
                   e.currentTarget.closest("details")?.removeAttribute("open");

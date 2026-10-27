@@ -1,4 +1,4 @@
-param([string]$Mode = 'release', [string]$Target = 'x86_64-pc-windows-msvc', [switch]$ContextOnly, [switch]$NavigationOnly, [switch]$FormOnly, [switch]$ImageOnly, [switch]$VerticalOnly, [switch]$ChoiceOnly, [switch]$BookmarkOnly, [switch]$InlineOnly, [switch]$UiOnly, [switch]$CjkOnly, [switch]$ProductivityOnly, [switch]$ReviewImagesOnly, [switch]$OrganizationOnly, [switch]$BookmarkFilesOnly, [switch]$AttachmentsOnly, [switch]$PageOrderOnly, [switch]$ProcessingOnly, [switch]$BatesOnly, [switch]$UnicodeOnly, [switch]$Type3Only)
+param([string]$Mode = 'release', [string]$Target = 'x86_64-pc-windows-msvc', [switch]$ContextOnly, [switch]$NavigationOnly, [switch]$FormOnly, [switch]$ImageOnly, [switch]$VerticalOnly, [switch]$ChoiceOnly, [switch]$BookmarkOnly, [switch]$InlineOnly, [switch]$UiOnly, [switch]$CjkOnly, [switch]$ProductivityOnly, [switch]$ReviewImagesOnly, [switch]$OrganizationOnly, [switch]$BookmarkFilesOnly, [switch]$AttachmentsOnly, [switch]$PageOrderOnly, [switch]$ProcessingOnly, [switch]$BatesOnly, [switch]$UnicodeOnly, [switch]$Type3Only, [switch]$OfficeOnly)
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
 $Exe = Join-Path $Root "src-tauri\target\$Target\$Mode\kikki-pdf.exe"
@@ -17,7 +17,15 @@ Copy-Item (Join-Path $Root 'public\assets\pdfjs\standard_fonts\LiberationSans-Re
 & 'C:\Program Files\nodejs\node.exe' (Join-Path $PSScriptRoot 'native-fixture.cjs') $Fixture $(if ($Type3Only) {'type3'} elseif ($UnicodeOnly) {'page-order'} elseif ($BatesOnly) {'page-order'} elseif ($ProcessingOnly) {'processing'} elseif ($PageOrderOnly) {'page-order'} elseif ($AttachmentsOnly) {'attachments'} elseif ($BookmarkFilesOnly) {'bookmarks'} elseif ($OrganizationOnly) {'organization'} elseif ($ReviewImagesOnly) {'review-images'} elseif ($CjkOnly) {'cjk'} elseif ($FormOnly) {'form'} elseif ($ImageOnly) {'images'} elseif ($VerticalOnly) {'vertical'} elseif ($ChoiceOnly) {'choices'} elseif ($BookmarkOnly) {'bookmarks'} elseif ($InlineOnly) {'inline'} else {'full'})
 if ($LASTEXITCODE -ne 0) { throw 'Could not create test PDF' }
 Copy-Item (Join-Path $Root 'src-tauri\icons\128x128.png') (Join-Path $TestDir 'replacement.png') -Force
+if ($OfficeOnly) {
+    foreach ($Name in @('office-word.docx', 'office-excel.xlsx', 'office-powerpoint.pptx')) {
+        Copy-Item (Join-Path $Root ('tests\fixtures\' + $Name)) (Join-Path $TestDir $Name) -Force
+        Remove-Item (Join-Path $TestDir ($Name + '.pdf')) -Force -ErrorAction SilentlyContinue
+    }
+    Remove-Item (Join-Path $TestDir 'exported-text.docx') -Force -ErrorAction SilentlyContinue
+}
 $env:KIKKI_SMOKE_DIR = $TestDir
+$env:KIKKI_SMOKE_OFFICE_ONLY = if ($OfficeOnly) {'1'} else {''}
 $env:KIKKI_SMOKE_TYPE3_ONLY = if ($Type3Only) {'1'} else {''}
 $env:KIKKI_SMOKE_UNICODE_ONLY = if ($UnicodeOnly) {'1'} else {''}
 $env:KIKKI_SMOKE_BATES_ONLY = if ($BatesOnly) {'1'} else {''}

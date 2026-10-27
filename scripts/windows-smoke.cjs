@@ -87,6 +87,47 @@ async function verifyObjectContext(page, root) {
   await expect(
     page.locator(".viewer-scroll .page-view[data-rendered=true]").first(),
   ).toBeVisible();
+  if (process.env.KIKKI_SMOKE_OFFICE_ONLY === "1") {
+    const fixtureDir = process.env.KIKKI_SMOKE_DIR;
+    const crypto = require("node:crypto");
+    for (const [file, expected] of [["office-word.docx", "KIKKI WORD TEST 789"], ["office-excel.xlsx", "KIKKI EXCEL TEST 123"], ["office-powerpoint.pptx", "KIKKI POWERPOINT TEST 456"]]) {
+      const source = path.join(fixtureDir, file);
+      const before = crypto.createHash("sha256").update(await fs.readFile(source)).digest("hex");
+      const picking = pickNativeFile(source);
+      await page.locator(".menu > summary").filter({ hasText: "ファイル" }).click();
+      await page.getByRole("button", { name: "OfficeからPDFを作成", exact: true }).click();
+      await picking;
+      const dialog = page.getByRole("dialog", { name: "OfficeからPDFを作成" });
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole("button", { name: "変換", exact: true }).click();
+      await expect(page.locator(".status-message")).toContainText("Office文書からPDFを作成", { timeout: 90000 });
+      await expect(page.locator(".viewer-scroll .textLayer").first()).toContainText(expected, { timeout: 30000 });
+      await expect(page.locator(".unsaved-dot")).toHaveCount(1);
+      const output = path.join(process.env.KIKKI_SMOKE_DIR, file + ".pdf");
+      const saving = pickNativeFile(output);
+      await page.getByRole("button", { name: "保存", exact: true }).click();
+      await saving;
+      await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
+      const saved = await PDFDocument.load(await fs.readFile(output));
+      if (!saved.getPageCount()) throw Error("Converted PDF has no pages");
+      const after = crypto.createHash("sha256").update(await fs.readFile(source)).digest("hex");
+      if (before !== after) throw Error("Office source was changed");
+    }
+    await page.locator(".menu > summary").filter({ hasText: "ファイル" }).click();
+    await page.getByRole("button", { name: "Word形式で書き出し（テキスト）", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Word形式で書き出し（テキスト）" });
+    await expect(dialog).toContainText("元のレイアウトは再現しません");
+    const docx = path.join(process.env.KIKKI_SMOKE_DIR, "exported-text.docx");
+    const savingWord = pickNativeFile(docx);
+    await dialog.getByRole("button", { name: "書き出し", exact: true }).click();
+    await savingWord;
+    await expect(page.locator(".status-message")).toContainText("Word形式でテキストを保存", { timeout: 30000 });
+    const documentXml = Buffer.from(unzipSync(await fs.readFile(docx))["word/document.xml"]).toString("utf8");
+    if (!documentXml.includes("KIKKI POWERPOINT TEST 456")) throw Error("Word document does not contain expected text");
+    if (errors.length) throw Error(JSON.stringify(errors));
+    console.log(JSON.stringify({ officeWord: true, officeExcel: true, officePowerPoint: true, savedPdf: true, wordTextExport: true, sourcePreserved: true, errors, elapsedMs: Date.now() - started }));
+    await browser.close(); return;
+  }
   if (process.env.KIKKI_SMOKE_TYPE3_ONLY === "1") {
     await page.keyboard.press("Escape"); const before = await page.locator(".viewer-scroll .textLayer span").filter({ hasText: "Neighbour" }).first().boundingBox();
     const original = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^AB$/ }).first(); await expect(original).toBeVisible();

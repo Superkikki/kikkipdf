@@ -98,11 +98,12 @@ export async function exportPageImages(
   }
 }
 
-export async function exportText(
+export async function extractPageTexts(
   model: DocumentModel,
   indices: number[],
   progress: (n: number) => void,
   signal: AbortSignal,
+  maxCharacters = Infinity,
 ) {
   const bytes = await exportDocument(
     { ...model, flattenForms: true },
@@ -112,24 +113,36 @@ export async function exportText(
   );
   const pdf = await getDocument({ data: bytes }).promise,
     parts: string[] = [];
+  let totalCharacters = 0;
   try {
     for (let i = 0; i < indices.length; i++) {
       if (signal.aborted) throw new DOMException("キャンセル", "AbortError");
       const page = await pdf.getPage(i + 1),
         content = await page.getTextContent();
       parts.push(
-        `--- ページ ${indices[i] + 1} ---\n` +
-          content.items
+        content.items
             .map((item) =>
               "str" in item ? item.str + (item.hasEOL ? "\n" : " ") : "",
             )
             .join(""),
       );
+      totalCharacters += parts[parts.length - 1].length;
+      if (totalCharacters > maxCharacters) throw Error("Wordへの書き出しは文字数合計1000万文字までです。");
       page.cleanup();
       progress((i + 1) / indices.length);
     }
-    return new TextEncoder().encode(parts.join("\n\n"));
+    return parts;
   } finally {
     await pdf.loadingTask.destroy();
   }
+}
+
+export async function exportText(
+  model: DocumentModel,
+  indices: number[],
+  progress: (n: number) => void,
+  signal: AbortSignal,
+) {
+  const parts = await extractPageTexts(model, indices, progress, signal);
+  return new TextEncoder().encode(parts.map((part, i) => `--- ページ ${indices[i] + 1} ---\n${part}`).join("\n\n"));
 }

@@ -6,7 +6,7 @@ export interface LocalFile {
   bytes: Uint8Array;
 }
 export async function pickFiles(
-  kind: "pdf" | "batchPdf" | "image" | "project" | "attachment" | "font" | "xfdf" | "csv" | "json" = "pdf",
+  kind: "pdf" | "batchPdf" | "office" | "image" | "project" | "attachment" | "font" | "xfdf" | "csv" | "json" = "pdf",
   multiple = false,
 ): Promise<LocalFile[]> {
   if (isTauri()) {
@@ -26,7 +26,7 @@ export async function pickFiles(
       paths.map((path) =>
         readPath(
           path,
-          kind === "font" ? { maxBytes: 32 * 1024 * 1024 }
+          (kind === "font" || kind === "office") ? { maxBytes: 32 * 1024 * 1024 }
             : (kind === "xfdf" || kind === "csv" || kind === "json") ? { maxBytes: 8 * 1024 * 1024 } : undefined,
         ),
       ),
@@ -37,7 +37,9 @@ export async function pickFiles(
     input.type = "file";
     input.multiple = multiple;
     input.accept =
-      kind === "batchPdf"
+      kind === "office"
+        ? ".docx,.xlsx,.pptx"
+        : kind === "batchPdf"
         ? ".pdf"
         : kind === "pdf"
         ? ".pdf,.kpdf"
@@ -63,7 +65,7 @@ export async function pickFiles(
       }
       void Promise.all(
         Array.from(input.files ?? []).map(async (f) => {
-          if (kind === "font" && f.size > 32 * 1024 * 1024)
+          if ((kind === "font" || kind === "office") && f.size > 32 * 1024 * 1024)
             throw Error("フォントは1件32MBまでです。");
           if ((kind === "xfdf" || kind === "csv" || kind === "json") && f.size > 8 * 1024 * 1024)
             throw Error("読み込みファイルは1件8MBまでです。");

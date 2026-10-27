@@ -1,3 +1,5 @@
+#[path = "../../../src-tauri/src/office.rs"]
+pub mod office;
 #[path = "../../../src-tauri/src/security.rs"]
 pub mod security;
 #[path = "../../../src-tauri/src/storage.rs"]

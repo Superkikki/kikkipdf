@@ -5,9 +5,11 @@ import { change, deletePages, duplicatePage, insertBlank, rotatePage } from "../
 import { clearRecovery, getPreference } from "../state/recovery";
 import { isTauri, pickFiles, saveBytes } from "../platform/files";
 import { transformPdf } from "../platform/pdfSecurity";
-import { importPdf } from "../viewer/pdf";
+import { convertOffice, type OfficeInput } from "../platform/office";
+import { createTextDocx } from "../office/docx";
+import { importPdf, releasePdfs } from "../viewer/pdf";
 import { exportProject, exportDocument, createImagePdf, exportSplitZip } from "../export/client";
-import { exportPageImages, exportText } from "../export/batch";
+import { exportPageImages, exportText, extractPageTexts } from "../export/batch";
 import { rasterPage } from "../export/raster";
 import { recognize } from "../ocr/engine";
 import { applyRedactions } from "../redaction/engine";
@@ -101,6 +103,32 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
         });
         return;
       }
+      if (a === "officeImport") {
+        if (!isTauri()) throw Error("Office変換はMicrosoft OfficeをインストールしたWindows版で利用できます。");
+        if (!(await mayDiscard())) return;
+        const [file] = await pickFiles("office");
+        if (!file) return;
+        const extension = file.name.split(".").pop()?.toLowerCase();
+        if (!extension || !["docx", "xlsx", "pptx"].includes(extension)) throw Error("Word・Excel・PowerPointのOffice Open XMLファイルを選んでください。");
+        const confirmed = await ask({
+          title: "OfficeからPDFを作成",
+          message: "インストール済みのMicrosoft Officeで変換します。Officeのライセンスと初回設定が必要です。外部リンクや接続がある文書ではOfficeがネットワークにアクセスする可能性があります。マクロは無効にして開きます。キャンセル後もOffice側の処理が続く場合があります。",
+          confirm: "変換",
+        });
+        if (!confirmed) return;
+        await work("OfficeからPDFへ変換中", async (signal) => {
+          const bytes = await convertOffice(extension as OfficeInput, file.bytes, signal);
+          const model = await importPdf({ name: file.name.replace(/\.[^.]+$/, "") + ".pdf", bytes }, progress);
+          if (signal.aborted) throw new DOMException("キャンセル", "AbortError");
+          await clearRecovery();
+          await releasePdfs();
+          documentStore.load(model, true);
+          setActive(model.pages[0].id);
+          setSelected(null);
+          setStatus("Office文書からPDFを作成しました。保存先を選んでください。");
+        });
+        return;
+      }
       if (a === "batchPdf") { setModal("batchPdf"); return; }
       if (!doc || !page) return;
       if (
@@ -115,6 +143,7 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
           "png",
           "jpeg",
           "encrypt",
+          "officeExportWord",
         ].includes(a) &&
         doc.pages.some((p) => p.objects.some((o) => o.kind === "redaction"))
       ) {
@@ -123,6 +152,22 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
         );
       }
       switch (a) {
+        case "officeExportWord": {
+          const confirmed = await ask({
+            title: "Word形式で書き出し（テキスト）",
+            message: "現在の編集内容から文字を抽出し、ページ区切り付きの編集可能なWord文書を作成します。画像、表、書式、元のレイアウトは再現しません。画像のみのPDFは先にOCRを実行してください。抽出順序はPDFによって異なります。2000ページ・1000万文字まで。",
+            confirm: "書き出し",
+          });
+          if (!confirmed) break;
+          if (doc.pages.length > 2000) throw Error("Wordへの書き出しは2000ページまでです。");
+          await work("Word形式へ書き出し中", async (signal) => {
+            const texts = await extractPageTexts(doc, doc.pages.map((_, i) => i), progress, signal, 10_000_000);
+            if (signal.aborted) throw new DOMException("キャンセル", "AbortError");
+            const bytes = createTextDocx(texts);
+            if (await saveBytes(bytes, doc.name.replace(/\.pdf$/i, "") + ".docx")) setStatus("Word形式でテキストを保存しました");
+          });
+          break;
+        }
         case "bates":
           setModal("bates");
           return;

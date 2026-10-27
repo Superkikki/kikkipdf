@@ -1,3 +1,4 @@
+mod office;
 mod security;
 mod storage;
 use std::{fs, path::Path};
@@ -23,11 +24,13 @@ async fn select_files(
     kind: String,
     multiple: bool,
 ) -> Result<Vec<String>, String> {
-    let remember_documents = kind != "batchPdf" && kind != "attachment" && kind != "font" && kind != "xfdf" && kind != "csv" && kind != "json";
+    let remember_documents = kind != "batchPdf" && kind != "office" && kind != "attachment" && kind != "font" && kind != "xfdf" && kind != "csv" && kind != "json";
     let paths = tauri::async_runtime::spawn_blocking(move || {
         let dialog = rfd::FileDialog::new();
         let dialog = if kind == "image" {
             dialog.add_filter("Images", &["png", "jpg", "jpeg"])
+        } else if kind == "office" {
+            dialog.add_filter("Microsoft Office", &["docx", "xlsx", "pptx"])
         } else if kind == "batchPdf" {
             dialog.add_filter("PDF", &["pdf"])
         } else if kind == "project" {
@@ -182,6 +185,13 @@ fn recent_documents(access: State<Access>) -> Result<Vec<String>, String> {
         .clone())
 }
 #[tauri::command]
+async fn convert_office(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let bytes = security_payload(&request)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        office::convert_request(&bytes).map(tauri::ipc::Response::new)
+    }).await.map_err(|_| "Office変換を完了できません。")?
+}
+#[tauri::command]
 async fn decrypt_pdf(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
     let bytes = security_payload(&request)?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -244,6 +254,7 @@ pub fn run() {
             save_document,
             recent_documents,
             startup_documents,
+            convert_office,
             decrypt_pdf,
             encrypt_pdf
         ])
