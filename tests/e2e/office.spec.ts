@@ -59,3 +59,28 @@ test("refuses Word export while a redaction is still pending", async ({ page }) 
   await expect(page.getByRole("alert")).toContainText("墨消し候補が残っています");
   await expect(page.getByRole("dialog", { name: "Word形式で書き出し（テキスト）" })).toHaveCount(0);
 });
+
+test("exports only the requested Word pages in the requested order", async ({ page }) => {
+  const pdf = await PDFDocument.create();
+  for (const text of ["Page one", "Page two", "Page three"]) {
+    pdf.addPage([420, 595]).drawText(text, { x: 40, y: 520, size: 20 });
+  }
+  await page.goto("/");
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "PDFを開く", exact: true }).click();
+  await (await chooser).setFiles({ name: "source.pdf", mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()) });
+  await expect(page.locator(".viewer-scroll .page-view[data-rendered=true]").first()).toBeVisible();
+  await page.locator(".menu > summary").filter({ hasText: "ファイル" }).click();
+  await page.getByRole("button", { name: "Word形式で書き出し（テキスト）", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Word形式で書き出し（テキスト）" });
+  await dialog.getByLabel("ページ範囲（空欄は全ページ）").fill("3,1");
+  const downloaded = page.waitForEvent("download");
+  await dialog.getByRole("button", { name: "書き出し", exact: true }).click();
+  const files = unzipSync(await readFile(await (await downloaded).path()));
+  const xml = strFromU8(files["word/document.xml"]);
+  expect(xml).toContain("Page three");
+  expect(xml).toContain("Page one");
+  expect(xml).not.toContain("Page two");
+  expect(xml.indexOf("Page three")).toBeLessThan(xml.indexOf("Page one"));
+  expect(xml).toContain('<w:br w:type="page"/>');
+});

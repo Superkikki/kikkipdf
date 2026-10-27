@@ -117,6 +117,7 @@ async function verifyObjectContext(page, root) {
     await page.getByRole("button", { name: "Word形式で書き出し（テキスト）", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Word形式で書き出し（テキスト）" });
     await expect(dialog).toContainText("元のレイアウトは再現しません");
+    await dialog.getByLabel("ページ範囲（空欄は全ページ）").fill("1");
     const docx = path.join(process.env.KIKKI_SMOKE_DIR, "exported-text.docx");
     const savingWord = pickNativeFile(docx);
     await dialog.getByRole("button", { name: "書き出し", exact: true }).click();

@@ -192,15 +192,17 @@ export function useWorkspaceActions(options: WorkspaceActionsOptions) {
           break;
         }
         case "officeExportWord": {
-          const confirmed = await ask({
+          const result = await ask({
             title: "Word形式で書き出し（テキスト）",
             message: "現在の編集内容から文字を抽出し、ページ区切り付きの編集可能なWord文書を作成します。画像、表、書式、元のレイアウトは再現しません。画像のみのPDFは先にOCRを実行してください。抽出順序はPDFによって異なります。2000ページ・1000万文字まで。",
+            fields: [{ key: "range", label: "ページ範囲（空欄は全ページ）" }],
             confirm: "書き出し",
           });
-          if (!confirmed) break;
-          if (doc.pages.length > 2000) throw Error("Wordへの書き出しは2000ページまでです。");
+          if (!result) break;
+          const indices = parseRange(result.range, doc.pages.length);
+          if (indices.length > 2000) throw Error("Wordへの書き出しは2000ページまでです。");
           await work("Word形式へ書き出し中", async (signal) => {
-            const texts = await extractPageTexts(doc, doc.pages.map((_, i) => i), progress, signal, 10_000_000);
+            const texts = await extractPageTexts(doc, indices, progress, signal, 10_000_000);
             if (signal.aborted) throw new DOMException("キャンセル", "AbortError");
             const bytes = createTextDocx(texts);
             if (await saveBytes(bytes, doc.name.replace(/\.pdf$/i, "") + ".docx")) setStatus("Word形式でテキストを保存しました");
