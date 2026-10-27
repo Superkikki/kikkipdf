@@ -18,7 +18,7 @@ export function BatesEditor({ model, close }: { model: DocumentModel; close: () 
   }
   return <form onSubmit={event => { event.preventDefault(); if (!previewError && !stale) apply(); }}>
     <div className="dialog-body bates-editor">
-      <p className="hint">選択したページに管理番号を印字します。接頭辞・接尾辞は半角英数字と記号に対応します。番号はページ順で連続し、適用後は通常のテキストとして個別に編集できます。ページを並べ替えても番号は自動で変わりません。</p>
+      <p className="hint">選択したページに管理番号を印字します。接頭辞・接尾辞には日本語も使用できます。番号はページ順で連続し、適用後は通常のテキストとして個別に編集できます。ページを並べ替えても番号は自動で変わりません。</p>
       <label>ページ範囲（空欄は全ページ）<input data-autofocus aria-label="ベイツ番号を付けるページ範囲" placeholder="例: 1-3,5" value={range} onChange={event => setRange(event.target.value)} /></label>
       <div className="bates-grid"><label>接頭辞<input aria-label="ベイツ番号の接頭辞" maxLength={64} value={prefix} onChange={event => setPrefix(event.target.value)} placeholder="例: CASE-" /></label>
       <label>接尾辞<input aria-label="ベイツ番号の接尾辞" maxLength={64} value={suffix} onChange={event => setSuffix(event.target.value)} /></label>

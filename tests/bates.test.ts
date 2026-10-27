@@ -10,8 +10,9 @@ it("numbers only selected pages in document order and checks overflow", () => {
   expect(() => planBates(d, { ...settings, start: 999, digits: 3 })).toThrow("桁数");
   expect(() => planBates(d, { ...settings, range: "1-5" })).toThrow("範囲");
   expect(() => planBates(d, { ...settings, start: NaN })).toThrow("開始番号");
-  expect(() => planBates(d, { ...settings, prefix: "x\ny" })).toThrow("半角");
-  expect(() => planBates(d, { ...settings, prefix: "案件-" })).toThrow("半角");
+  expect(() => planBates(d, { ...settings, prefix: "x\ny" })).toThrow("1行");
+  expect(planBates(d, { ...settings, prefix: "案件-" })[0].text).toBe("案件-007-A");
+  expect(batesObject(d.pages[0], "案件-007", settings).font).toBe("japanese");
   expect(() => planBates(d, { ...settings, margin: 144 })).toThrow("小さすぎ");
 });
 it("places the rotated text box at the same visible edge on all four page orientations", () => {

@@ -41,6 +41,7 @@ import { inspectDefaultValue } from "../forms/defaultValue";
 import { APP_NAME } from "../config";
 import fontkit from "@pdf-lib/fontkit";
 import type { ChoiceOption, DocumentModel, EditObject } from "../state/model";
+import { HorizontalUnicode } from "../text/horizontalUnicode";
 import { embedTextFont, fontKey, assertGlyphs } from "../text/fonts";
 import { createVerticalWriter } from "../text/vertical";
 import { layoutText } from "../text/layout";
@@ -69,6 +70,7 @@ export async function exportPdf(
   output.registerFontkit(fontkit);
   const drawVertical = createVerticalWriter(output);
   const fonts = new Map<string, PDFFont>();
+  const unicode = new HorizontalUnicode();
   const fontFor = async (o: EditObject) => {
     const key = fontKey(o);
     let f = fonts.get(key);
@@ -87,6 +89,8 @@ export async function exportPdf(
         fontBytes,
         o.fontId ? model.fonts?.[o.fontId] : undefined,
       );
+      const bytes = o.font === "japanese" ? fontBytes : o.font === "custom" && o.fontId ? model.fonts?.[o.fontId]?.bytes : undefined;
+      if (bytes) unicode.register(f, bytes);
       fonts.set(key, f);
     }
     return f;
@@ -214,6 +218,7 @@ export async function exportPdf(
           (text) => font.widthOfTextAtSize(text, o.fontSize),
         );
         for (const { text: line, width, baseline } of lines) {
+          unicode.record(font, line);
           const fitOcr = o.kind === "ocr" && width > 0;
           if (fitOcr)
             page.pushOperators(
@@ -414,6 +419,7 @@ export async function exportPdf(
       }
     }
   }
+  await unicode.apply(output);
   return output.save({ updateFieldAppearances: false });
 }
 export interface FormDescriptor {
