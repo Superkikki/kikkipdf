@@ -22,6 +22,61 @@ async function openFixture(page: Page, count = 3) {
   await expect(page.locator(".viewer-scroll .page-view[data-rendered=true]").first()).toBeVisible();
 }
 
+test("toolbar collapses without changing tools, remembers its state, and opens from a category", async ({ page }, info) => {
+  await page.goto("/");
+  await openFixture(page, 1);
+  await expect(page.locator("#document-properties")).toBeHidden();
+  const toolbar = page.locator("#document-toolbar");
+  await page.getByRole("button", { name: "テキスト", exact: true }).click();
+  const before = (await page.locator(".viewer-scroll").boundingBox())!;
+  const collapse = page.getByRole("button", { name: "ツールバーを折りたたむ", exact: true });
+  await collapse.focus();
+  await page.keyboard.press("Enter");
+  const expand = page.getByRole("button", { name: "ツールバーを展開", exact: true });
+  await expect(expand).toBeFocused();
+  await expect(expand).toHaveAttribute("aria-expanded", "false");
+  await expect(toolbar).toBeHidden();
+  await expect(page.locator(".collapsed-tool")).toHaveText("使用中: テキスト");
+  expect((await page.locator(".viewer-scroll").boundingBox())!.height).toBeGreaterThanOrEqual(before.height + 80);
+  await page.screenshot({ path: info.outputPath("toolbar-collapsed.png") });
+  await expand.press("Space");
+  await expect(toolbar.getByRole("button", { name: "テキスト", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await collapse.click();
+  await page.getByRole("button", { name: "注釈", exact: true }).click();
+  await expect(toolbar).toBeVisible();
+  await expect(toolbar.getByRole("button", { name: "付箋", exact: true })).toBeVisible();
+  await collapse.click();
+  await page.reload();
+  await openFixture(page, 1);
+  await expect(toolbar).toBeHidden();
+  await expect(expand).toHaveAttribute("aria-expanded", "false");
+  await expand.click();
+  await expect(toolbar).toBeVisible();
+});
+
+test("toolbar controls fit a compact window in both themes", async ({ page }, info) => {
+  await page.setViewportSize({ width: 800, height: 600 });
+  await page.goto("/");
+  await openFixture(page, 1);
+  for (const category of ["編集", "ページ管理", "注釈", "ツール"]) {
+    await page.getByRole("button", { name: category, exact: true }).click();
+    const tools = page.locator(".toolbar-tools");
+    const last = tools.getByRole("button").last();
+    await last.scrollIntoViewIfNeeded();
+    const bounds = (await last.boundingBox())!;
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(800);
+    expect(await page.locator(".app").evaluate((el) => el.scrollWidth)).toBeLessThanOrEqual(800);
+  }
+  await page.getByRole("button", { name: "ツールバーを折りたたむ", exact: true }).click();
+  await page.getByRole("button", { name: "テーマ切替" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.screenshot({ path: info.outputPath("toolbar-compact-dark.png") });
+  const expand = page.getByRole("button", { name: "ツールバーを展開", exact: true });
+  expect((await expand.boundingBox())!.x + (await expand.boundingBox())!.width).toBeLessThanOrEqual(800);
+  await expand.click();
+  await expect(page.locator("#document-toolbar")).toBeVisible();
+});
+
 test("document name edits inline, cancels, validates, undoes, and saves under the new name", async ({ page }, info) => {
   await page.goto("/");
   await openFixture(page);

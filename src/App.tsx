@@ -40,7 +40,7 @@ export function App() {
   const search = useDocumentSearch(doc, w.jump);
   const index = Math.max(0, doc?.pages.findIndex((p) => p.id === w.active) ?? 0);
   const [showSidebar, setShowSidebar] = useState(true);
-  const [showProperties, setShowProperties] = useState(() => window.innerWidth > 1150);
+  const [showProperties, setShowProperties] = useState(false);
   useEffect(() => {
     if (w.selected) setShowProperties(true);
   }, [w.selected]);

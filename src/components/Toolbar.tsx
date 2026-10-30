@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FolderOpen,
   Save,
@@ -35,6 +35,8 @@ import {
   FileStack,
   TextCursorInput,
   Link2,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 import { APP_NAME } from "../config";
 import type { Tool } from "../viewer/PageView";
@@ -108,6 +110,20 @@ export function Toolbar({
   setCategory: (s: string) => void;
 }) {
   const menubar = useRef<HTMLDivElement>(null);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("kikki-toolbar-collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("kikki-toolbar-collapsed", String(collapsed));
+    } catch {
+      // The toolbar still works when browser storage is unavailable.
+    }
+  }, [collapsed]);
   useEffect(() => {
     const root = menubar.current;
     if (!root) return;
@@ -174,6 +190,10 @@ export function Toolbar({
     { id: "strike", label: "取り消し線", icon: Strikethrough },
     { id: "note", label: "付箋", icon: StickyNote },
   ];
+  const activeToolLabel = tools.find((t) => t.id === tool)?.label ?? ({
+    link: "リンク", editText: "既存文字", editImage: "既存画像",
+    appearanceText: "見た目の置換", redaction: "墨消し候補",
+  } as Record<string, string>)[tool];
   return (
     <>
       <div className="menubar" ref={menubar}>
@@ -268,11 +288,19 @@ export function Toolbar({
             disabled={!hasDocument}
             aria-pressed={category === t}
             className={category === t ? "active" : ""}
-            onClick={() => setCategory(t)}
+            onClick={() => {
+              setCategory(t);
+              setCollapsed(false);
+            }}
           >
             {t}
           </button>
         ))}
+        {hasDocument && collapsed && (
+          <span className="collapsed-tool" title={toolHint}>
+            使用中: {activeToolLabel}
+          </span>
+        )}
         <div className="menubar-spacer" />
         <button className="open-button" onClick={() => action("open")}>
           <FolderOpen size={16} />
@@ -286,9 +314,22 @@ export function Toolbar({
           <Save size={16} />
           保存
         </button>
+        {hasDocument && (
+          <button
+            className="toolbar-toggle"
+            aria-label={collapsed ? "ツールバーを展開" : "ツールバーを折りたたむ"}
+            aria-expanded={!collapsed}
+            aria-controls="document-toolbar"
+            title={collapsed ? "ツールバーを展開（カテゴリのタブからも表示できます）" : "ツールバーを折りたたんでPDFを広く表示"}
+            onClick={() => setCollapsed((value) => !value)}
+          >
+            {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+            <span>{collapsed ? "展開" : "たたむ"}</span>
+          </button>
+        )}
       </div>
       {hasDocument && (
-        <div className="toolbar">
+        <div className="toolbar" id="document-toolbar" hidden={collapsed}>
           <div className="toolbar-tools">
             <div className="tool-group">
               <button
