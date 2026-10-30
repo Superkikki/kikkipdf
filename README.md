@@ -2,9 +2,13 @@
 
 Tauri 2 / React / TypeScript / Vite / Rust で作った、ローカル処理のPDF編集デスクトップアプリです。Windows 11を第一対象とし、画面のデザイン・アプリの編集モデル・操作コマンドは独自実装です。PDFの解釈・描画・書き出しにはOSSを使用しています。
 
-**バージョン0.34.1は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
+**バージョン0.35.0は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
 
-Windows配布物は [0.34.1インストーラー](artifacts/windows/Kikki.PDF_0.34.1_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.34.1_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.34.1.txt)も同梱します。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.34.1)からもダウンロードできます。
+Windows配布物は [0.35.0インストーラー](artifacts/windows/Kikki.PDF_0.35.0_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.35.0_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.35.0.txt)も同梱します。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.35.0)からもダウンロードできます。
+
+## 0.35.0：読みやすさとツールバーの折りたたみ
+
+上部右端の「たたむ／展開」でツールバーを開閉でき、次回起動時も状態を記憶します。各カテゴリのタブからも再表示できます。操作ボタンの文字と選択状態を見やすくし、プロパティは編集対象を選んだときに自動表示してPDFの閲覧領域を広げました。
 
 ## 0.34.1：Word出力のページ範囲指定
 

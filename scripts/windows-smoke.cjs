@@ -440,6 +440,22 @@ async function verifyObjectContext(page, root) {
   }
   if (process.env.KIKKI_SMOKE_UI_ONLY === "1") {
     const dir = process.env.KIKKI_SMOKE_DIR;
+    await expect(page.locator("#document-properties")).toBeHidden();
+    await page.getByRole("button", { name: "編集", exact: true }).click();
+    await page.getByRole("button", { name: "テキスト", exact: true }).click();
+    const expandedHeight = (await page.locator(".viewer-scroll").boundingBox()).height;
+    await page.getByRole("button", { name: "ツールバーを折りたたむ", exact: true }).click();
+    await expect(page.locator("#document-toolbar")).toBeHidden();
+    await expect(page.locator(".collapsed-tool")).toHaveText("使用中: テキスト");
+    expect((await page.locator(".viewer-scroll").boundingBox()).height).toBeGreaterThanOrEqual(expandedHeight + 80);
+    await page.screenshot({ path: path.join(dir, "toolbar-collapsed.png") });
+    await page.reload();
+    await expect(page.locator(".document-tab")).toContainText("native-fixture.pdf");
+    await expect(page.locator("#document-toolbar")).toBeHidden();
+    await page.getByRole("button", { name: "注釈", exact: true }).click();
+    await expect(page.getByRole("button", { name: "付箋", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "編集", exact: true }).click();
+    await page.getByRole("button", { name: "選択", exact: true }).click();
     const fixture = path.join(dir, "native-fixture.pdf");
     const original = await fs.readFile(fixture);
     const thumbnails = page.locator(".thumbnail");
@@ -498,7 +514,8 @@ async function verifyObjectContext(page, root) {
     await page.screenshot({ path: path.join(dir, "workspace-ui.png") });
     await page.keyboard.press("Escape");
     if (errors.length) throw Error(errors.join("\n"));
-    console.log(JSON.stringify({ native: true, thumbnailActions: true, undoRedo: true,
+    console.log(JSON.stringify({ native: true, collapsibleToolbar: true, toolbarPersistence: true,
+      thumbnailActions: true, undoRedo: true,
       promptFocus: true, sidebarLabels: true, invalidNameBlocksSave: true,
       buttonRenameSave: true, keyboardRenameSave: true, originalFilePreserved: true,
       elapsedSeconds: Math.round((Date.now() - started) / 1000), errors }));
