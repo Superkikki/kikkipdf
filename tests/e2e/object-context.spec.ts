@@ -25,7 +25,9 @@ test("right-click deletes the clicked shape, supports undo/redo, and saves only 
   const rectangle = page.locator(".viewer-scroll .object-layer > g").first();
   const id = await rectangle.getAttribute("data-object-id");
   await page.getByRole("button", { name: "円", exact: true }).click();
-  await page.mouse.click(bounds.x + 180, bounds.y + 180);
+  // Selecting the first object opens properties and shifts the page on screen.
+  const updatedBounds = (await page.locator(".viewer-scroll .page-view").boundingBox())!;
+  await page.mouse.click(updatedBounds.x + 180, updatedBounds.y + 180);
   const objects = page.locator(".viewer-scroll .object-layer > g");
   await expect(objects).toHaveCount(2);
   await rectangle.click({ button: "right" });

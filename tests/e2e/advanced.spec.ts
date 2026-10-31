@@ -144,7 +144,7 @@ test("edits existing comments and saves semantic markup with object keyboard edi
   if (!box) throw Error("no page");
   await page.mouse.click(box.x + 80, box.y + 100);
   await page.getByLabel("テキスト内容").fill("コピー元");
-  await page.locator(".viewer-scroll .object-layer > g").click();
+  await page.locator(".viewer-scroll .object-layer > g").dblclick();
   await page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true }).press("Escape");
   await page.locator(".document-tab").click();
   await page.keyboard.press("Control+d");

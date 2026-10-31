@@ -203,7 +203,7 @@ test("compares invisible text, missing pages and unchanged text, and includes te
 test("includes unsaved direct text edits in text comparison and preserves their undo history", async ({ page }) => {
   const original = await textFixture(["Price 100"]);
   await page.goto("/"); await open(page, original, "unsaved-text.pdf");
-  await page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Price 100$/ }).click();
+  await page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Price 100$/ }).dblclick();
   const editor = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
   await editor.fill("Price 300"); await editor.press("Enter");
   const dialog = await compareDialog(page, original);

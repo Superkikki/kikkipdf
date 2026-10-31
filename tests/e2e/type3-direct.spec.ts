@@ -11,7 +11,7 @@ for (const sample of [
   const input = await type3Fixture({ unicode: sample.unicode }), before = await inspectDirectText(input, 0);
   await page.goto("/"); await page.keyboard.press("Escape"); const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "PDFを開く", exact: true }).click(); await (await chooser).setFiles({ name: "type3.pdf", mimeType: "application/pdf", buffer: Buffer.from(input) });
-  const text = page.locator(".viewer-scroll .textLayer span").filter({ hasText: sample.text }).first(); await expect(text).toBeVisible(); await text.click();
+  const text = page.locator(".viewer-scroll .textLayer span").filter({ hasText: sample.text }).first(); await expect(text).toBeVisible(); await text.dblclick();
   const editor = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true }); await expect(editor).toBeFocused(); await editor.fill("Changed"); await editor.press("Enter");
   const download = page.waitForEvent("download"); await page.keyboard.press("Control+s"); const file = info.outputPath("type3-edited.pdf"); await (await download).saveAs(file);
   const after = await inspectDirectText(await readFile(file), 0); expect(after.runs.some(run => run.text === sample.text)).toBe(false); expect(after.runs.some(run => run.text === "Changed")).toBe(true);

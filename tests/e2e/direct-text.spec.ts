@@ -1,3 +1,4 @@
+import { textPosition } from "./textPosition";
 import { test, expect, type Page } from "@playwright/test";
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, StandardFonts, rgb, degrees } from "pdf-lib";
 import { readFile } from "node:fs/promises";
@@ -72,7 +73,7 @@ test("direct edit removes source glyphs without covering backgrounds, preserving
   const neighbour = page
     .locator(".viewer-scroll .textLayer span")
     .filter({ hasText: /Neighbour/ });
-  const before = await neighbour.boundingBox();
+  const before = await textPosition(neighbour);
   await page.getByRole("button", { name: "ツール", exact: true }).click();
   await page.getByRole("button", { name: "既存文字", exact: true }).click();
   await original(page).dblclick();
@@ -91,7 +92,7 @@ test("direct edit removes source glyphs without covering backgrounds, preserving
     ".viewer-scroll .editable-text[data-layout-ready=true]",
   );
   await expect(overlay).toHaveText("Changed direct text");
-  const after = await neighbour.boundingBox();
+  const after = await textPosition(neighbour);
   expect(after!.x).toBeCloseTo(before!.x, 1);
   expect(after!.y).toBeCloseTo(before!.y, 1);
   await expect(
@@ -275,14 +276,14 @@ test("directly edits verified Differences text, keeps neighbouring glyphs and sa
   const target = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^éÀ$/ });
   const neighbour = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /Neighbour/ });
   await expect(target).toBeVisible();
-  const before = (await neighbour.boundingBox())!;
+  const before = (await textPosition(neighbour))!;
   await page.getByRole("button", { name: "ツール", exact: true }).click();
   await page.getByRole("button", { name: "既存文字", exact: true }).click();
   await target.dblclick();
   await expect(page.locator(".properties")).toContainText("既存テキストを直接編集");
   await page.getByLabel("テキスト内容").fill("Edited accent text");
   await expect(target).toHaveCount(0);
-  const after = (await neighbour.boundingBox())!;
+  const after = (await textPosition(neighbour))!;
   expect(after.x).toBeCloseTo(before.x, 1);
   expect(after.y).toBeCloseTo(before.y, 1);
   const download = page.waitForEvent("download");
@@ -325,14 +326,14 @@ test("edits only the selected shared Form invocation, preserving backgrounds, ne
   await open(page, Buffer.from(await pdf.save()), "nested-shared-form.pdf");
   await expect(original(page)).toHaveCount(2);
   const neighbours = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Neighbour$/ });
-  const before = await neighbours.first().boundingBox();
+  const before = await textPosition(neighbours.first());
   await page.getByRole("button", { name: "ツール", exact: true }).click();
   await page.getByRole("button", { name: "既存文字", exact: true }).click();
   await original(page).first().dblclick();
   await expect(page.locator(".properties")).toContainText("既存テキストを直接編集");
   await page.getByLabel("テキスト内容").fill("Form changed");
   await expect(original(page)).toHaveCount(1);
-  const after = await neighbours.first().boundingBox();
+  const after = await textPosition(neighbours.first());
   expect(after!.x).toBeCloseTo(before!.x, 1); expect(after!.y).toBeCloseTo(before!.y, 1);
   await expect(page.locator(".viewer-scroll .page-view[data-rendered=true]")).toBeVisible();
   const background = await page.locator(".viewer-scroll canvas").first().evaluate((canvas: HTMLCanvasElement) =>
@@ -406,7 +407,7 @@ for (const sample of [
     await open(page, Buffer.from(bytes));
     const span = page.locator(".viewer-scroll .textLayer span").filter({ hasText: ("extractedText" in sample ? sample.extractedText! : sample.text).normalize("NFKC") }).first();
     await expect(span).toBeVisible();
-    await span.click();
+    await span.dblclick();
     const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
     await expect(input).toBeFocused();
     if ("extractedText" in sample) await expect(input).toHaveValue(sample.text);
@@ -436,7 +437,7 @@ test("edits an Office-style poster heading through rectangle clipping and preser
   await page.goto("/");
   await open(page, Buffer.from(await pdf.save()), "office-poster.pdf");
   const span = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Editable original Neighbour$/ });
-  await span.click();
+  await span.dblclick();
   const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
   await expect(input).toBeFocused();
   await input.fill("Edited poster heading");
@@ -482,11 +483,8 @@ for (const angle of [-90, 90, 35]) {
     await open(page, Buffer.from(bytes), "rotated-axis.pdf");
     const axis = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Axis label$/ });
     const neighbour = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Neighbour$/ });
-    const neighbourBefore = await neighbour.evaluate(el => {
-      const r = el.getBoundingClientRect(), p = el.closest(".page-view")!.getBoundingClientRect();
-      return { x: r.x - p.x, y: r.y - p.y };
-    });
-    await axis.click();
+    const neighbourBefore = await textPosition(neighbour);
+    await axis.dblclick();
     const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
     await expect(input).toBeFocused();
     await input.fill("変更した軸ラベル\nSecond line");
@@ -494,10 +492,7 @@ for (const angle of [-90, 90, 35]) {
     await expect(axis).toHaveCount(0);
     const overlay = page.locator(".viewer-scroll .editable-text");
     await expect(overlay).toContainText("変更した軸ラベル");
-    const neighbourAfter = await neighbour.evaluate(el => {
-      const r = el.getBoundingClientRect(), p = el.closest(".page-view")!.getBoundingClientRect();
-      return { x: r.x - p.x, y: r.y - p.y };
-    });
+    const neighbourAfter = await textPosition(neighbour);
     expect(neighbourAfter.x).toBeCloseTo(neighbourBefore.x, 1);
     expect(neighbourAfter.y).toBeCloseTo(neighbourBefore.y, 1);
     const download = page.waitForEvent("download");
@@ -513,7 +508,7 @@ for (const angle of [-90, 90, 35]) {
     await page.reload();
     await open(page, saved);
     const reopened = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^変更した軸ラベル$/ });
-    await reopened.click();
+    await reopened.dblclick();
     await expect(input).toBeFocused();
     await expect(input).toHaveValue("変更した軸ラベル");
     await input.press("Escape");
@@ -531,11 +526,11 @@ test("edits device-color outlined headings inside line-built clips and single-op
   )));
   await page.goto("/"); await open(page, Buffer.from(await pdf.save()), "extended-text.pdf");
   const text = page.locator(".viewer-scroll .textLayer span");
-  await text.filter({ hasText: /^Heading$/ }).click();
+  await text.filter({ hasText: /^Heading$/ }).dblclick();
   const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
   await expect(input).toBeFocused(); await input.fill("Changed heading"); await input.press("Enter");
   await expect(page.locator(".viewer-scroll .editable-text").filter({ hasText: "Changed heading" })).toHaveAttribute("stroke", "#ff0000");
-  await text.filter({ hasText: /^(Rendered|Logical)$/ }).click();
+  await text.filter({ hasText: /^(Rendered|Logical)$/ }).dblclick();
   await expect(input).toHaveValue("Logical"); await input.fill("Changed logical"); await input.press("Enter");
   const download = page.waitForEvent("download"); await page.keyboard.press("Control+s");
   const path = info.outputPath("extended-text-edited.pdf"); await (await download).saveAs(path);

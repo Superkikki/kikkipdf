@@ -1,3 +1,4 @@
+import { textPosition } from "./textPosition";
 import { test, expect } from "@playwright/test";
 import { PDFDocument, PDFName, PDFString, StandardFonts } from "pdf-lib";
 import { readFile } from "node:fs/promises";
@@ -34,14 +35,14 @@ for (const kind of ["shift-jis", "identity-without-tounicode", "embedded-encodin
     const original = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^日本語$/ });
     const neighbour = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /Neighbour/ });
     await expect(original).toBeVisible();
-    const before = await neighbour.boundingBox();
-    await original.click();
+    const before = await textPosition(neighbour);
+    await original.dblclick();
     const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
     await expect(input).toBeFocused(); await expect(input).toHaveValue("日本語");
     await input.fill("変更した文字"); await input.press("Enter");
     await expect(original).toHaveCount(0);
     await expect(page.locator(".viewer-scroll .editable-text")).toContainText("変更した文字");
-    const after = await neighbour.boundingBox();
+    const after = await textPosition(neighbour);
     expect(after!.x).toBeCloseTo(before!.x, 1); expect(after!.y).toBeCloseTo(before!.y, 1);
     const download = page.waitForEvent("download"); await page.keyboard.press("Control+s");
     const output = info.outputPath("edited-japanese.pdf"); await (await download).saveAs(output);

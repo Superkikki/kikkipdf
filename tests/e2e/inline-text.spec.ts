@@ -46,11 +46,18 @@ async function openCustomFixture(page: Page, count = 1) {
   await expect(overlay(page).filter({ hasText: /^Keep original$/ })).toBeVisible();
 }
 
-test("one click edits original PDF text, supports Japanese input and saves only the replacement", async ({ page }, info) => {
+test("double click edits original PDF text, supports Japanese input and saves only the replacement", async ({ page }, info) => {
   await openFixture(page);
   const neighbour = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^Keep this line$/ });
-  const before = await neighbour.boundingBox();
+  const before = await neighbour.evaluate(el => ({
+    x: getComputedStyle(el).left, y: getComputedStyle(el).top,
+  }));
   await source(page).click();
+  await expect(editor(page)).toHaveCount(0);
+  await expect(page.locator(".page-loading")).toHaveCount(0);
+  await expect(page.locator(".viewer-scroll .object-layer > g")).toHaveCount(0);
+  await expect(page.locator(".unsaved-dot")).toHaveCount(0);
+  await source(page).dblclick();
   await expect(editor(page)).toBeFocused();
   await expect(editor(page)).toHaveValue("Click to edit");
   await editor(page).fill("クリックで日本語に編集");
@@ -62,9 +69,10 @@ test("one click edits original PDF text, supports Japanese input and saves only 
   await expect(editor(page)).toHaveCount(0);
   await expect(overlay(page)).toHaveText("クリックで日本語に編集");
   await expect(page.getByLabel("フォント", { exact: true })).toHaveValue("japanese");
-  const after = await neighbour.boundingBox();
-  expect(after!.x).toBeCloseTo(before!.x, 1);
-  expect(after!.y).toBeCloseTo(before!.y, 1);
+  const after = await neighbour.evaluate(el => ({
+    x: getComputedStyle(el).left, y: getComputedStyle(el).top,
+  }));
+  expect(after).toEqual(before);
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "保存", exact: true }).click();
   const path = info.outputPath("inline-saved.pdf");
@@ -77,7 +85,7 @@ test("one click edits original PDF text, supports Japanese input and saves only 
 
 test("Escape cancels a new source edit and leaves the original document unchanged", async ({ page }) => {
   await openFixture(page);
-  await source(page).click();
+  await source(page).dblclick();
   await editor(page).fill("Discard this");
   await editor(page).press("Escape");
   await expect(editor(page)).toHaveCount(0);
@@ -100,10 +108,12 @@ test("new text is focused, accepts line breaks, and can be reedited, cancelled a
   await expect(overlay(page).locator("tspan")).toHaveCount(2);
   await expect(page.getByLabel("テキスト内容")).toHaveValue("First line\nSecond line");
   await page.getByRole("button", { name: "文字を編集: First line Second line" }).click();
+  await expect(editor(page)).toHaveCount(0);
+  await page.getByRole("button", { name: "文字を編集: First line Second line" }).dblclick();
   await editor(page).fill("Cancelled");
   await page.getByRole("button", { name: "文字編集を取り消す", exact: true }).click();
   await expect(page.getByLabel("テキスト内容")).toHaveValue("First line\nSecond line");
-  await page.getByRole("button", { name: "文字を編集: First line Second line" }).click();
+  await page.getByRole("button", { name: "文字を編集: First line Second line" }).dblclick();
   await editor(page).fill("Final text");
   await editor(page).press("Enter");
   await expect(overlay(page)).toHaveText("Final text");
@@ -115,7 +125,7 @@ test("new text is focused, accepts line breaks, and can be reedited, cancelled a
 
 test("IME confirmation does not submit or cancel the editor", async ({ page }) => {
   await openFixture(page);
-  await source(page).click();
+  await source(page).dblclick();
   await editor(page).dispatchEvent("compositionstart");
   await editor(page).fill("日本語入力中");
   await editor(page).press("Enter");
@@ -130,12 +140,12 @@ test("IME confirmation does not submit or cancel the editor", async ({ page }) =
 
 test("clicking outside commits and keyboard save includes unsubmitted input", async ({ page }, info) => {
   await openFixture(page);
-  await source(page).click();
+  await source(page).dblclick();
   await editor(page).fill("Outside commit");
   await page.locator(".page-caption").click();
   await expect(editor(page)).toHaveCount(0);
   await expect(overlay(page)).toHaveText("Outside commit");
-  await page.getByRole("button", { name: "文字を編集: Outside commit" }).click();
+  await page.getByRole("button", { name: "文字を編集: Outside commit" }).dblclick();
   await editor(page).fill("Saved from editor");
   const download = page.waitForEvent("download");
   await editor(page).press("Control+s");
@@ -171,7 +181,7 @@ test("dragging selects source text for copying and moves added text without open
   expect(Number(await page.getByLabel("x", { exact: true }).inputValue())).toBeGreaterThan(x);
 });
 
-test("clicks place the caret within original and added text, including a rotated page", async ({ page }) => {
+test("double clicks place the caret within original and added text, including a rotated page", async ({ page }) => {
   await openFixture(page);
   const boundary = await source(page).evaluate(el => {
     const range = document.createRange();
@@ -180,7 +190,7 @@ test("clicks place the caret within original and added text, including a rotated
     const rect = range.getBoundingClientRect();
     return { x: rect.right, y: (rect.top + rect.bottom) / 2 };
   });
-  await page.mouse.click(boundary.x, boundary.y);
+  await page.mouse.dblclick(boundary.x, boundary.y);
   await expect(editor(page)).toBeFocused();
   await editor(page).pressSequentially("!");
   await expect(editor(page)).toHaveValue("Click! to edit");
@@ -195,7 +205,7 @@ test("clicks place the caret within original and added text, including a rotated
     const rect = range.getBoundingClientRect();
     return { x: (rect.left + rect.right) / 2, y: rect.bottom };
   });
-  await page.mouse.click(rotated.x, rotated.y);
+  await page.mouse.dblclick(rotated.x, rotated.y);
   await expect(editor(page)).toBeFocused();
   await editor(page).pressSequentially("?");
   await expect(editor(page)).toHaveValue("Click!? to edit");
@@ -203,7 +213,7 @@ test("clicks place the caret within original and added text, including a rotated
 
 test("scrolling to another page retains unfinished text instead of discarding it", async ({ page }) => {
   await openFixture(page, 3);
-  await source(page).first().click();
+  await source(page).first().dblclick();
   await editor(page).fill("Committed by scrolling");
   await page.locator(".viewer-scroll").evaluate(el => { el.scrollTop = el.scrollHeight; });
   await expect(editor(page)).toHaveCount(0);
@@ -215,7 +225,7 @@ test("font errors block shortcut and toolbar saves without losing the inline dra
   await openCustomFixture(page);
   await expect(overlay(page)).toHaveText("Keep original");
   const dirtyBeforeSave = await page.locator(".unsaved-dot").count();
-  await page.getByRole("button", { name: "文字を編集: Keep original", exact: true }).click();
+  await page.getByRole("button", { name: "文字を編集: Keep original", exact: true }).dblclick();
   await editor(page).fill("日本語の未対応文字");
   await editor(page).press("Enter");
   await expect(page.getByRole("alert")).toContainText("登録フォントに含まれない文字");
@@ -246,7 +256,7 @@ test("font errors block shortcut and toolbar saves without losing the inline dra
 
 test("IME composition blocks saves until composition ends and preserves the composed text", async ({ page }, info) => {
   await openFixture(page);
-  await source(page).click();
+  await source(page).dblclick();
   await editor(page).dispatchEvent("compositionstart");
   await editor(page).fill("日本語入力中");
   const dirtyBeforeSave = await page.locator(".unsaved-dot").count();
@@ -276,7 +286,7 @@ test("font errors and IME retain drafts through page navigation, object clicks a
   const number = page.getByLabel("ページ番号", { exact: true });
   const other = page.getByRole("button", { name: "文字を編集: Other object", exact: true });
   const dirtyBefore = await page.locator(".unsaved-dot").count();
-  await page.getByRole("button", { name: "文字を編集: Keep original", exact: true }).click();
+  await page.getByRole("button", { name: "文字を編集: Keep original", exact: true }).dblclick();
   await editor(page).fill("未対応の文字を保持");
   await expect(page.getByRole("alert")).toContainText("登録フォントに含まれない文字");
   async function retainedAfterNavigation(value: string) {
@@ -301,7 +311,7 @@ test("font errors and IME retain drafts through page navigation, object clicks a
   await expect(editor(page)).toHaveAttribute("data-layout-ready", "true");
   await editor(page).press("Enter");
   await expect(editor(page)).toHaveCount(0);
-  await page.getByRole("button", { name: "文字を編集: Valid draft", exact: true }).click();
+  await page.getByRole("button", { name: "文字を編集: Valid draft", exact: true }).dblclick();
   await editor(page).dispatchEvent("compositionstart");
   await editor(page).fill("Composed retained text");
   await retainedAfterNavigation("Composed retained text");
@@ -316,4 +326,52 @@ test("font errors and IME retain drafts through page navigation, object clicks a
   expect(runs).toContain("Composed retained text");
   expect(runs).toContain("Other object");
   expect(runs).not.toContain("Keep original");
+});
+
+test("selecting added text keeps the last PDF raster visible while the properties panel opens", async ({ page }) => {
+  await openFixture(page);
+  await page.getByRole("button", { name: "テキスト", exact: true }).click();
+  const paper = page.locator(".viewer-scroll .page-view");
+  const bounds = (await paper.boundingBox())!;
+  await page.mouse.click(bounds.x + 70, bounds.y + 250);
+  await editor(page).fill("Select without editing");
+  await editor(page).press("Enter");
+  await page.getByRole("button", { name: "選択", exact: true }).click();
+  await page.keyboard.press("Escape");
+  const properties = page.getByRole("button", { name: "プロパティパネル", exact: true });
+  await expect(properties).toHaveAttribute("aria-expanded", "true");
+  await properties.click();
+  await page.evaluate(async () => {
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+  });
+  await expect(paper).toHaveAttribute("data-rendered", "true");
+  const canvas = paper.locator("canvas");
+  await canvas.evaluate(el => {
+    const canvas = el as HTMLCanvasElement;
+    canvas.dataset.blankFrames = "0";
+    canvas.dataset.samples = "0";
+    canvas.dataset.sampling = "true";
+    function sample() {
+      if (canvas.dataset.sampling !== "true" || !canvas.isConnected) return;
+      const blank = !canvas.width || !canvas.height || canvas.getContext("2d")!.getImageData(1, 1, 1, 1).data[3] === 0;
+      if (blank) canvas.dataset.blankFrames = String(Number(canvas.dataset.blankFrames) + 1);
+      canvas.dataset.samples = String(Number(canvas.dataset.samples) + 1);
+      requestAnimationFrame(sample);
+    }
+    requestAnimationFrame(sample);
+  });
+  const object = page.getByRole("button", { name: "文字を編集: Select without editing", exact: true });
+  await object.click();
+  await expect(properties).toHaveAttribute("aria-expanded", "true");
+  await expect(editor(page)).toHaveCount(0);
+  await expect(paper).toHaveAttribute("data-rendered", "true");
+  await expect.poll(() => canvas.evaluate(el => Number((el as HTMLElement).dataset.samples))).toBeGreaterThan(3);
+  const blankFrames = await canvas.evaluate(el => {
+    (el as HTMLElement).dataset.sampling = "false";
+    return Number((el as HTMLElement).dataset.blankFrames);
+  });
+  expect(blankFrames).toBe(0);
+  await object.press("F2");
+  await expect(editor(page)).toBeFocused();
 });

@@ -196,6 +196,7 @@ export function Overlay({
     null,
   );
   const svg = useRef<SVGSVGElement>(null);
+  const editClick = useRef<string | null>(null);
   const openContext = useCallback(
     (id: string, point: Point, anchor: SVGElement) => {
       drag.current = null;
@@ -257,6 +258,7 @@ export function Overlay({
     window.getSelection()?.removeAllRanges();
     e.currentTarget.focus({ preventScroll: true });
     onSelect(o.id);
+    editClick.current = null;
     drag.current = { o, point: point(e), screen: { x: e.clientX, y: e.clientY }, resize, moved: false };
     e.currentTarget.setPointerCapture(e.pointerId);
   }
@@ -282,18 +284,13 @@ export function Overlay({
       }),
     );
   }
-  function end(e: React.PointerEvent) {
+  function end() {
     const d = drag.current;
     if (preview)
       documentStore.execute(updateObject(page.id, preview.id, preview));
     drag.current = null;
     setPreview(null);
-    if (d && !d.moved && !d.resize && textInteractive && isEditableText(d.o)) {
-      const shape = svg.current?.querySelector(`[data-object-id="${CSS.escape(d.o.id)}"] .editable-text`);
-      const caret = shape ? textCaretAtPoint(shape, d.o.text ?? "", { x: e.clientX, y: e.clientY },
-        page.rotation + d.o.rotation, d.o.writingMode === "vertical") : undefined;
-      onEditText?.(d.o, caret);
-    }
+    editClick.current = d && !d.moved && !d.resize ? d.o.id : null;
   }
   return (
     <>
@@ -305,10 +302,11 @@ export function Overlay({
         viewBox={`0 0 ${page.width} ${page.height}`}
         onPointerMove={move}
         onPointerUp={(e) => {
-          if (e.button === 0) end(e);
+          if (e.button === 0) end();
         }}
         onPointerCancel={() => {
           drag.current = null;
+          editClick.current = null;
           setPreview(null);
         }}
         style={{ pointerEvents: "none" }}
@@ -331,6 +329,17 @@ export function Overlay({
                 }}
                 onPointerDown={(e) => start(e, o)}
                 onClick={e => e.stopPropagation()}
+                onDoubleClick={e => {
+                  e.stopPropagation();
+                  if (!textInteractive || !isEditableText(o) || editClick.current !== o.id ||
+                    e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+                  e.preventDefault();
+                  editClick.current = null;
+                  const shape = e.currentTarget.querySelector(".editable-text");
+                  const caret = shape ? textCaretAtPoint(shape, o.text ?? "", { x: e.clientX, y: e.clientY },
+                    page.rotation + o.rotation, o.writingMode === "vertical") : undefined;
+                  onEditText?.(o, caret);
+                }}
                 onKeyDown={e => {
                   if (textInteractive && isEditableText(o) && (e.key === "Enter" || e.key === "F2" || e.key === " ")) {
                     e.preventDefault();

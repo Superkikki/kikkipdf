@@ -164,11 +164,11 @@ export function Toolbar({
   }, []);
   const toolHint =
     tool === "select"
-      ? "文字をクリックして編集 · オブジェクトはドラッグで移動 · 元の文字はドラッグでコピー"
+      ? "クリックで選択 · 文字はダブルクリックで編集 · ドラッグで移動や文字選択"
       : tool === "editImage"
         ? "画像の枠をダブルクリックして選択 · 移動・サイズ変更・削除ができます"
       : tool === "editText" || tool === "appearanceText"
-        ? "元の文字をクリックしてその場で編集 · Enterで確定 · Escで取消"
+        ? "元の文字をダブルクリックして編集 · Enterで確定 · Escで取消"
         : tool === "text"
           ? "ページをクリックして文字を追加 · ドラッグで範囲を指定"
           : tool === "note"

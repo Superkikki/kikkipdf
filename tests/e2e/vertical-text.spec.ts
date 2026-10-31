@@ -1,3 +1,4 @@
+import { textPosition } from "./textPosition";
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import fontkit from "@pdf-lib/fontkit";
@@ -26,14 +27,14 @@ test("vertical source editing preserves neighbour, previews alternate glyphs, an
   await expect(page.locator(".viewer-scroll .page-view[data-rendered=true]")).toBeVisible();
   const original = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^日本語の縦書き$/ });
   const neighbour = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^隣の列$/ });
-  await expect(original).toBeVisible(); const before = await neighbour.boundingBox();
+  await expect(original).toBeVisible(); const before = await textPosition(neighbour);
   await page.getByRole("button", { name: "ツール", exact: true }).click();
   await page.getByRole("button", { name: "既存文字", exact: true }).click(); await original.dblclick();
   await expect(page.getByLabel("文字の方向")).toHaveValue("vertical");
   await page.getByLabel("テキスト内容").fill("変更、。「」ー");
   const overlay = page.locator(".viewer-scroll .editable-text[data-layout-ready=true]");
   await expect(overlay).toHaveText("変更、。「」ー"); await expect(overlay.locator("use")).toHaveCount(7);
-  await expect(original).toHaveCount(0); const after = await neighbour.boundingBox();
+  await expect(original).toHaveCount(0); const after = await textPosition(neighbour);
   expect(after!.x).toBeCloseTo(before!.x, 1); expect(after!.y).toBeCloseTo(before!.y, 1);
   await page.getByRole("button", { name: /^元に戻す/ }).click(); await page.getByRole("button", { name: /^元に戻す/ }).click();
   await expect(original).toHaveCount(1); await page.getByRole("button", { name: /^やり直す/ }).click(); await page.getByRole("button", { name: /^やり直す/ }).click();
@@ -67,13 +68,13 @@ test("vertical removal keeps PDF.js downstream placement with character spacing,
   await page.getByRole("button", { name: "PDFを開く", exact: true }).click();
   await (await chooser).setFiles({ name: "vertical-advance.pdf", mimeType: "application/pdf", buffer: await fixture(true) });
   const following = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^後続$/ });
-  await expect(following).toBeVisible(); const before = await following.boundingBox();
+  await expect(following).toBeVisible(); const before = await textPosition(following);
   await page.getByRole("button", { name: "ツール", exact: true }).click(); await page.getByRole("button", { name: "既存文字", exact: true }).click();
   await page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^日本語の縦書き$/ }).dblclick();
   await expect(page.getByLabel("文字の方向")).toHaveValue("vertical");
   await expect(page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^日本語の縦書き$/ })).toHaveCount(0);
   await expect(page.locator(".viewer-scroll .page-view[data-rendered=true]")).toBeVisible();
-  const after = await following.boundingBox(); expect(after!.x).toBeCloseTo(before!.x, 2); expect(after!.y).toBeCloseTo(before!.y, 2);
+  const after = await textPosition(following); expect(after!.x).toBeCloseTo(before!.x, 2); expect(after!.y).toBeCloseTo(before!.y, 2);
 });
 
 test("switches registered text between directions, wraps vertically by height and restores the project", async ({ page }, info) => {

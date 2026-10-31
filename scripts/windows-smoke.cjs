@@ -154,7 +154,7 @@ async function verifyObjectContext(page, root) {
     const original = page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^AB$/ }).first(); await expect(original).toBeVisible();
     const originalBox = await original.boundingBox(); if (!before || !originalBox) throw Error("Text selection bounds unavailable");
     console.log(JSON.stringify({ type3Before: originalBox, neighbourBefore: before }));
-    await original.click({ position: { x: 2, y: Math.max(1, originalBox.height / 2) } });
+    await original.dblclick({ position: { x: 2, y: Math.max(1, originalBox.height / 2) } });
     const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true }); await expect(input).toBeFocused(); await input.fill("Changed"); await input.press("Enter");
     await page.getByRole("button", { name: "保存", exact: true }).click(); await expect(page.locator(".unsaved-dot")).toHaveCount(0, { timeout: 30000 });
     const fixture = path.join(process.env.KIKKI_SMOKE_DIR, "native-fixture.pdf"), picking = pickNativeFile(fixture); await page.keyboard.press("Control+o"); await picking;
@@ -411,7 +411,7 @@ async function verifyObjectContext(page, root) {
     await expect(neighbours).toHaveCount(3);
     const before = await Promise.all([0, 1, 2].map(index => neighbours.nth(index).boundingBox()));
     for (const replacement of ["日本語の変更", "埋め込み文字変更", "文字対応表なし変更"]) {
-      await page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^日本語$/ }).first().click({ position: { x: 3, y: 3 } });
+      await page.locator(".viewer-scroll .textLayer span").filter({ hasText: /^日本語$/ }).first().dblclick({ position: { x: 3, y: 3 } });
       const input = page.getByRole("textbox", { name: "ページ上のテキスト編集", exact: true });
       await expect(input).toHaveValue("日本語"); await input.fill(replacement); await input.press("Enter");
       await expect(page.locator(".viewer-scroll .editable-text").filter({ hasText: replacement })).toBeVisible();
@@ -603,7 +603,7 @@ async function verifyObjectContext(page, root) {
     await expect(cancelledSource).toBeVisible();
     await expect(neighbour).toBeVisible();
 
-    await cancelledSource.click();
+    await cancelledSource.dblclick();
     await expect(inlineInput).toBeVisible();
     await expect(editor).toBeFocused();
     await expect(editor).toHaveValue("Cancel this edit");
@@ -614,7 +614,7 @@ async function verifyObjectContext(page, root) {
     await expect(page.locator(".unsaved-dot")).toHaveCount(0);
 
     const neighbourBefore = await neighbour.boundingBox();
-    await source.click();
+    await source.dblclick();
     await expect(inlineInput).toBeVisible();
     await expect(editor).toBeFocused();
     await expect(editor).toHaveValue("Inline original text");

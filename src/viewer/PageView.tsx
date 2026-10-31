@@ -117,6 +117,10 @@ export function PageView({
   useEffect(() => {
     if (!visible) {
       setReady(false);
+      if (canvas.current) {
+        canvas.current.width = 0;
+        canvas.current.height = 0;
+      }
       return;
     }
     let cancelled = false,
@@ -143,13 +147,26 @@ export function PageView({
         Math.sqrt(12_000_000 / (page.width * page.height)),
       );
       const viewport = p.getViewport({ scale: rasterScale, rotation: 0 });
-      canvasEl.width = Math.ceil(viewport.width);
-      canvasEl.height = Math.ceil(viewport.height);
       const config = await layerConfig(pdf, directReferences(currentPage.current).length || directImageEdits(currentPage.current).length
         ? undefined : source!.layerVisibility);
       if (cancelled) return;
-      render = p.render({ canvas: canvasEl, viewport, annotationMode: 2, optionalContentConfigPromise: Promise.resolve(config) });
-      await render.promise;
+      // Keep the last complete page visible while selection/sidebar changes
+      // resize the viewer. Commit the new raster in one task, without a blank frame.
+      const buffer = document.createElement("canvas");
+      buffer.width = Math.ceil(viewport.width);
+      buffer.height = Math.ceil(viewport.height);
+      try {
+        render = p.render({ canvas: buffer, viewport, annotationMode: 2, optionalContentConfigPromise: Promise.resolve(config) });
+        await render.promise;
+        if (cancelled) return;
+        const context = canvasEl.getContext("2d");
+        if (!context) throw Error("ページ表示用キャンバスを取得できません。");
+        canvasEl.width = buffer.width;
+        canvasEl.height = buffer.height;
+        context.drawImage(buffer, 0, 0);
+      } finally {
+        buffer.width = buffer.height = 0;
+      }
       if (cancelled) return;
       if (textEl && !thumbnail) {
         textEl.replaceChildren();
@@ -178,10 +195,6 @@ export function PageView({
       release?.();
       textEl?.replaceChildren();
       textDivs.current = [];
-      if (canvasEl) {
-        canvasEl.width = 0;
-        canvasEl.height = 0;
-      }
     };
   }, [
     visible,
@@ -283,12 +296,13 @@ export function PageView({
     if (tool === "text") setEditing({ id: o.id, selectAll: true, createdToken: documentStore.history?.current.token });
   }
   async function existing(e: React.MouseEvent) {
-    if (thumbnail || e.button !== 0 || e.detail > 1 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey ||
+    if (thumbnail || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey ||
       (tool !== "select" && tool !== "editText" && tool !== "appearanceText") || !source) return;
     const target = (e.target as HTMLElement).closest<HTMLElement>(".textLayer span:not(.markedContent)");
     if (!target || !target.textContent?.trim()) return;
     if (clickStart.current && Math.hypot(e.clientX - clickStart.current.x, e.clientY - clickStart.current.y) > 4) return;
-    if (tool === "select" && window.getSelection()?.toString()) return;
+    e.preventDefault();
+    window.getSelection()?.removeAllRanges();
     const click = { x: e.clientX, y: e.clientY };
     const textValue = target.textContent ?? "";
     const rect = target.getBoundingClientRect();
@@ -415,7 +429,7 @@ export function PageView({
                 drawing.current = null;
                 setDraft(null);
               }}
-              onClick={(e) => {
+              onDoubleClick={(e) => {
                 void existing(e);
               }}
             >
