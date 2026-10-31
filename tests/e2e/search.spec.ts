@@ -1,6 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import { degrees, PDFDocument, StandardFonts } from "pdf-lib";
 import { readFile } from "node:fs/promises";
+import { blankPage, emptyDocument, newObject } from "../../src/state/model";
+import { saveProject } from "../../src/state/project";
 
 async function open(page: Page, pdf: PDFDocument) {
   await page.goto("/");
@@ -24,6 +26,11 @@ test("highlights exact source words, navigates within a page, keeps text selecta
   await expect(page.locator(".search-count")).toContainText("1 / 2 件");
   const marks = page.locator(".viewer-scroll .textLayer mark.search-match");
   await expect(marks).toHaveText(["needle", "needle"]);
+  const widths = await marks.first().evaluate(el => ({
+    match: el.getBoundingClientRect().width,
+    line: el.parentElement!.getBoundingClientRect().width,
+  }));
+  expect(widths.match).toBeLessThan(widths.line / 2);
   const span = page.locator(".viewer-scroll .textLayer span").filter({ hasText: "Top needle context" });
   await expect(span).toHaveText("Top needle context");
   await search.press("Enter");
@@ -58,6 +65,65 @@ test("highlights exact source words, navigates within a page, keeps text selecta
   await expect(page.locator(".unsaved-dot")).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+for (const { kind, unicode } of [{ kind: "text", unicode: false }, { kind: "ocr", unicode: false },
+  { kind: "text", unicode: true }] as const) {
+  test(`highlights each matching word inside ${unicode ? "Japanese text with emoji" : kind} instead of its entire region`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", e => errors.push(e.message));
+    const model = emptyDocument("word-highlights.pdf");
+    model.pages = [blankPage()];
+    const object = { ...newObject(kind, 50, 150), text: unicode ? "前😀 needle middle needle 後" : "Before needle middle needle after",
+      width: 480, height: 90, fontSize: 18, font: unicode ? "japanese" as const : "sans" as const, rotation: 12,
+      opacity: kind === "ocr" ? 0 : 1 };
+    model.pages[0].objects = [object];
+    await page.goto("/");
+    const chooser = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "PDFを開く", exact: true }).click();
+    await (await chooser).setFiles({ name: "words.kpdf", mimeType: "application/zip",
+      buffer: Buffer.from(await saveProject(model)) });
+    await expect(page.locator(".viewer-scroll .page-view").first()).toBeVisible();
+    const dirtyCount = await page.locator(".unsaved-dot").count();
+    await page.keyboard.press("Control+f");
+    const search = page.getByLabel("PDF内を検索");
+    await search.fill("needle");
+    await expect(page.locator(".search-count")).toContainText("1 / 2 件");
+    const matches = page.locator(".search-object-highlights rect.search-match");
+    await expect(matches).toHaveCount(2);
+    const boxes = await matches.evaluateAll(elements => elements.map(el => ({
+      x: Number(el.getAttribute("x")), width: Number(el.getAttribute("width")),
+      height: Number(el.getAttribute("height")),
+    })));
+    expect(boxes[0].x).toBeGreaterThan(object.x);
+    expect(boxes[1].x).toBeGreaterThan(boxes[0].x + boxes[0].width);
+    for (const box of boxes) {
+      expect(box.width).toBeGreaterThan(0);
+      expect(box.width).toBeLessThan(object.width / 3);
+      expect(box.height).toBeLessThan(object.height / 2);
+    }
+    if (kind === "text") {
+      const expected = await page.locator(".viewer-scroll .editable-text tspan").first().evaluate(el => {
+        const span = el as SVGTSpanElement;
+        const start = span.textContent!.indexOf("needle");
+        const first = span.getExtentOfChar(start), last = span.getExtentOfChar(start + 5);
+        return { x: first.x, width: last.x + last.width - first.x };
+      });
+      expect(Math.abs(boxes[0].x - expected.x)).toBeLessThan(0.1);
+      expect(Math.abs(boxes[0].width - expected.width)).toBeLessThan(0.1);
+    }
+    await search.press("Enter");
+    await search.press("Enter");
+    await expect(matches.nth(1)).toHaveClass(/current-search-match/);
+    await page.getByLabel("ズーム", { exact: true }).selectOption("1.5");
+    await expect(matches).toHaveCount(2);
+    await search.fill("middle");
+    await expect(matches).toHaveCount(1);
+    await page.getByRole("button", { name: "検索をクリア", exact: true }).click();
+    await expect(matches).toHaveCount(0);
+    await expect(page.locator(".unsaved-dot")).toHaveCount(dirtyCount);
+    expect(errors).toEqual([]);
+  });
+}
 
 test("search options apply to source and added text, and highlights refresh through undo", async ({ page }) => {
   const pdf = await PDFDocument.create();

@@ -1,11 +1,13 @@
 import { useEffect, type RefObject } from "react";
-import type { PageModel } from "../state/model";
+import type { FontAsset, PageModel } from "../state/model";
 import type { SearchHit } from "./search";
+import { ObjectSearchHighlights } from "./ObjectSearchHighlights";
 
 /** Mark existing text in place without changing its text, geometry, selection,
- * or the PDF. Added text and OCR use their editable object region. */
-export function SearchHighlights({ page, hits, currentId, ready, textDivs }: {
+ * or the PDF. */
+export function SearchHighlights({ page, fonts, hits, currentId, ready, textDivs }: {
   page: PageModel;
+  fonts?: Record<string, FontAsset>;
   hits: SearchHit[];
   currentId?: string;
   ready: boolean;
@@ -44,18 +46,19 @@ export function SearchHighlights({ page, hits, currentId, ready, textDivs }: {
     }
     return () => { for (const { div, value } of changed) div.textContent = value; };
   }, [ready, hits, currentId, textDivs]);
-  const objectMatches = new Map<string, SearchHit>();
+  const objectMatches = new Map<string, SearchHit[]>();
   for (const hit of hits) for (const part of hit.fragments) {
-    if (part.key.startsWith("object:") && (!objectMatches.has(part.key) || hit.id === currentId))
-      objectMatches.set(part.key, hit);
+    if (!part.key.startsWith("object:")) continue;
+    const group = objectMatches.get(part.key) ?? [];
+    if (!group.includes(hit)) group.push(hit);
+    objectMatches.set(part.key, group);
   }
   return <svg className="search-object-highlights" width={page.width} height={page.height} aria-hidden="true">
-    {Array.from(objectMatches, ([key, hit]) => {
+    {Array.from(objectMatches, ([key, matches]) => {
       const object = page.objects.find((o) => o.id === key.slice(7));
       if (!object) return null;
-      return <rect key={key} className={`search-match${hit.id === currentId ? " current-search-match" : ""}`}
-        data-search-hit={hit.id} x={object.x} y={object.y} width={object.width} height={object.height}
-        transform={`rotate(${object.rotation} ${object.x} ${object.y + object.height})`} />;
+      return <ObjectSearchHighlights key={key} object={object} hits={matches} currentId={currentId}
+        asset={object.fontId ? fonts?.[object.fontId] : undefined} />;
     })}
   </svg>;
 }

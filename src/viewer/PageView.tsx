@@ -472,7 +472,7 @@ export function PageView({
                 onEditText={editText}
                 contextEnabled={!thumbnail}
               />
-              {!thumbnail && <SearchHighlights page={page} hits={searchHits}
+              {!thumbnail && <SearchHighlights page={page} fonts={model.fonts} hits={searchHits}
                 currentId={currentSearchId} ready={ready} textDivs={textDivs} />}
               {draft && (
                 <svg

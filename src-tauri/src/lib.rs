@@ -16,7 +16,12 @@ fn remember(app: &tauri::AppHandle, access: &Access, path: &Path) -> Result<(), 
         .map_err(|_| "設定フォルダーを取得できません。")?;
     fs::create_dir_all(&dir).map_err(|e| ui_error("設定を保存できません", e))?;
     let bytes = serde_json::to_vec(&*recent).map_err(|_| "履歴を保存できません。")?;
-    atomic_write(&dir.join("recent.json"), &bytes)
+    atomic_write(&dir.join("recent.json"), &bytes).map_err(|error| error.to_string())
+}
+fn remember_best_effort(app: &tauri::AppHandle, access: &Access, path: &Path) {
+    if let Err(error) = remember(app, access, path) {
+        eprintln!("[kikki] recent document history: {error}");
+    }
 }
 #[tauri::command]
 async fn select_files(
@@ -65,7 +70,7 @@ async fn select_files(
             && p.extension()
                 .is_some_and(|e| e.eq_ignore_ascii_case("pdf") || e.eq_ignore_ascii_case("kpdf"))
         {
-            remember(&app, &access, &p)?;
+            remember_best_effort(&app, &access, &p);
         }
     }
     Ok(result)
@@ -105,12 +110,19 @@ async fn prepare_save(
     app: tauri::AppHandle,
     name: String,
     path: Option<String>,
+    access_denied: Option<bool>,
 ) -> Result<Option<String>, String> {
     let target = if let Some(path) = path {
         authorized(&app.state::<Access>(), &path)?
     } else {
         let choice = tauri::async_runtime::spawn_blocking(move || {
-            rfd::FileDialog::new().set_file_name(&name).save_file()
+            let dialog = rfd::FileDialog::new().set_file_name(&name);
+            let dialog = if access_denied.unwrap_or(false) {
+                dialog.set_title("上書きできません。別のファイル名または保存先を選択してください")
+            } else {
+                dialog
+            };
+            dialog.save_file()
         })
         .await
         .map_err(|_| "保存先を選択できません。")?;
@@ -151,14 +163,21 @@ async fn save_document(
     let target = path.clone();
     tauri::async_runtime::spawn_blocking(move || atomic_write(&target, &bytes))
         .await
-        .map_err(|_| "保存を完了できません。")??;
+        .map_err(|_| "保存を完了できません。")?
+        .map_err(|error| {
+            if error.access_denied() {
+                format!("SAVE_ACCESS_DENIED:{error}")
+            } else {
+                error.to_string()
+            }
+        })?;
     let access = app.state::<Access>();
     let canonical = allow(&access, &path)?;
     if path
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("pdf") || e.eq_ignore_ascii_case("kpdf"))
     {
-        remember(&app, &access, &canonical)?;
+        remember_best_effort(&app, &access, &canonical);
     }
     Ok(canonical.to_string_lossy().to_string())
 }

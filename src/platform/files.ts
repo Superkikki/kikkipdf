@@ -97,17 +97,29 @@ export async function saveBytes(
   path?: string,
 ): Promise<{ name: string; path?: string } | null> {
   if (isTauri()) {
-    const token = await invoke<string | null>("prepare_save", {
-      name,
-      path: path ?? null,
-    });
-    if (!token) return null;
-    const result = await invoke<string>("save_document", bytes, {
-      headers: { "x-kikki-token": token },
-    });
-    return result
-      ? { name: result.split(/[\\/]/).pop() ?? name, path: result }
-      : null;
+    const save = async (target?: string, accessDenied = false) => {
+      const token = await invoke<string | null>("prepare_save", {
+        name, path: target ?? null, accessDenied,
+      });
+      if (!token) return null;
+      const result = await invoke<string>("save_document", bytes, {
+        headers: { "x-kikki-token": token },
+      });
+      return result ? { name: result.split(/[\\/]/).pop() ?? name, path: result } : null;
+    };
+    const accessError = (error: unknown) => String(error).startsWith("SAVE_ACCESS_DENIED:");
+    try {
+      try { return await save(path); }
+      catch (error) {
+        // Keep the exported bytes and let the user save a copy if the original
+        // is read-only, locked, or in a folder that does not permit replacement.
+        if (!path || !accessError(error)) throw error;
+        return await save(undefined, true);
+      }
+    } catch (error) {
+      if (accessError(error)) throw Error(String(error).slice("SAVE_ACCESS_DENIED:".length));
+      throw error;
+    }
   }
   const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]));
   const a = document.createElement("a");
