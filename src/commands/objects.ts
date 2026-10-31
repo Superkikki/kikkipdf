@@ -5,6 +5,8 @@ export function patchObject(
   patch: Partial<EditObject>,
 ): EditObject {
   const result = { ...object, ...patch };
+  if (object.kind === "ocr" && patch.text !== undefined && patch.text !== object.text)
+    result.ocrGeometry = undefined;
   if (object.kind === "direct-image" && object.sourceImage?.bounds?.length) {
     const bounds = object.sourceImage.bounds;
     const left = Math.max(...bounds.map(b => b.x)), top = Math.max(...bounds.map(b => b.y));

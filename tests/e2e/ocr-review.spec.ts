@@ -55,6 +55,23 @@ test("reviews a scanned OCR result, saves corrected transparent text, and restor
   await expect(page.locator(".status-message")).toContainText("OCR完了", {
     timeout: 90000,
   });
+  await page.getByRole("button", { name: "検索", exact: true }).click();
+  await page.getByLabel("PDF内を検索").fill("OCR");
+  const recognizedMatch = page.locator(".search-object-highlights rect.search-match");
+  await expect(recognizedMatch).toHaveCount(1);
+  const recognizedBox = await recognizedMatch.evaluate(el => ({
+    x: Number(el.getAttribute("x")), y: Number(el.getAttribute("y")),
+    width: Number(el.getAttribute("width")), height: Number(el.getAttribute("height")),
+  }));
+  expect(recognizedBox.x).toBeGreaterThan(80);
+  expect(recognizedBox.x).toBeLessThan(100);
+  expect(recognizedBox.y).toBeGreaterThan(35);
+  expect(recognizedBox.y).toBeLessThan(45);
+  expect(recognizedBox.width).toBeGreaterThan(35);
+  expect(recognizedBox.width).toBeLessThan(50);
+  expect(recognizedBox.height).toBeGreaterThan(10);
+  expect(recognizedBox.height).toBeLessThan(20);
+  await page.getByRole("button", { name: "検索をクリア", exact: true }).click();
   await page.getByRole("button", { name: "OCR校正", exact: true }).click();
   await expect(page.locator(".ocr-row").first()).toContainText("KIKKI");
   await page.locator(".ocr-row").first().click();

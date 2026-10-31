@@ -2,9 +2,13 @@
 
 Tauri 2 / React / TypeScript / Vite / Rust で作った、ローカル処理のPDF編集デスクトップアプリです。Windows 11を第一対象とし、画面のデザイン・アプリの編集モデル・操作コマンドは独自実装です。PDFの解釈・描画・書き出しにはOSSを使用しています。
 
-**バージョン0.35.1は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
+**バージョン0.35.2は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
 
-Windows配布物は [0.35.1インストーラー](artifacts/windows/Kikki.PDF_0.35.1_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.35.1_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.35.1.txt)も同梱します。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.35.1)からもダウンロードできます。
+Windows配布物は [0.35.2インストーラー](artifacts/windows/Kikki.PDF_0.35.2_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.35.2_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.35.2.txt)も同梱します。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.35.2)からもダウンロードできます。
+
+## 0.35.2：ピンチズームとOCRの位置合わせ
+
+Windowsのタッチパッドで二本指ピンチによるPDFの拡大・縮小に対応。OCRでは文字ごとの認識座標を保持し、検索ハイライトの位置に使います。以前のOCR結果に文字位置がない場合は、OCRをやり直してください。
 
 ## 0.35.1：検索ハイライトと保存処理の修正
 

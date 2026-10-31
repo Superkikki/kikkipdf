@@ -1,5 +1,13 @@
 # 検証記録
 
+## 0.35.2：ピンチズームとOCR検索の位置合わせ（2026-10-31）
+
+- 単体テスト369件（56ファイル）とlintが成功。OCR文字の座標・字間、移動とリサイズ、校正時の座標破棄、プロジェクト保存を検証。
+- OCR・検索・ページ移動の画面テスト19件が成功。実際の画像からのOCRと検索位置、認識文字の幅が異なる原稿での一致座標、回転・トリミング・ズーム、既存の文字選択・保存・Undoを確認。ブラウザの入力プロトコルでタッチパッド相当のピンチ入力を生成し、PDFの拡大・縮小とアプリ倍率の維持を確認。
+- WindowsではWryの既定値がピンチ入力も無効にするため、WebView2のIsPinchZoomEnabledだけを有効に変更。ブラウザのキーボードズームは従来どおり無効。仕様参考: https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/winrt/microsoft_web_webview2_core/corewebview2settings#ispinchzoomenabled
+- TypeScript・production build・Windows MSVC release・NSIS生成が成功。本体はx64、FileVersion／ProductVersionは本体・インストーラーとも0.35.2.0。配布EXEは15,976,523 bytes、ZIPは15,934,810 bytesで、バイト一致・ZIP整合性・SHA-256を確認。
+- 位置合わせの対象はOCR後の検索ハイライト。以前のOCRデータでは文字座標がないため、元のスキャンPDFで再認識が必要。配布物は未署名。Windows実機での物理タッチパッド操作・インストールは未検証。
+
 ## 0.35.1：検索ハイライトと保存処理の修正（2026-10-31）
 
 - 単体テスト365件（55ファイル）、検索の画面テスト8件、Linuxでのネイティブ保存テスト4件が成功。追加文字・OCRの複数一致、日本語・絵文字の一致位置、回転・ズーム、検索クリアと未保存状態の維持を確認。権限エラー時の別名保存・キャンセル・再失敗、元ファイル保持と一時ファイルの清掃も検証。

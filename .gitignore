@@ -148,3 +148,7 @@ artifacts/windows/*
 !artifacts/windows/Kikki.PDF_0.35.1_x64-setup.exe
 !artifacts/windows/Kikki.PDF_0.35.1_x64-setup.zip
 !artifacts/windows/SHA256SUMS-0.35.1.txt
+
+!artifacts/windows/Kikki.PDF_0.35.2_x64-setup.exe
+!artifacts/windows/Kikki.PDF_0.35.2_x64-setup.zip
+!artifacts/windows/SHA256SUMS-0.35.2.txt

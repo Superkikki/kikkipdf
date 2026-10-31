@@ -174,6 +174,41 @@ test("Ctrl+wheel and trackpad pinch zoom only the PDF and retain the cursor loca
   await expect.poll(async () => Number(await zoom.inputValue())).toBeLessThan(Number(value));
 });
 
+test("native touchpad pinch enlarges and shrinks the PDF without scaling the app", async ({ page, context }) => {
+  await page.goto("/");
+  await openFixture(page, 3);
+  const zoom = page.getByLabel("ズーム", { exact: true });
+  await zoom.selectOption("1");
+  const paper = page.locator(".viewer-scroll .page-view").first();
+  const bounds = (await paper.boundingBox())!;
+  const point = { x: Math.round(bounds.x + 200), y: Math.round(bounds.y + 220) };
+  const toolbar = page.locator(".menubar");
+  const uiWidth = (await toolbar.boundingBox())!.width;
+  const client = await context.newCDPSession(page);
+  await client.send("Input.synthesizePinchGesture", {
+    ...point, scaleFactor: 1.4, gestureSourceType: "mouse", relativeSpeed: 400,
+  });
+  await expect.poll(async () => Number(await zoom.inputValue())).toBeGreaterThan(1.02);
+  const enlarged = Number(await zoom.inputValue());
+  await client.send("Input.synthesizePinchGesture", {
+    ...point, scaleFactor: 0.7, gestureSourceType: "mouse", relativeSpeed: 400,
+  });
+  await expect.poll(async () => Number(await zoom.inputValue())).toBeLessThan(enlarged);
+  expect(await page.evaluate(() => window.visualViewport!.scale)).toBe(1);
+  expect((await toolbar.boundingBox())!.width).toBeCloseTo(uiWidth, 1);
+
+  // Pinching over application chrome must not zoom the browser or the PDF.
+  const value = await zoom.inputValue();
+  const ui = (await toolbar.boundingBox())!;
+  await client.send("Input.synthesizePinchGesture", {
+    x: Math.round(ui.x + ui.width / 2), y: Math.round(ui.y + ui.height / 2),
+    scaleFactor: 1.4, gestureSourceType: "mouse", relativeSpeed: 400,
+  });
+  await expect(zoom).toHaveValue(value);
+  expect(await page.evaluate(() => window.visualViewport!.scale)).toBe(1);
+  await client.detach();
+});
+
 test("pointer drag reorders pages in both directions, supports keyboard and undo, and persists on save", async ({ page }, info) => {
   // Keep all three targets visible below the labelled sidebar tabs.
   await page.setViewportSize({ width: 1440, height: 1200 });

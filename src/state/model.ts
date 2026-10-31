@@ -88,6 +88,11 @@ export interface EditObject extends Box {
   link?: LinkTarget;
   ocrConfidence?: number;
   ocrReviewed?: boolean;
+  /** Original recognition coordinates, normalized to the editable line box. */
+  ocrGeometry?: {
+    text: string;
+    boxes: (Box & { start: number; end: number })[];
+  };
   wrap?: boolean;
   lineHeight?: number;
   writingMode?: "vertical";

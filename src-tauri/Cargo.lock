@@ -2147,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "kikki-pdf"
-version = "0.35.1"
+version = "0.35.2"
 dependencies = [
  "lopdf",
  "rand 0.9.5",
@@ -2157,6 +2157,8 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tempfile",
+ "webview2-com",
+ "windows-core 0.61.2",
  "zeroize",
 ]
 

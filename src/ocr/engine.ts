@@ -3,6 +3,7 @@ import { createWorker } from "tesseract.js";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { exportDocument } from "../export/client";
 import { newObject, type DocumentModel, type EditObject } from "../state/model";
+import { recognitionGeometry } from "./geometry";
 export async function recognize(
   model: DocumentModel,
   indices: number[],
@@ -90,6 +91,7 @@ export async function recognize(
                 height: (y1 - y0) / scale,
                 fontSize: ((y1 - y0) / scale) * 0.85,
                 text: line.text.trimEnd(),
+                ocrGeometry: recognitionGeometry(line),
                 opacity: 0,
                 ocrConfidence: Number.isFinite(line.confidence)
                   ? Math.max(0, Math.min(100, line.confidence))

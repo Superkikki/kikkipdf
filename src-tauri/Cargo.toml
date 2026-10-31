@@ -1,6 +1,6 @@
 [package]
 name = "kikki-pdf"
-version = "0.35.1"
+version = "0.35.2"
 description = "Local desktop PDF editor"
 authors = ["Kikki PDF contributors"]
 edition = "2021"
@@ -21,3 +21,7 @@ tempfile = "3"
 lopdf = "0.45"
 rand = "0.9"
 zeroize = "1"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows-core = "0.61"

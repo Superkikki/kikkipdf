@@ -4,12 +4,13 @@ import { useTextLayout } from "../text/useTextLayout";
 import { useFontFace } from "../fonts/useFontFace";
 import { previewFontFamily } from "../text/fonts";
 import type { SearchHit } from "./search";
+import { recognizedMatch, recognizedBoxes } from "../ocr/geometry";
 
 type Box = { x: number; y: number; width: number; height: number; id: string };
 const displayText = (text: string) => text.replace(/\r\n?/g, "\n").replace(/\t/g, "    ");
 
-/** Measure the same SVG layout as the editable text, in page coordinates. OCR
- * has only a line bounding box, so fit the measured text to that region. */
+/** Use recognized glyph boxes for OCR and the editable SVG layout for added
+ * text. Legacy OCR without glyph coordinates is fitted to its line region. */
 export function ObjectSearchHighlights({ object: o, asset, hits, currentId }: {
   object: EditObject; asset?: FontAsset; hits: SearchHit[]; currentId?: string;
 }) {
@@ -19,6 +20,15 @@ export function ObjectSearchHighlights({ object: o, asset, hits, currentId }: {
   const [boxes, setBoxes] = useState<Box[]>([]);
   useLayoutEffect(() => {
     const boxes: Box[] = [];
+    if (recognizedBoxes(o).length) {
+      for (const hit of hits) for (const fragment of hit.fragments) {
+        if (fragment.key !== `object:${o.id}`) continue;
+        const box = recognizedMatch(o, fragment.start, fragment.end);
+        if (box) boxes.push({ ...box, id: hit.id });
+      }
+      setBoxes(boxes);
+      return;
+    }
     if (layout && !pending && face.ready) {
       const source = o.text ?? "";
       const value = displayText(source);
@@ -48,9 +58,9 @@ export function ObjectSearchHighlights({ object: o, asset, hits, currentId }: {
             // SVG character positions use the same UTF-16 offsets as search.
             const rects = Array.from({ length: end - start }, (_, j) => span.getExtentOfChar(start + j));
             const x = Math.min(...rects.map(r => r.x)), y = Math.min(...rects.map(r => r.y));
-            boxes.push({ id: range.id, x, y,
+            boxes.push({ id: range.id, x, y: o.kind === "ocr" ? o.y : y,
               width: Math.max(...rects.map(r => r.x + r.width)) - x,
-              height: Math.max(...rects.map(r => r.y + r.height)) - y });
+              height: o.kind === "ocr" ? o.height : Math.max(...rects.map(r => r.y + r.height)) - y });
           }
           offset += line.text.length;
         });

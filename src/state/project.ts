@@ -132,6 +132,16 @@ const object = z.object({
   link: linkTarget.optional(),
   ocrConfidence: number.min(0).max(100).optional(),
   ocrReviewed: z.boolean().optional(),
+  ocrGeometry: z.object({
+    text,
+    boxes: z.array(z.object({
+      start: z.number().int().min(0).max(1_000_000),
+      end: z.number().int().min(1).max(1_000_000),
+      x: number.min(0).max(1), y: number.min(0).max(1),
+      width: number.positive().max(1), height: number.positive().max(1),
+    }).refine(b => b.start < b.end && b.x + b.width <= 1.000001 && b.y + b.height <= 1.000001))
+      .max(100000),
+  }).optional(),
   wrap: z.boolean().optional(),
   writingMode: z.literal("vertical").optional(),
   lineHeight: number.min(1).max(3).optional(),

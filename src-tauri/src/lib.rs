@@ -238,6 +238,25 @@ pub fn run() {
     let result = tauri::Builder::default()
         .manage(Access::default())
         .setup(|app| {
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                window.with_webview(|webview| {
+                    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings5;
+                    use windows_core::Interface;
+                    // Wry disables both browser zoom and pinch by default. Enable
+                    // pinch input so the viewer can handle its Ctrl+wheel events;
+                    // keep browser keyboard/wheel zoom disabled for the app UI.
+                    let enable_pinch = || -> windows_core::Result<()> {
+                        unsafe {
+                            let settings = webview.controller().CoreWebView2()?.Settings()?;
+                            settings.cast::<ICoreWebView2Settings5>()?.SetIsPinchZoomEnabled(true)
+                        }
+                    };
+                    if let Err(error) = enable_pinch() {
+                        eprintln!("[kikki] touchpad pinch initialization: {error}");
+                    }
+                })?;
+            }
             let access = app.state::<Access>();
             if let Ok(dir) = app.path().app_data_dir() {
                 if let Ok(bytes) = fs::read(dir.join("recent.json")) {

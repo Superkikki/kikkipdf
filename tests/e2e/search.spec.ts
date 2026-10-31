@@ -74,7 +74,7 @@ for (const { kind, unicode } of [{ kind: "text", unicode: false }, { kind: "ocr"
     const model = emptyDocument("word-highlights.pdf");
     model.pages = [blankPage()];
     const object = { ...newObject(kind, 50, 150), text: unicode ? "前😀 needle middle needle 後" : "Before needle middle needle after",
-      width: 480, height: 90, fontSize: 18, font: unicode ? "japanese" as const : "sans" as const, rotation: 12,
+      width: 480, height: kind === "ocr" ? 20 : 90, fontSize: 18, font: unicode ? "japanese" as const : "sans" as const, rotation: 12,
       opacity: kind === "ocr" ? 0 : 1 };
     model.pages[0].objects = [object];
     await page.goto("/");
@@ -99,7 +99,8 @@ for (const { kind, unicode } of [{ kind: "text", unicode: false }, { kind: "ocr"
     for (const box of boxes) {
       expect(box.width).toBeGreaterThan(0);
       expect(box.width).toBeLessThan(object.width / 3);
-      expect(box.height).toBeLessThan(object.height / 2);
+      if (kind === "ocr") expect(box.height).toBe(object.height);
+      else expect(box.height).toBeLessThan(object.height / 2);
     }
     if (kind === "text") {
       const expected = await page.locator(".viewer-scroll .editable-text tspan").first().evaluate(el => {
