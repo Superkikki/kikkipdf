@@ -2,9 +2,13 @@
 
 Tauri 2 / React / TypeScript / Vite / Rust で作った、ローカル処理のPDF編集デスクトップアプリです。Windows 11を第一対象とし、画面のデザイン・アプリの編集モデル・操作コマンドは独自実装です。PDFの解釈・描画・書き出しにはOSSを使用しています。
 
-**バージョン0.35.0は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
+**バージョン0.35.1は実際のPDFを開いて編集・保存できる初期実用版です。Acrobat Pro相当の全機能・互換性を達成した完成製品ではありません。** 対応範囲を限定した既存文字の直接編集、墨消し時の画像化など、以下の制約を確認してください。
 
-Windows配布物は [0.35.0インストーラー](artifacts/windows/Kikki.PDF_0.35.0_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.35.0_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.35.0.txt)も同梱します。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.35.0)からもダウンロードできます。
+Windows配布物は [0.35.1インストーラー](artifacts/windows/Kikki.PDF_0.35.1_x64-setup.exe) と [圧縮ZIP](artifacts/windows/Kikki.PDF_0.35.1_x64-setup.zip) です。[チェックサム](artifacts/windows/SHA256SUMS-0.35.1.txt)も同梱します。[GitHub Releases](https://github.com/Superkikki/kikkipdf/releases/tag/v0.35.1)からもダウンロードできます。
+
+## 0.35.1：検索ハイライトと保存処理の修正
+
+検索結果は、一致した単語だけをハイライトします。追加文字とOCRの同じ行に複数の一致がある場合も個別に表示します。履歴の書き込み失敗でPDFの読み込み・保存が失敗扱いになる問題を修正し、元のPDFへの上書きが権限やロックで拒否された場合は、別のファイル名・保存先を選べるようにしました。
 
 ## 0.35.0：読みやすさとツールバーの折りたたみ
 
